@@ -1,0 +1,9 @@
+<svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="FlatFold">
+  <!-- FlatFold mark: a square sheet with its corner flat-folded to the centre.
+       Theme-aware: uses the ponderance color custom properties, falls back to light-mode hexes. -->
+  <path d="M8 8H32L56 32V56H8Z" fill="var(--color-inset, #FFFFFF)"/>
+  <path d="M8 8L56 56" stroke="var(--color-crease-line, rgba(46,94,140,0.13))" stroke-width="1.5"/>
+  <path d="M8 56L44 20" stroke="var(--color-crease-line-bold, rgba(46,94,140,0.28))" stroke-width="1.5"/>
+  <path d="M32 8L56 32L32 32Z" fill="var(--color-crane, #E84A27)" stroke="var(--color-crane-dark, #C23A1C)" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M8 8H32L56 32V56H8Z" stroke="var(--color-crease, #2E5E8C)" stroke-width="2.5" stroke-linejoin="round"/>
+</svg>

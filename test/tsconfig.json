@@ -1,0 +1,22 @@
+{
+	"compilerOptions": {
+		"tsBuildInfoFile": "./node_modules/.tmp/tsconfig.test.tsbuildinfo",
+		"target": "ES2022",
+		"lib": ["ES2022"],
+		"module": "ESNext",
+		"types": ["vite/client", "@cloudflare/vitest-pool-workers/types"],
+		"skipLibCheck": true,
+		"moduleResolution": "bundler",
+		"allowImportingTsExtensions": true,
+		"verbatimModuleSyntax": true,
+		"moduleDetection": "force",
+		"noEmit": true,
+		"strict": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"erasableSyntaxOnly": true,
+		"noFallthroughCasesInSwitch": true,
+		"noUncheckedSideEffectImports": true
+	},
+	"include": ["./**/*.ts", "../worker", "../shared", "../worker-configuration.d.ts"]
+}

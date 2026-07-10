@@ -1,0 +1,7 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Safari pinned-tab / monochrome mask icon: single black silhouette,
+       the folded facet punched out so the fold still reads. Color is set
+       via the mask-icon link tag (use #2E5E8C). -->
+  <path fill-rule="evenodd" clip-rule="evenodd" fill="#000000"
+        d="M6 6H33L58 31V58H6ZM33 12V29H50Z"/>
+</svg>

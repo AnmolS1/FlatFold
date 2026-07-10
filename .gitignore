@@ -1,0 +1,47 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+/hidden
+.env*
+temp.txt
+.vercel
+.wrangler
+.dev.vars*
+worker-configuration.d.ts
+
+/.claude
+.clinerules
+
+# Internal design/architecture/prompt/ops docs — kept LOCAL, not public.
+# The only public markdown is README.md and docs/THREAT_MODEL.md.
+/*_CHANGELOG.md
+/*_PROMPT.md
+/docs/*.md
+
+# Playwright MCP screenshots / traces (local verification)
+.playwright-mcp/
+*-mobile.png
+*-desktop.png
+m?-*.png

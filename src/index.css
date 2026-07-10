@@ -1,0 +1,282 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ── Self-hosted fonts ───────────────────────────────────────────
+   No Google Fonts / CDN — everything served from our own /fonts
+   (invariant: no third-party trackers or origins). Ported from the
+   ponderance.dev design package. */
+@font-face {
+	font-family: 'Bricolage Grotesque';
+	src: url('/fonts/bricolage-grotesque-wght.woff2') format('woff2');
+	font-weight: 200 800;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Hanken Grotesk';
+	src: url('/fonts/hanken-grotesk-wght.woff2') format('woff2');
+	font-weight: 100 900;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Hanken Grotesk';
+	src: url('/fonts/hanken-grotesk-wght-italic.woff2') format('woff2');
+	font-weight: 100 900;
+	font-style: italic;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'IBM Plex Mono';
+	src: url('/fonts/ibm-plex-mono-400.woff2') format('woff2');
+	font-weight: 400;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'IBM Plex Mono';
+	src: url('/fonts/ibm-plex-mono-500.woff2') format('woff2');
+	font-weight: 500;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'IBM Plex Mono';
+	src: url('/fonts/ibm-plex-mono-600.woff2') format('woff2');
+	font-weight: 600;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'IBM Plex Mono';
+	src: url('/fonts/ibm-plex-mono-700.woff2') format('woff2');
+	font-weight: 700;
+	font-display: swap;
+}
+
+/* ── Design tokens — the ponderance.dev visual language ──────────
+   Values ported from ../ponderance/src/styles/global.css. We keep this
+   app's EXISTING dark-mode mechanism (a `.dark` class on <html>, toggled
+   by useThemeInternal + localStorage['theme-preference']) rather than
+   ponderance's `[data-theme="dark"]` attribute — see docs/ARCHITECTURE.md
+   for that tradeoff. Only the token *values* are ported, not the selector. */
+@theme {
+	--color-graph: #EEF0EC;
+	--color-graph-card: #F6F7F4;
+	--color-inset: #FFFFFF;
+
+	--color-graphite: #1B2A33;
+	--color-graphite-60: rgba(27, 42, 51, 0.72);
+	--color-graphite-40: rgba(27, 42, 51, 0.4);
+
+	--color-crease: #2E5E8C;
+	--color-crease-line: rgba(46, 94, 140, 0.13);
+	--color-crease-line-bold: rgba(46, 94, 140, 0.28);
+	--color-grid-line: rgba(46, 94, 140, 0.07);
+
+	--color-crane: #E84A27;
+	--color-crane-dark: #C23A1C;
+	--color-sax: #D9A521;
+	--color-orbit: #2A2A6E;
+	--color-orbit-ink: #2A2A6E;
+
+	--font-display: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
+	--font-body: 'Hanken Grotesk', ui-sans-serif, system-ui, sans-serif;
+	--font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace;
+}
+
+/* Mirrors @theme so `var(--color-*)` resolves in raw CSS too — @theme alone
+   tree-shakes a color var unless a utility class references it. */
+:root {
+	--color-graph: #EEF0EC;
+	--color-graph-card: #F6F7F4;
+	--color-inset: #FFFFFF;
+	--color-graphite: #1B2A33;
+	--color-graphite-60: rgba(27, 42, 51, 0.72);
+	--color-graphite-40: rgba(27, 42, 51, 0.4);
+	--color-crease: #2E5E8C;
+	--color-crease-line: rgba(46, 94, 140, 0.13);
+	--color-crease-line-bold: rgba(46, 94, 140, 0.28);
+	--color-grid-line: rgba(46, 94, 140, 0.07);
+	--color-crane: #E84A27;
+	--color-crane-dark: #C23A1C;
+	--color-sax: #D9A521;
+	--color-orbit: #2A2A6E;
+	--color-orbit-ink: #2A2A6E;
+	--shadow-card: 0 8px 22px rgba(27, 42, 51, 0.10);
+	color-scheme: light;
+}
+
+/* Dark theme — "the blueprint at night". Values lifted from ponderance's
+   [data-theme="dark"] block, applied here via the `.dark` class this app
+   already uses. */
+.dark {
+	--color-graph: #0E1A24;
+	--color-graph-card: #182530;
+	--color-inset: #1E2C38;
+	--color-graphite: #E9ECE7;
+	--color-graphite-60: rgba(233, 236, 231, 0.66);
+	--color-graphite-40: rgba(233, 236, 231, 0.50);
+	--color-crease: #82A9CE;
+	--color-crease-line: rgba(130, 169, 206, 0.15);
+	--color-crease-line-bold: rgba(130, 169, 206, 0.30);
+	--color-grid-line: rgba(122, 162, 200, 0.07);
+	--color-crane: #F5613C;
+	--color-crane-dark: #C23A1C;
+	--color-sax: #E0B43F;
+	--color-orbit: #212146;
+	--color-orbit-ink: #A6A8DC;
+	--shadow-card: 0 10px 26px rgba(0, 0, 0, 0.45);
+	color-scheme: dark;
+}
+
+/* Smooth theme transitions */
+* {
+	transition-property: background-color, border-color, color, fill, stroke;
+	transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+	transition-duration: 200ms;
+}
+
+/* Disable transitions for animations and transforms */
+*:where([class*="animate-"]) {
+	transition: none;
+}
+
+body {
+	margin: 0;
+	font-family: var(--font-body);
+	color: var(--color-graphite);
+	background-color: var(--color-graph);
+	/* the blueprint graph-paper ground */
+	background-image:
+		linear-gradient(var(--color-grid-line) 1px, transparent 1px),
+		linear-gradient(90deg, var(--color-grid-line) 1px, transparent 1px);
+	background-size: 32px 32px;
+	background-position: -1px -1px;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Mobile primitives ──────────────────────────────────────────
+   Safe-area insets for notch/home-indicator devices. Applied to the
+   OUTER header / composer wrappers (whose own padding lives on inner
+   divs), so these are purely additive — content never slides under the
+   notch or the home indicator. Requires `viewport-fit=cover` in the
+   viewport meta (set in index.html). No-ops to 0 on devices without
+   insets. `100dvh`, `overscroll-contain` etc. come from Tailwind v4
+   built-ins (h-dvh / overscroll-contain). */
+.env-safe-top {
+	padding-top: env(safe-area-inset-top);
+}
+.env-safe-bottom {
+	padding-bottom: env(safe-area-inset-bottom);
+}
+.env-safe-x {
+	padding-left: env(safe-area-inset-left);
+	padding-right: env(safe-area-inset-right);
+}
+
+/* Skeleton shimmer — "skeletons never spinners". A hairline blueprint
+   sweep across a graph-card-tinted block. Collapses to a static block
+   under prefers-reduced-motion (the sweep keyframe is disabled there). */
+@keyframes skeleton-sweep {
+	0% {
+		background-position: 200% 0;
+	}
+	100% {
+		background-position: -200% 0;
+	}
+}
+.animate-skeleton {
+	background-image: linear-gradient(
+		90deg,
+		var(--color-crease-line) 0%,
+		var(--color-crease-line-bold) 50%,
+		var(--color-crease-line) 100%
+	);
+	background-size: 200% 100%;
+	animation: skeleton-sweep 1.4s ease-in-out infinite;
+}
+
+/* Bottom-sheet entrance: the panel rises from the bottom edge, the scrim
+   fades. Collapses to instant under prefers-reduced-motion (global reset). */
+@keyframes sheet-rise {
+	from {
+		transform: translateY(100%);
+	}
+	to {
+		transform: translateY(0);
+	}
+}
+.animate-sheet-rise {
+	animation: sheet-rise 260ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+@keyframes scrim-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+.animate-scrim-in {
+	animation: scrim-in 200ms ease-out both;
+}
+
+@keyframes slide-in {
+	from {
+		transform: translateX(100%);
+		opacity: 0;
+	}
+	to {
+		transform: translateX(0);
+		opacity: 1;
+	}
+}
+
+.animate-slide-in {
+	animation: slide-in 0.3s ease-out;
+}
+
+@keyframes fade-out {
+	to {
+		opacity: 0;
+		transform: scale(0.95);
+	}
+}
+
+.animate-fade-out {
+	animation: fade-out 0.3s ease-out forwards;
+}
+
+/* Paper-fold send animation (M6): a message bubble unfolds like origami in
+   place — the ponderance crane motif made functional. ~300ms, cosmetic only
+   (the message is already in the DOM; this animates a transform over it).
+   The prefers-reduced-motion reset below collapses it to instant. */
+@keyframes paper-fold {
+	0% {
+		transform: perspective(500px) rotateX(-78deg) scaleY(0.55);
+		opacity: 0;
+	}
+	55% {
+		transform: perspective(500px) rotateX(12deg) scaleY(1);
+		opacity: 1;
+	}
+	100% {
+		transform: perspective(500px) rotateX(0deg) scaleY(1);
+		opacity: 1;
+	}
+}
+
+.animate-paper-fold {
+	animation: paper-fold 300ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+	transform-origin: top center;
+	will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+	}
+}

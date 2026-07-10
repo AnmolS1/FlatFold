@@ -1,0 +1,23 @@
+<svg viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Raster source for the link-preview card (Open Graph / iMessage / Twitter).
+       Hex colors only; light theme (link previews don't theme-switch). -->
+  <defs>
+    <pattern id="og-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" stroke="rgba(46,94,140,0.07)" stroke-width="2" fill="none"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="630" fill="#EEF0EC"/>
+  <rect width="1200" height="630" fill="url(#og-grid)"/>
+  <g transform="translate(110 195) scale(3.75)">
+    <path d="M8 8H32L56 32V56H8Z" fill="#FFFFFF"/>
+    <path d="M8 8L56 56" stroke="rgba(46,94,140,0.16)" stroke-width="1.5"/>
+    <path d="M8 56L44 20" stroke="rgba(46,94,140,0.30)" stroke-width="1.5"/>
+    <path d="M32 8L56 32L32 32Z" fill="#E84A27" stroke="#C23A1C" stroke-width="1" stroke-linejoin="round"/>
+    <path d="M8 8H32L56 32V56H8Z" stroke="#2E5E8C" stroke-width="2.5" stroke-linejoin="round"/>
+  </g>
+  <text x="430" y="308" font-family="Bricolage Grotesque 96pt ExtraBold" font-size="108" fill="#1B2A33">FlatFold</text>
+  <text x="434" y="372" font-family="Hanken Grotesk" font-size="33" fill="rgba(27,42,51,0.72)">End-to-end encrypted messaging.</text>
+  <text x="434" y="418" font-family="Hanken Grotesk" font-size="33" fill="rgba(27,42,51,0.72)">Nothing stored. Nothing to hand over.</text>
+  <path d="M434 458H770" stroke="rgba(46,94,140,0.28)" stroke-width="1.5"/>
+  <text x="434" y="496" font-family="IBM Plex Mono Medium" font-size="25" fill="#2E5E8C">flatfold.ponderance.dev</text>
+</svg>

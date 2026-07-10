@@ -1,0 +1,934 @@
+// Public API of the encrypted local keystore. Everything this module
+// persists (identity keys, one-time prekey secrets, contacts, ratchet
+// session state) lives in IndexedDB as AEAD ciphertext, keyed by a
+// password-derived key that never leaves the device and is never sent to
+// the server.
+//
+// Unlock is a separate step from server login. AuthContext's session
+// bootstrap (GET /api/auth/me) restores *who's logged in* from an httpOnly
+// cookie on every fresh load — but the password itself is never retained
+// in JS memory past the login/signup call, so there's nothing to
+// re-derive the keystore key from on a plain reload. The derived key is
+// cached in `sessionStorage` (survives reload, dies on tab close, not
+// shared across tabs) so a reload doesn't force a re-prompt; a fresh tab
+// still does. This is a deliberate usability/security tradeoff — the key
+// sits in sessionStorage in plaintext for the tab's lifetime, readable by
+// any script-injection on the page, same risk class as most client-side
+// SPA secrets. Revisit in the M7 hardening pass if that tradeoff needs
+// tightening (e.g. a Web Worker holding the key out of the main JS realm).
+//
+// New-device / cleared-storage handling: if `unlock()` finds no local
+// identity for a username that just authenticated successfully, the
+// caller (AuthContext) generates and publishes a *fresh* identity — losing
+// access to prior conversations from this device, and changing this
+// user's safety number for every contact (the non-dismissable warning
+// contacts see on that change is a later milestone's UI; the key rotation
+// itself is honest and correct today). This matches the spec's single-
+// device-v1 stance: no key escrow, no cross-device backup.
+
+import {
+	generateIdentityKeyPair,
+	generateOneTimePreKeys,
+	generateSignedPreKey,
+	type IdentityKeyPair,
+	type IdentityPublicKeys,
+	type OneTimePreKey,
+	type RatchetState,
+	type SignedPreKey,
+} from '../crypto';
+import { base64ToBytes, bytesToBase64 } from './codec';
+import { decryptBlob, deriveKeystoreKey, encryptBlob, generateKeystoreSalt, type EncryptedBlob } from './crypto';
+import type { DisplayMessage } from '../types';
+import {
+	deleteKeystoreDatabase,
+	deleteRecord,
+	getRecord,
+	GROUP_RECEIVER_STORE,
+	GROUP_SENDER_STORE,
+	GROUP_STORE,
+	IDENTITY_STORE,
+	listKeys,
+	MEDIA_CACHE_STORE,
+	MESSAGE_STORE,
+	PROCESSED_STORE,
+	putRecord,
+	SESSION_STORE,
+	SUMMARY_STORE,
+} from './storage';
+import type { ReceiverSenderKeyState, SenderKeyState } from '../crypto';
+
+export { deleteKeystoreDatabase };
+
+// ---- serialized shapes persisted (encrypted) in IndexedDB ----
+
+interface StoredIdentityDoc {
+	identity: {
+		signingPublicKey: string;
+		signingSecretKey: string;
+		dhPublicKey: string;
+		dhSecretKey: string;
+	};
+	signedPreKey: {
+		publicKey: string;
+		secretKey: string;
+		signature: string;
+	};
+	// publicKey (base64) -> secretKey (base64); removed once consumed
+	// responding to a first message that used it.
+	oneTimePreKeys: Record<string, string>;
+	contacts: Record<string, StoredContact>;
+	// Sealed sender: MY current delivery token — the one I register with my own
+	// mailbox DO and publish in my bundle so others can reach me on the
+	// sender-hidden path. Rotated when I remove a contact. Absent until I first
+	// publish keys with sealed sender enabled.
+	sealToken?: string;
+}
+
+interface StoredContact {
+	signingPublicKey: string;
+	dhPublicKey: string;
+	// True once the user has confirmed this contact's safety number
+	// out-of-band (compared digits, or scanned their QR). Reset to false on
+	// any identity-key change.
+	verified?: boolean;
+	// True when this contact's identity key changed and the user hasn't yet
+	// acknowledged the warning. Drives the non-dismissable banner.
+	keyChangeUnacknowledged?: boolean;
+	// Disappearing-messages timer for this conversation, in seconds (0 = off).
+	// Synced across both sides by an in-channel 'timer' control message.
+	disappearingSeconds?: number;
+	// Sealed sender: THIS contact's current delivery token, learned over our
+	// authenticated ratchet (a 'deliverytoken' payload) or their bundle, so I
+	// can send to them on the sealed path. Lives on the contact so removing the
+	// contact drops it automatically.
+	sealToken?: string;
+}
+
+interface StoredSkippedKey {
+	headerKey: string;
+	messageKey: string;
+	messageNumber: number;
+}
+
+interface StoredRatchetState {
+	rootKey: string;
+	dhSelfPublicKey: string;
+	dhSelfSecretKey: string;
+	dhRemotePublicKey: string | null;
+	sendingChainKey: string | null;
+	receivingChainKey: string | null;
+	sendHeaderKey: string | null;
+	receiveHeaderKey: string | null;
+	nextSendHeaderKey: string | null;
+	nextReceiveHeaderKey: string | null;
+	sendMessageNumber: number;
+	receiveMessageNumber: number;
+	previousSendingChainLength: number;
+	skippedMessageKeys: [string, StoredSkippedKey][];
+}
+
+interface StoredSession {
+	associatedData: string;
+	ratchet: StoredRatchetState;
+}
+
+interface IdentityRecord {
+	salt: string;
+	blob: EncryptedBlob;
+}
+
+function serializeRatchetState(state: RatchetState): StoredRatchetState {
+	const b64 = (v: Uint8Array | null) => (v ? bytesToBase64(v) : null);
+	return {
+		rootKey: bytesToBase64(state.rootKey),
+		dhSelfPublicKey: bytesToBase64(state.dhSelf.publicKey),
+		dhSelfSecretKey: bytesToBase64(state.dhSelf.secretKey),
+		dhRemotePublicKey: b64(state.dhRemotePublicKey),
+		sendingChainKey: b64(state.sendingChainKey),
+		receivingChainKey: b64(state.receivingChainKey),
+		sendHeaderKey: b64(state.sendHeaderKey),
+		receiveHeaderKey: b64(state.receiveHeaderKey),
+		nextSendHeaderKey: b64(state.nextSendHeaderKey),
+		nextReceiveHeaderKey: b64(state.nextReceiveHeaderKey),
+		sendMessageNumber: state.sendMessageNumber,
+		receiveMessageNumber: state.receiveMessageNumber,
+		previousSendingChainLength: state.previousSendingChainLength,
+		skippedMessageKeys: Array.from(state.skippedMessageKeys.entries()).map(([k, v]) => [
+			k,
+			{ headerKey: bytesToBase64(v.headerKey), messageKey: bytesToBase64(v.messageKey), messageNumber: v.messageNumber },
+		]),
+	};
+}
+
+function deserializeRatchetState(stored: StoredRatchetState): RatchetState {
+	const bytes = (v: string | null) => (v ? base64ToBytes(v) : null);
+	return {
+		rootKey: base64ToBytes(stored.rootKey),
+		dhSelf: { publicKey: base64ToBytes(stored.dhSelfPublicKey), secretKey: base64ToBytes(stored.dhSelfSecretKey) },
+		dhRemotePublicKey: bytes(stored.dhRemotePublicKey),
+		sendingChainKey: bytes(stored.sendingChainKey),
+		receivingChainKey: bytes(stored.receivingChainKey),
+		sendHeaderKey: bytes(stored.sendHeaderKey),
+		receiveHeaderKey: bytes(stored.receiveHeaderKey),
+		nextSendHeaderKey: bytes(stored.nextSendHeaderKey),
+		nextReceiveHeaderKey: bytes(stored.nextReceiveHeaderKey),
+		sendMessageNumber: stored.sendMessageNumber,
+		receiveMessageNumber: stored.receiveMessageNumber,
+		previousSendingChainLength: stored.previousSendingChainLength,
+		skippedMessageKeys: new Map(
+			stored.skippedMessageKeys.map(([k, v]) => [
+				k,
+				{ headerKey: base64ToBytes(v.headerKey), messageKey: base64ToBytes(v.messageKey), messageNumber: v.messageNumber },
+			])
+		),
+	};
+}
+
+// ---- in-memory unlock-key cache (M7 hardening) ----
+// The Argon2id-derived keystore key is held ONLY here, in a module-scoped map
+// in the JS heap — never in `sessionStorage` (which is script-readable via the
+// storage API and persists in devtools/extensions). Consequences:
+//   • The key is gone on page reload / new tab → the user re-unlocks (re-enters
+//     their password) each time. This is the deliberate security/UX tradeoff.
+//   • No other in-origin script can read it via a storage API; a reference to
+//     this closure is required, which scripts don't have.
+// (Against an *active* in-origin XSS, neither this nor a Web Worker fully
+// protects — an attacker can call the keystore's own decrypt functions — so
+// this captures the concrete win without a heavy realm-isolation refactor.)
+const cachedKeys = new Map<string, Uint8Array>();
+
+function cacheKey(username: string, key: Uint8Array): void {
+	cachedKeys.set(username, key);
+}
+
+function readCachedKey(username: string): Uint8Array | null {
+	return cachedKeys.get(username) ?? null;
+}
+
+export function isUnlocked(username: string): boolean {
+	return cachedKeys.has(username);
+}
+
+export function lock(username: string): void {
+	cachedKeys.delete(username);
+}
+
+// Clears every in-memory unlock key. Used by panic wipe so the key is gone
+// immediately, not only after the post-wipe reload.
+export function lockAll(): void {
+	cachedKeys.clear();
+}
+
+function requireCachedKey(username: string): Uint8Array {
+	const key = readCachedKey(username);
+	if (!key) throw new Error(`Keystore for ${username} is locked — call unlock() first.`);
+	return key;
+}
+
+// ---- identity lifecycle ----
+
+export async function hasLocalIdentity(username: string): Promise<boolean> {
+	return (await getRecord<IdentityRecord>(IDENTITY_STORE, username)) !== undefined;
+}
+
+export interface NewIdentityMaterial {
+	identity: IdentityKeyPair;
+	signedPreKey: SignedPreKey;
+	oneTimePreKeys: OneTimePreKey[];
+}
+
+// Generates a fresh identity, persists it encrypted, and caches the derived
+// key for this tab. Returns the public material the caller must publish to
+// the server (POST /api/keys/publish) — this function only touches local
+// storage.
+export async function createIdentity(username: string, password: string): Promise<NewIdentityMaterial> {
+	const identity = generateIdentityKeyPair();
+	const signedPreKey = generateSignedPreKey(identity);
+	const oneTimePreKeys = generateOneTimePreKeys(20);
+
+	const doc: StoredIdentityDoc = {
+		identity: {
+			signingPublicKey: bytesToBase64(identity.signing.publicKey),
+			signingSecretKey: bytesToBase64(identity.signing.secretKey),
+			dhPublicKey: bytesToBase64(identity.dh.publicKey),
+			dhSecretKey: bytesToBase64(identity.dh.secretKey),
+		},
+		signedPreKey: {
+			publicKey: bytesToBase64(signedPreKey.keyPair.publicKey),
+			secretKey: bytesToBase64(signedPreKey.keyPair.secretKey),
+			signature: bytesToBase64(signedPreKey.signature),
+		},
+		oneTimePreKeys: Object.fromEntries(
+			oneTimePreKeys.map((opk) => [bytesToBase64(opk.keyPair.publicKey), bytesToBase64(opk.keyPair.secretKey)])
+		),
+		contacts: {},
+	};
+
+	const salt = generateKeystoreSalt();
+	const key = await deriveKeystoreKey(password, salt);
+	await putRecord<IdentityRecord>(IDENTITY_STORE, username, { salt, blob: encryptBlob(key, doc) });
+	cacheKey(username, key);
+
+	return { identity, signedPreKey, oneTimePreKeys };
+}
+
+export type UnlockResult =
+	| { status: 'no-local-identity' }
+	| { status: 'wrong-password' }
+	| { status: 'unlocked'; identity: IdentityKeyPair };
+
+export async function unlock(username: string, password: string): Promise<UnlockResult> {
+	const record = await getRecord<IdentityRecord>(IDENTITY_STORE, username);
+	if (!record) return { status: 'no-local-identity' };
+
+	const key = await deriveKeystoreKey(password, record.salt);
+	let doc: StoredIdentityDoc;
+	try {
+		doc = decryptBlob<StoredIdentityDoc>(key, record.blob);
+	} catch {
+		return { status: 'wrong-password' };
+	}
+
+	cacheKey(username, key);
+	return {
+		status: 'unlocked',
+		identity: {
+			signing: {
+				publicKey: base64ToBytes(doc.identity.signingPublicKey),
+				secretKey: base64ToBytes(doc.identity.signingSecretKey),
+			},
+			dh: {
+				publicKey: base64ToBytes(doc.identity.dhPublicKey),
+				secretKey: base64ToBytes(doc.identity.dhSecretKey),
+			},
+		},
+	};
+}
+
+async function loadDoc(username: string): Promise<{ key: Uint8Array; doc: StoredIdentityDoc }> {
+	const key = requireCachedKey(username);
+	const record = await getRecord<IdentityRecord>(IDENTITY_STORE, username);
+	if (!record) throw new Error(`No local identity for ${username}.`);
+	return { key, doc: decryptBlob<StoredIdentityDoc>(key, record.blob) };
+}
+
+async function saveDoc(username: string, key: Uint8Array, doc: StoredIdentityDoc): Promise<void> {
+	const record = await getRecord<IdentityRecord>(IDENTITY_STORE, username);
+	if (!record) throw new Error(`No local identity for ${username}.`);
+	await putRecord<IdentityRecord>(IDENTITY_STORE, username, { salt: record.salt, blob: encryptBlob(key, doc) });
+}
+
+export async function getIdentity(username: string): Promise<IdentityKeyPair> {
+	const { doc } = await loadDoc(username);
+	return {
+		signing: {
+			publicKey: base64ToBytes(doc.identity.signingPublicKey),
+			secretKey: base64ToBytes(doc.identity.signingSecretKey),
+		},
+		dh: { publicKey: base64ToBytes(doc.identity.dhPublicKey), secretKey: base64ToBytes(doc.identity.dhSecretKey) },
+	};
+}
+
+export async function getSignedPreKey(username: string): Promise<SignedPreKey> {
+	const { doc } = await loadDoc(username);
+	return {
+		keyPair: {
+			publicKey: base64ToBytes(doc.signedPreKey.publicKey),
+			secretKey: base64ToBytes(doc.signedPreKey.secretKey),
+		},
+		signature: base64ToBytes(doc.signedPreKey.signature),
+	};
+}
+
+// Looks up (and permanently removes) the secret key for one of THIS user's
+// own one-time prekeys, identified by its public key — used when responding
+// to an incoming first message that names which OPK the sender consumed.
+// Removing it locally is a second no-reuse guarantee independent of the
+// server's own atomic delete-on-fetch (worker/keys.ts).
+export async function takeOneTimePreKeySecret(username: string, publicKeyBase64: string): Promise<Uint8Array | null> {
+	const { key, doc } = await loadDoc(username);
+	const secretBase64 = doc.oneTimePreKeys[publicKeyBase64];
+	if (!secretBase64) return null;
+
+	delete doc.oneTimePreKeys[publicKeyBase64];
+	await saveDoc(username, key, doc);
+	return base64ToBytes(secretBase64);
+}
+
+// Adds a brand-new contact (unverified, no key-change flag). Idempotent for
+// an unchanged identity; use recordKeyChange when a KNOWN contact's identity
+// changes so the verification/warning state is handled correctly.
+export async function addContact(username: string, contactUsername: string, identity: IdentityPublicKeys): Promise<void> {
+	const { key, doc } = await loadDoc(username);
+	doc.contacts[contactUsername] = {
+		signingPublicKey: bytesToBase64(identity.signingPublicKey),
+		dhPublicKey: bytesToBase64(identity.dhPublicKey),
+		verified: false,
+		keyChangeUnacknowledged: false,
+	};
+	await saveDoc(username, key, doc);
+}
+
+export interface ContactRecord {
+	username: string;
+	identity: IdentityPublicKeys;
+	verified: boolean;
+	keyChangeUnacknowledged: boolean;
+	disappearingSeconds: number;
+}
+
+function toContactRecord(contactUsername: string, stored: StoredContact): ContactRecord {
+	return {
+		username: contactUsername,
+		identity: {
+			signingPublicKey: base64ToBytes(stored.signingPublicKey),
+			dhPublicKey: base64ToBytes(stored.dhPublicKey),
+		},
+		verified: stored.verified ?? false,
+		keyChangeUnacknowledged: stored.keyChangeUnacknowledged ?? false,
+		disappearingSeconds: stored.disappearingSeconds ?? 0,
+	};
+}
+
+export async function setDisappearingTimer(username: string, contactUsername: string, seconds: number): Promise<void> {
+	const { key, doc } = await loadDoc(username);
+	const stored = doc.contacts[contactUsername];
+	if (!stored) return;
+	stored.disappearingSeconds = seconds;
+	await saveDoc(username, key, doc);
+}
+
+export async function listContacts(username: string): Promise<ContactRecord[]> {
+	const { doc } = await loadDoc(username);
+	return Object.entries(doc.contacts).map(([contactUsername, stored]) => toContactRecord(contactUsername, stored));
+}
+
+export async function getContact(username: string, contactUsername: string): Promise<ContactRecord | null> {
+	const { doc } = await loadDoc(username);
+	const stored = doc.contacts[contactUsername];
+	return stored ? toContactRecord(contactUsername, stored) : null;
+}
+
+// A known contact's identity key changed. Replace the stored identity, drop
+// any prior verification, and raise the unacknowledged-key-change flag that
+// drives the non-dismissable warning. This is the detection point Signal
+// calls a "safety number change."
+export async function recordKeyChange(username: string, contactUsername: string, identity: IdentityPublicKeys): Promise<void> {
+	const { key, doc } = await loadDoc(username);
+	doc.contacts[contactUsername] = {
+		signingPublicKey: bytesToBase64(identity.signingPublicKey),
+		dhPublicKey: bytesToBase64(identity.dhPublicKey),
+		verified: false,
+		keyChangeUnacknowledged: true,
+	};
+	await saveDoc(username, key, doc);
+}
+
+// User confirmed the safety number out-of-band (compared digits, or scanned
+// the QR). Clears any pending key-change warning too.
+export async function setVerified(username: string, contactUsername: string, verified: boolean): Promise<void> {
+	const { key, doc } = await loadDoc(username);
+	const stored = doc.contacts[contactUsername];
+	if (!stored) return;
+	stored.verified = verified;
+	if (verified) stored.keyChangeUnacknowledged = false;
+	await saveDoc(username, key, doc);
+}
+
+// User dismissed the key-change warning without re-verifying — the contact
+// stays unverified, but the banner stops nagging.
+export async function acknowledgeKeyChange(username: string, contactUsername: string): Promise<void> {
+	const { key, doc } = await loadDoc(username);
+	const stored = doc.contacts[contactUsername];
+	if (!stored) return;
+	stored.keyChangeUnacknowledged = false;
+	await saveDoc(username, key, doc);
+}
+
+// ---- sealed-sender delivery tokens ----
+
+// My own delivery token (the one I register with my mailbox DO + publish in my
+// bundle). Not a secret — see src/lib/sealToken.ts. Rotated on contact removal.
+export async function saveOwnSealToken(username: string, token: string): Promise<void> {
+	const { key, doc } = await loadDoc(username);
+	doc.sealToken = token;
+	await saveDoc(username, key, doc);
+}
+
+export async function loadOwnSealToken(username: string): Promise<string | null> {
+	const { doc } = await loadDoc(username);
+	return doc.sealToken ?? null;
+}
+
+// Store a contact's delivery token (learned over the ratchet or their bundle),
+// so a future sealed send to them can present it. No-op for an unknown contact.
+export async function savePeerSealToken(username: string, contactUsername: string, token: string): Promise<void> {
+	const { key, doc } = await loadDoc(username);
+	const stored = doc.contacts[contactUsername];
+	if (!stored) return;
+	stored.sealToken = token;
+	await saveDoc(username, key, doc);
+}
+
+export async function loadPeerSealToken(username: string, contactUsername: string): Promise<string | null> {
+	const { doc } = await loadDoc(username);
+	return doc.contacts[contactUsername]?.sealToken ?? null;
+}
+
+// Removes a 1:1 contact and all local state for that conversation: the contact
+// record (identity, verification, their delivery token), the ratchet session,
+// message history, and the chat-list summary. Mirrors group removal's local
+// purge. Triggers a delivery-token rotation at the call site (Chat.tsx) so the
+// removed contact's copy of my token goes stale after the DO's grace window.
+export async function removeContact(username: string, contactUsername: string): Promise<void> {
+	const { key, doc } = await loadDoc(username);
+	delete doc.contacts[contactUsername];
+	await saveDoc(username, key, doc);
+	await deleteRecord(SESSION_STORE, sessionKey(username, contactUsername));
+	await deleteRecord(MESSAGE_STORE, sessionKey(username, contactUsername));
+	await deleteConversationSummary(username, contactUsername);
+}
+
+// ---- ratchet sessions (one record per contact, separate from the
+// identity doc so a chatty conversation doesn't rewrite the whole identity
+// blob — including every other contact and remaining OPKs — on each message)
+
+function sessionKey(username: string, contactUsername: string): string {
+	return `${username}:${contactUsername}`;
+}
+
+export async function saveSession(
+	username: string,
+	contactUsername: string,
+	ratchet: RatchetState,
+	associatedData: Uint8Array
+): Promise<void> {
+	const key = requireCachedKey(username);
+	const stored: StoredSession = { associatedData: bytesToBase64(associatedData), ratchet: serializeRatchetState(ratchet) };
+	await putRecord(SESSION_STORE, sessionKey(username, contactUsername), encryptBlob(key, stored));
+}
+
+export async function loadSession(
+	username: string,
+	contactUsername: string
+): Promise<{ ratchet: RatchetState; associatedData: Uint8Array } | null> {
+	const key = requireCachedKey(username);
+	const blob = await getRecord<EncryptedBlob>(SESSION_STORE, sessionKey(username, contactUsername));
+	if (!blob) return null;
+
+	const stored = decryptBlob<StoredSession>(key, blob);
+	return { ratchet: deserializeRatchetState(stored.ratchet), associatedData: base64ToBytes(stored.associatedData) };
+}
+
+export async function hasSession(username: string, contactUsername: string): Promise<boolean> {
+	return (await getRecord(SESSION_STORE, sessionKey(username, contactUsername))) !== undefined;
+}
+
+// Every contact we hold a 1:1 ratchet session with. Sealed-sender receive uses
+// this to trial-decrypt an incoming from-less envelope against each candidate
+// session until one's header key decrypts it (identifying the sender). Mirrors
+// the `${username}:` prefix scan used by loadAllMessages / summaries.
+export async function listSessionContacts(username: string): Promise<string[]> {
+	const prefix = `${username}:`;
+	const keys = await listKeys(SESSION_STORE);
+	return keys.filter((k) => k.startsWith(prefix)).map((k) => k.slice(prefix.length));
+}
+
+// ---- decrypted message history (one record per conversation) ----
+// Stored encrypted under the same derived key as everything else — "no
+// server-side message store" doesn't mean "no history"; it means history
+// lives only here, client-side.
+
+export async function appendMessage(username: string, contactUsername: string, message: DisplayMessage): Promise<void> {
+	const key = requireCachedKey(username);
+	const storeKey = sessionKey(username, contactUsername);
+	const existingBlob = await getRecord<EncryptedBlob>(MESSAGE_STORE, storeKey);
+	const history = existingBlob ? decryptBlob<DisplayMessage[]>(key, existingBlob) : [];
+	history.push(message);
+	await putRecord(MESSAGE_STORE, storeKey, encryptBlob(key, history));
+}
+
+export async function loadMessages(username: string, contactUsername: string): Promise<DisplayMessage[]> {
+	const key = requireCachedKey(username);
+	const blob = await getRecord<EncryptedBlob>(MESSAGE_STORE, sessionKey(username, contactUsername));
+	return blob ? decryptBlob<DisplayMessage[]>(key, blob) : [];
+}
+
+// Every conversation's decrypted history, tagged by contact. Used to build
+// the in-memory local search index — which is NEVER persisted, so search
+// touches neither the network nor plaintext-at-rest.
+export async function loadAllMessages(username: string): Promise<{ contact: string; message: DisplayMessage }[]> {
+	const key = requireCachedKey(username);
+	const prefix = `${username}:`;
+	const all: { contact: string; message: DisplayMessage }[] = [];
+	for (const storeKey of await listKeys(MESSAGE_STORE)) {
+		if (!storeKey.startsWith(prefix)) continue;
+		const blob = await getRecord<EncryptedBlob>(MESSAGE_STORE, storeKey);
+		if (!blob) continue;
+		const contact = storeKey.slice(prefix.length);
+		for (const message of decryptBlob<DisplayMessage[]>(key, blob)) all.push({ contact, message });
+	}
+	return all;
+}
+
+// Resolve a sealed delivered-receipt's `rid` back to the local sent message it
+// refers to, WITHOUT the receipt carrying a conversation identity. Scans the
+// (encrypted) per-conversation history — the same store the in-memory ridIndex
+// is built from, so no new plaintext-at-rest index of contact identities. Only
+// hit on a receipt whose rid isn't already in the in-memory map (a receipt for
+// a conversation not opened this session, e.g. flushed after a reload). Returns
+// the first match's `{contact, messageId}` (rid is per-message unique).
+export async function findMessageByRid(username: string, rid: string): Promise<{ contact: string; messageId: string } | null> {
+	const key = requireCachedKey(username);
+	const prefix = `${username}:`;
+	for (const storeKey of await listKeys(MESSAGE_STORE)) {
+		if (!storeKey.startsWith(prefix)) continue;
+		const blob = await getRecord<EncryptedBlob>(MESSAGE_STORE, storeKey);
+		if (!blob) continue;
+		const match = decryptBlob<DisplayMessage[]>(key, blob).find((m) => m.rid === rid);
+		if (match) return { contact: storeKey.slice(prefix.length), messageId: match.id };
+	}
+	return null;
+}
+
+// Deletes expired disappearing messages from every conversation, returning
+// the set of contacts whose history changed (so the UI can refresh just
+// those). Both sides run this on the same `expiresAt` wall-clock, so a
+// message vanishes from both devices at the same moment.
+export async function sweepExpiredMessages(username: string, now: number): Promise<string[]> {
+	const key = requireCachedKey(username);
+	const prefix = `${username}:`;
+	const changed: string[] = [];
+	for (const storeKey of await listKeys(MESSAGE_STORE)) {
+		if (!storeKey.startsWith(prefix)) continue;
+		const blob = await getRecord<EncryptedBlob>(MESSAGE_STORE, storeKey);
+		if (!blob) continue;
+		const history = decryptBlob<DisplayMessage[]>(key, blob);
+		const kept: DisplayMessage[] = [];
+		const expired: DisplayMessage[] = [];
+		for (const m of history) (m.expiresAt !== undefined && m.expiresAt <= now ? expired : kept).push(m);
+		if (expired.length > 0) {
+			await putRecord(MESSAGE_STORE, storeKey, encryptBlob(key, kept));
+			// A disappearing media message must take its locally-cached bytes
+			// with it, not just the bubble.
+			for (const m of expired) {
+				if (m.media) await deleteRecord(MEDIA_CACHE_STORE, mediaCacheKey(username, m.media.id));
+			}
+			changed.push(storeKey.slice(prefix.length));
+		}
+	}
+	return changed;
+}
+
+// Upgrades a previously-stored own message to 'delivered' (or any later
+// status) once its delivered notification arrives. No-op if the message
+// isn't found — a delivered notification can outlive its message record
+// (e.g. after a panic wipe), and that shouldn't throw.
+export async function updateMessageStatus(
+	username: string,
+	contactUsername: string,
+	messageId: string,
+	status: 'sent' | 'delivered'
+): Promise<void> {
+	const key = requireCachedKey(username);
+	const storeKey = sessionKey(username, contactUsername);
+	const blob = await getRecord<EncryptedBlob>(MESSAGE_STORE, storeKey);
+	if (!blob) return;
+	const history = decryptBlob<DisplayMessage[]>(key, blob);
+	const target = history.find((m) => m.id === messageId);
+	if (!target) return;
+	target.status = status;
+	await putRecord(MESSAGE_STORE, storeKey, encryptBlob(key, history));
+}
+
+// Hard-removes a single message from a conversation's local history ("delete
+// for me" — a purely local action, no network). Also drops its cached media
+// bytes. Returns true if a message was removed. Idempotent: a no-op (returns
+// false) if the id isn't present.
+export async function deleteMessageLocal(username: string, convoKey: string, messageId: string): Promise<boolean> {
+	const key = requireCachedKey(username);
+	const storeKey = sessionKey(username, convoKey);
+	const blob = await getRecord<EncryptedBlob>(MESSAGE_STORE, storeKey);
+	if (!blob) return false;
+	const history = decryptBlob<DisplayMessage[]>(key, blob);
+	const target = history.find((m) => m.id === messageId);
+	const next = history.filter((m) => m.id !== messageId);
+	if (next.length === history.length) return false;
+	await putRecord(MESSAGE_STORE, storeKey, encryptBlob(key, next));
+	if (target?.media) await deleteRecord(MEDIA_CACHE_STORE, mediaCacheKey(username, target.media.id));
+	return true;
+}
+
+// Tombstones a message ("delete for everyone"): keeps the record so the bubble
+// can render "deleted", but clears its content (text, media, reply quote) and
+// drops any cached media bytes. Returns true if it changed anything. Idempotent:
+// a no-op (returns false) if the id is missing or already tombstoned.
+//
+// AUTHORIZATION for the remote path is the caller's job (see canDelete in
+// deleteAuth.ts): only call this after confirming the requester authored the
+// target, and look the target up ONLY in the requester's own conversation.
+export async function tombstoneMessage(username: string, convoKey: string, messageId: string): Promise<boolean> {
+	const key = requireCachedKey(username);
+	const storeKey = sessionKey(username, convoKey);
+	const blob = await getRecord<EncryptedBlob>(MESSAGE_STORE, storeKey);
+	if (!blob) return false;
+	const history = decryptBlob<DisplayMessage[]>(key, blob);
+	const target = history.find((m) => m.id === messageId);
+	if (!target || target.deleted) return false;
+	const mediaId = target.media?.id;
+	target.deleted = true;
+	target.text = '';
+	delete target.media;
+	delete target.replyTo;
+	await putRecord(MESSAGE_STORE, storeKey, encryptBlob(key, history));
+	if (mediaId) await deleteRecord(MEDIA_CACHE_STORE, mediaCacheKey(username, mediaId));
+	return true;
+}
+
+// ---- conversation summaries (chat-list previews + unread) ----
+// A denormalized, per-conversation snapshot of the last message plus a
+// lastRead marker, so the chat list can show a preview + timestamp + unread
+// dot WITHOUT decrypting every conversation's full history on each render.
+// This is a cache derived from message history — never authoritative over it.
+// The unread dot is computed by the UI as `lastTs > lastReadTs && the last
+// message was received (not sent by me)`.
+
+export interface ConversationSummary {
+	// Raw text of the last message ('' for media — the UI renders a label from
+	// lastKind). Snippet truncation happens at render time.
+	lastText: string;
+	lastTs: number;
+	// Sender username of the last message (=== our own username when we sent it).
+	lastFrom: string;
+	lastKind: 'text' | 'media' | 'voice';
+	// Wall-clock ms of the last time the user viewed this conversation.
+	lastReadTs: number;
+	// True when the last message was retracted ("delete for everyone") — so the
+	// list preview reads "Message deleted" rather than leaking the old text.
+	deleted?: boolean;
+}
+
+function summaryKey(username: string, convoKey: string): string {
+	return `${username}:${convoKey}`;
+}
+
+// Persists a conversation's summary (last-message preview + lastRead marker),
+// encrypted at rest. The caller (Chat) derives this from message history and
+// the active-conversation state; this is just the durable write so previews
+// and unread dots survive a reload.
+export async function putConversationSummary(username: string, convoKey: string, summary: ConversationSummary): Promise<void> {
+	const key = requireCachedKey(username);
+	await putRecord(SUMMARY_STORE, summaryKey(username, convoKey), encryptBlob(key, summary));
+}
+
+// Removes a conversation's summary — when it has no messages left (all deleted
+// or expired), so the chat list stops showing a stale/vanished preview.
+export async function deleteConversationSummary(username: string, convoKey: string): Promise<void> {
+	await deleteRecord(SUMMARY_STORE, summaryKey(username, convoKey));
+}
+
+// Every conversation summary for this user, keyed by convoKey (contact
+// username or groupConversationKey). Cheap: one small record per conversation.
+export async function listConversationSummaries(username: string): Promise<Record<string, ConversationSummary>> {
+	const key = requireCachedKey(username);
+	const prefix = `${username}:`;
+	const out: Record<string, ConversationSummary> = {};
+	for (const storeKey of await listKeys(SUMMARY_STORE)) {
+		if (!storeKey.startsWith(prefix)) continue;
+		const blob = await getRecord<EncryptedBlob>(SUMMARY_STORE, storeKey);
+		if (!blob) continue;
+		out[storeKey.slice(prefix.length)] = decryptBlob<ConversationSummary>(key, blob);
+	}
+	return out;
+}
+
+// ---- processed inbound message ids (idempotent receive) ----
+// A tiny encrypted record per handled message id. The value is just a
+// timestamp, kept so a future pass can prune ids older than the 14-day
+// envelope TTL (after which no redelivery can occur); not pruned yet —
+// documented growth caveat in ARCHITECTURE.md.
+
+function processedKey(username: string, messageId: string): string {
+	return `${username}:${messageId}`;
+}
+
+export async function markProcessed(username: string, messageId: string): Promise<void> {
+	const key = requireCachedKey(username);
+	await putRecord(PROCESSED_STORE, processedKey(username, messageId), encryptBlob(key, { at: Date.now() }));
+}
+
+export async function isProcessed(username: string, messageId: string): Promise<boolean> {
+	return (await getRecord(PROCESSED_STORE, processedKey(username, messageId))) !== undefined;
+}
+
+// ---- decrypted-attachment cache (encrypted at rest) ----
+
+interface StoredMedia {
+	bytesBase64: string;
+	mimeType: string;
+}
+
+function mediaCacheKey(username: string, mediaId: string): string {
+	return `${username}:${mediaId}`;
+}
+
+export async function cacheMedia(username: string, mediaId: string, bytes: Uint8Array, mimeType: string): Promise<void> {
+	const key = requireCachedKey(username);
+	const stored: StoredMedia = { bytesBase64: bytesToBase64(bytes), mimeType };
+	await putRecord(MEDIA_CACHE_STORE, mediaCacheKey(username, mediaId), encryptBlob(key, stored));
+}
+
+export async function getCachedMedia(username: string, mediaId: string): Promise<{ bytes: Uint8Array; mimeType: string } | null> {
+	const key = requireCachedKey(username);
+	const blob = await getRecord<EncryptedBlob>(MEDIA_CACHE_STORE, mediaCacheKey(username, mediaId));
+	if (!blob) return null;
+	const stored = decryptBlob<StoredMedia>(key, blob);
+	return { bytes: base64ToBytes(stored.bytesBase64), mimeType: stored.mimeType };
+}
+
+// ---- groups (M5) ----
+// Group state is client-only and encrypted at rest; the server sees only
+// opaque group ids and per-member mailbox fan-out.
+
+export interface GroupRecord {
+	id: string;
+	name: string;
+	members: string[];
+	creator: string;
+}
+
+function groupKey(username: string, groupId: string): string {
+	return `${username}:${groupId}`;
+}
+
+export async function saveGroup(username: string, group: GroupRecord): Promise<void> {
+	const key = requireCachedKey(username);
+	await putRecord(GROUP_STORE, groupKey(username, group.id), encryptBlob(key, group));
+}
+
+export async function getGroup(username: string, groupId: string): Promise<GroupRecord | null> {
+	const key = requireCachedKey(username);
+	const blob = await getRecord<EncryptedBlob>(GROUP_STORE, groupKey(username, groupId));
+	return blob ? decryptBlob<GroupRecord>(key, blob) : null;
+}
+
+export async function listGroups(username: string): Promise<GroupRecord[]> {
+	const key = requireCachedKey(username);
+	const prefix = `${username}:`;
+	const groups: GroupRecord[] = [];
+	for (const storeKey of await listKeys(GROUP_STORE)) {
+		if (!storeKey.startsWith(prefix)) continue;
+		const blob = await getRecord<EncryptedBlob>(GROUP_STORE, storeKey);
+		if (blob) groups.push(decryptBlob<GroupRecord>(key, blob));
+	}
+	return groups;
+}
+
+interface StoredSenderKey {
+	chainKey: string;
+	iteration: number;
+	signingPublicKey: string;
+	signingSecretKey: string;
+}
+
+export async function saveOwnSenderKey(username: string, groupId: string, state: SenderKeyState): Promise<void> {
+	const key = requireCachedKey(username);
+	const stored: StoredSenderKey = {
+		chainKey: bytesToBase64(state.chainKey),
+		iteration: state.iteration,
+		signingPublicKey: bytesToBase64(state.signing.publicKey),
+		signingSecretKey: bytesToBase64(state.signing.secretKey),
+	};
+	await putRecord(GROUP_SENDER_STORE, groupKey(username, groupId), encryptBlob(key, stored));
+}
+
+export async function loadOwnSenderKey(username: string, groupId: string): Promise<SenderKeyState | null> {
+	const key = requireCachedKey(username);
+	const blob = await getRecord<EncryptedBlob>(GROUP_SENDER_STORE, groupKey(username, groupId));
+	if (!blob) return null;
+	const stored = decryptBlob<StoredSenderKey>(key, blob);
+	return {
+		chainKey: base64ToBytes(stored.chainKey),
+		iteration: stored.iteration,
+		signing: { publicKey: base64ToBytes(stored.signingPublicKey), secretKey: base64ToBytes(stored.signingSecretKey) },
+	};
+}
+
+interface StoredReceiverKey {
+	chainKey: string;
+	iteration: number;
+	signPublicKey: string;
+	skippedMessageKeys: [number, string][];
+}
+
+function receiverKey(username: string, groupId: string, sender: string): string {
+	return `${username}:${groupId}:${sender}`;
+}
+
+export async function saveReceiverSenderKey(
+	username: string,
+	groupId: string,
+	sender: string,
+	state: ReceiverSenderKeyState
+): Promise<void> {
+	const key = requireCachedKey(username);
+	const stored: StoredReceiverKey = {
+		chainKey: bytesToBase64(state.chainKey),
+		iteration: state.iteration,
+		signPublicKey: bytesToBase64(state.signPublicKey),
+		skippedMessageKeys: Array.from(state.skippedMessageKeys.entries()).map(([i, k]) => [i, bytesToBase64(k)]),
+	};
+	await putRecord(GROUP_RECEIVER_STORE, receiverKey(username, groupId, sender), encryptBlob(key, stored));
+}
+
+export async function loadReceiverSenderKey(username: string, groupId: string, sender: string): Promise<ReceiverSenderKeyState | null> {
+	const key = requireCachedKey(username);
+	const blob = await getRecord<EncryptedBlob>(GROUP_RECEIVER_STORE, receiverKey(username, groupId, sender));
+	if (!blob) return null;
+	const stored = decryptBlob<StoredReceiverKey>(key, blob);
+	return {
+		chainKey: base64ToBytes(stored.chainKey),
+		iteration: stored.iteration,
+		signPublicKey: base64ToBytes(stored.signPublicKey),
+		skippedMessageKeys: new Map(stored.skippedMessageKeys.map(([i, k]) => [i, base64ToBytes(k)])),
+	};
+}
+
+// Purge a removed member's sender key so their retained chain key can no
+// longer be tracked here (they've been rotated out anyway).
+export async function deleteReceiverSenderKey(username: string, groupId: string, sender: string): Promise<void> {
+	await deleteRecord(GROUP_RECEIVER_STORE, receiverKey(username, groupId, sender));
+}
+
+// Removes ALL local state for a group (metadata, own sender key, every
+// received sender key). Used when we're removed from a group.
+export async function deleteGroup(username: string, groupId: string): Promise<void> {
+	await deleteRecord(GROUP_STORE, groupKey(username, groupId));
+	await deleteRecord(GROUP_SENDER_STORE, groupKey(username, groupId));
+	const prefix = `${username}:${groupId}:`;
+	const keys = await listKeys(GROUP_RECEIVER_STORE);
+	await Promise.all(keys.filter((k) => k.startsWith(prefix)).map((k) => deleteRecord(GROUP_RECEIVER_STORE, k)));
+}
+
+// Deletes every local key-store record for a user: the identity document
+// (identity keys, signed prekey, remaining one-time prekey secrets,
+// contacts), every ratchet session, message history, processed-id markers,
+// cached media, and group state. Used by account deletion and panic wipe.
+export async function wipeAll(username: string): Promise<void> {
+	await deleteRecord(IDENTITY_STORE, username);
+	const prefix = `${username}:`;
+	for (const store of [
+		SESSION_STORE,
+		MESSAGE_STORE,
+		PROCESSED_STORE,
+		MEDIA_CACHE_STORE,
+		GROUP_STORE,
+		GROUP_SENDER_STORE,
+		GROUP_RECEIVER_STORE,
+		SUMMARY_STORE,
+	]) {
+		const keys = await listKeys(store);
+		await Promise.all(keys.filter((k) => k.startsWith(prefix)).map((k) => deleteRecord(store, k)));
+	}
+	lock(username);
+}

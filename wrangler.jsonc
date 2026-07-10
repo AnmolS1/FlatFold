@@ -1,0 +1,98 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "flatfold",
+	"main": "./worker/index.ts",
+	"compatibility_date": "2026-07-04",
+	"compatibility_flags": ["nodejs_compat"],
+
+	// Production hostname on the already-Cloudflare-hosted ponderance.dev zone.
+	// A custom_domain route provisions the DNS record + cert automatically.
+	// `workers_dev: false` means the app is reachable ONLY at this hostname —
+	// no *.workers.dev URL. Does NOT touch the separate `ponderance-dev`
+	// worker or the apex zone.
+	"routes": [{ "pattern": "flatfold.ponderance.dev", "custom_domain": true }],
+	"workers_dev": false,
+
+	"assets": {
+		// react-router `BrowserRouter` deep links (e.g. /chat on a hard
+		// refresh) must fall back to index.html instead of 404ing.
+		"not_found_handling": "single-page-application",
+		// API + WebSocket routes must always hit the Worker, never the
+		// SPA-fallback heuristic (which keys off Sec-Fetch-Mode: navigate).
+		"run_worker_first": ["/api/*", "/ws"]
+	},
+
+	"durable_objects": {
+		"bindings": [{ "name": "MAILBOX", "class_name": "Mailbox" }]
+	},
+	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["Mailbox"] }],
+
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "flatfold",
+			"database_id": "93b02632-c296-4da1-9d4a-d82e656f3027",
+			"migrations_dir": "migrations"
+		}
+	],
+
+	// Encrypted attachment blobs (M4). Ciphertext + random id only — the
+	// server never sees a decryption key.
+	"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "flatfold-media" }],
+
+	// SESSION_SECRET, VAPID_PRIVATE_JWK, SEAL_GATEWAY_PRIVATE_KEY and
+	// SEAL_RELAY_AUTH are SECRETS — set in production via `wrangler secret put ...`
+	// and locally via `.dev.vars` (gitignored). They are deliberately NOT in
+	// `vars` so they never enter git. The VAPID public key and subject are
+	// non-secret. SEAL_RELAY_AUTH is the shared secret the OHTTP relay injects as
+	// `X-Seal-Relay-Auth`; the gateway (worker/seal.ts) enforces it on POST
+	// /api/seal only when the secret is configured (unset ⇒ open, for local dev).
+	"vars": {
+		"VAPID_PUBLIC_KEY": "BLDjiJLQCbJUfqW-8pFSF-F_KVdX05Zyibj9k2fxKDZr7aFcv8NgYBO3g6-vjdTZGOojRGDStw8NtwQE6-S-VLU",
+		"VAPID_SUBJECT": "mailto:security@flatfold.ponderance.dev",
+		// Sealed-sender OHTTP gateway public key (non-secret; published via
+		// /api/seal/keys). Private key is SEAL_GATEWAY_PRIVATE_KEY (secret).
+		"SEAL_GATEWAY_PUBLIC_KEY": "BPMXXE6m+F7Py+eE4/KpegnOECQVwuu6JWW1TqZQZJPIW8G0w5Ovh/ap14iVcP9x1RuFuLUAH1MxO51FFqsyykU="
+	},
+
+	// PREVIEW environment for the Tier-1 relay validation (docs/RELAY_ONBOARDING.md).
+	// A SEPARATE worker (flatfold-preview.<subdomain>.workers.dev) with its OWN D1
+	// (never touches prod user data) and its own Mailbox DO namespace.
+	// DEPLOY: `CLOUDFLARE_ENV=preview npm run build && npx wrangler deploy` — the
+	// @cloudflare/vite-plugin selects the env at BUILD time; `wrangler deploy --env
+	// preview` is IGNORED (it deployed prod once — verify dist/flatfold/wrangler.json
+	// name before deploying). Named envs don't inherit bindings, so config is
+	// redeclared. Reuses the prod R2 (ciphertext blobs, random ids). Same gateway keypair.
+	"env": {
+		"preview": {
+			"name": "flatfold-preview",
+			"workers_dev": true,
+			// MUST be explicitly empty: a named env otherwise INHERITS the top-level
+			// `routes` (flatfold.ponderance.dev custom_domain) and a preview deploy
+			// HIJACKS the prod domain (it did — recovered by redeploying prod).
+			"routes": [],
+			"assets": {
+				"not_found_handling": "single-page-application",
+				"run_worker_first": ["/api/*", "/ws"]
+			},
+			"durable_objects": {
+				"bindings": [{ "name": "MAILBOX", "class_name": "Mailbox" }]
+			},
+			"migrations": [{ "tag": "v1", "new_sqlite_classes": ["Mailbox"] }],
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "flatfold-preview",
+					"database_id": "6b0bdeb9-a081-4bec-a26d-ad39d834e35d",
+					"migrations_dir": "migrations"
+				}
+			],
+			"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "flatfold-media" }],
+			"vars": {
+				"VAPID_PUBLIC_KEY": "BLDjiJLQCbJUfqW-8pFSF-F_KVdX05Zyibj9k2fxKDZr7aFcv8NgYBO3g6-vjdTZGOojRGDStw8NtwQE6-S-VLU",
+				"VAPID_SUBJECT": "mailto:security@flatfold.ponderance.dev",
+				"SEAL_GATEWAY_PUBLIC_KEY": "BPMXXE6m+F7Py+eE4/KpegnOECQVwuu6JWW1TqZQZJPIW8G0w5Ovh/ap14iVcP9x1RuFuLUAH1MxO51FFqsyykU="
+			}
+		}
+	}
+}

@@ -1,0 +1,19 @@
+<svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Self-contained favicon: no CSS vars (favicons can't read page vars),
+       switches palette with the OS theme via prefers-color-scheme. -->
+  <style>
+    .paper { fill: #FFFFFF; }
+    .edge  { stroke: #2E5E8C; }
+    .crease { stroke: rgba(46,94,140,0.30); }
+    @media (prefers-color-scheme: dark) {
+      .paper { fill: #1E2C38; }
+      .edge  { stroke: #82A9CE; }
+      .crease { stroke: rgba(130,169,206,0.38); }
+    }
+  </style>
+  <path class="paper" d="M8 8H32L56 32V56H8Z"/>
+  <path class="crease" d="M8 8L56 56" stroke-width="2"/>
+  <path class="crease" d="M8 56L44 20" stroke-width="2"/>
+  <path d="M32 8L56 32L32 32Z" fill="#E84A27" stroke="#C23A1C" stroke-width="1" stroke-linejoin="round"/>
+  <path class="edge" d="M8 8H32L56 32V56H8Z" stroke-width="3" stroke-linejoin="round"/>
+</svg>

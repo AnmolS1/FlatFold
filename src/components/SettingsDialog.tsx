@@ -1,0 +1,288 @@
+import { useCallback, useEffect, useState } from 'react';
+import { X, Monitor, Bell, BellOff, LogOut, Trash2, AlertTriangle } from 'lucide-react';
+import { apiDeleteAccount, apiLogoutAll, apiMe } from '../lib/api';
+import { panicWipe } from '../lib/panicWipe';
+import {
+	DEFAULT_DECOY_LABEL,
+	getDecoyLabel,
+	isPushSupported,
+	isSubscribedToPush,
+	setDecoyLabel,
+	subscribeToPush,
+	unsubscribeFromPush,
+} from '../lib/push';
+
+interface SettingsDialogProps {
+	username: string;
+	onClose: () => void;
+	onSignOut: () => void;
+}
+
+export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogProps) => {
+	const [sessionStart, setSessionStart] = useState<number | null>(null);
+	const [pushSupported] = useState(() => isPushSupported());
+	const [subscribed, setSubscribed] = useState(false);
+	const [busy, setBusy] = useState(false);
+	const [decoy, setDecoy] = useState(() => getDecoyLabel());
+	const [pushMessage, setPushMessage] = useState<string | null>(null);
+
+	useEffect(() => {
+		apiMe().then((me) => setSessionStart(me?.sessionCreatedAt ?? null));
+		if (pushSupported) isSubscribedToPush().then(setSubscribed);
+	}, [pushSupported]);
+
+	const toggleNotifications = useCallback(async () => {
+		setBusy(true);
+		setPushMessage(null);
+		try {
+			if (subscribed) {
+				await unsubscribeFromPush();
+				setSubscribed(false);
+			} else {
+				const result = await subscribeToPush();
+				if (result === 'subscribed') {
+					setSubscribed(true);
+					await setDecoyLabel(decoy);
+				} else if (result === 'denied') {
+					setPushMessage('Notification permission was denied.');
+				} else {
+					setPushMessage('Could not enable notifications.');
+				}
+			}
+		} finally {
+			setBusy(false);
+		}
+	}, [subscribed, decoy]);
+
+	const saveDecoy = useCallback(async () => {
+		await setDecoyLabel(decoy || DEFAULT_DECOY_LABEL);
+	}, [decoy]);
+
+	const [deleteArmed, setDeleteArmed] = useState(false);
+	const [deletePassword, setDeletePassword] = useState('');
+	const [deleting, setDeleting] = useState(false);
+	const [deleteError, setDeleteError] = useState<string | null>(null);
+
+	// "Sign out everywhere" (L3) — password-gated, mirrors the delete flow.
+	const [signOutAllArmed, setSignOutAllArmed] = useState(false);
+	const [signOutAllPassword, setSignOutAllPassword] = useState('');
+	const [signOutAllBusy, setSignOutAllBusy] = useState(false);
+	const [signOutAllError, setSignOutAllError] = useState<string | null>(null);
+
+	const signOutEverywhere = useCallback(async () => {
+		setSignOutAllBusy(true);
+		setSignOutAllError(null);
+		try {
+			await apiLogoutAll(signOutAllPassword);
+			// Server bumped the epoch (all sessions incl. this one are now invalid)
+			// and cleared this cookie. Leave the local keystore intact and go to
+			// login — this ends logins, not the account.
+			window.location.href = '/login';
+		} catch (err) {
+			setSignOutAllError(err instanceof Error ? err.message : 'Could not sign out everywhere.');
+			setSignOutAllBusy(false);
+		}
+	}, [signOutAllPassword]);
+
+	const deleteAccount = useCallback(async () => {
+		setDeleting(true);
+		setDeleteError(null);
+		try {
+			// Server deletes the D1 rows + queued ciphertext (after password
+			// re-auth); then wipe ALL local state and hard-redirect.
+			await apiDeleteAccount(deletePassword);
+			await panicWipe(async () => {});
+			window.location.href = '/login';
+		} catch (err) {
+			setDeleteError(err instanceof Error ? err.message : 'Could not delete account.');
+			setDeleting(false);
+		}
+	}, [deletePassword]);
+
+	return (
+		<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+			<div className="bg-graph-card border border-crease-line rounded-2xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+				<div className="flex items-center justify-between mb-5">
+					<h2 className="font-display text-lg font-bold text-graphite">Settings</h2>
+					<button onClick={onClose} aria-label="Close" className="text-graphite-40 hover:text-graphite">
+						<X className="w-5 h-5" />
+					</button>
+				</div>
+
+				{/* Session manager */}
+				<section className="mb-6">
+					<h3 className="text-sm font-semibold text-graphite mb-2 flex items-center gap-2">
+						<Monitor className="w-4 h-4" /> Sessions
+					</h3>
+					<div className="border border-crease-line rounded-lg p-3 flex items-center justify-between">
+						<div>
+							<p className="text-sm font-mono text-graphite">This device</p>
+							<p className="text-xs text-graphite-40">
+								{sessionStart ? `Signed in ${new Date(sessionStart * 1000).toLocaleString()}` : 'Current session'}
+							</p>
+						</div>
+						<button
+							onClick={onSignOut}
+							className="text-xs flex items-center gap-1 px-2 py-1 border border-crane/40 text-crane hover:border-crane rounded transition-colors"
+						>
+							<LogOut className="w-3.5 h-3.5" /> Sign out
+						</button>
+					</div>
+					{/* Sign out everywhere (L3) */}
+					<div className="mt-3">
+						{!signOutAllArmed ? (
+							<button
+								onClick={() => setSignOutAllArmed(true)}
+								className="text-xs flex items-center gap-1 px-2 py-1 border border-crane/40 text-crane hover:border-crane rounded transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-crane"
+							>
+								<LogOut className="w-3.5 h-3.5" /> Sign out everywhere
+							</button>
+						) : (
+							<div className="space-y-2 border border-crane/40 rounded-lg p-3">
+								<p className="text-sm font-semibold text-graphite">Sign out everywhere?</p>
+								<p className="text-xs text-graphite-40">
+									This signs you out on every device, including this one. You&rsquo;ll need to log back in. It
+									doesn&rsquo;t touch your messages or your account, only your logins.
+								</p>
+								<input
+									type="password"
+									value={signOutAllPassword}
+									onChange={(e) => setSignOutAllPassword(e.target.value)}
+									placeholder="Password"
+									aria-label="Password"
+									className="w-full rounded-lg border border-crane/40 bg-inset text-graphite placeholder-graphite-40 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-crane"
+								/>
+								<p className="text-xs text-graphite-40">Enter your password to confirm it&rsquo;s you.</p>
+								{signOutAllError && <p className="text-xs text-crane">{signOutAllError}</p>}
+								<div className="flex gap-2">
+									<button
+										onClick={() => void signOutEverywhere()}
+										disabled={signOutAllBusy || !signOutAllPassword}
+										className="flex-1 bg-crane text-white rounded-lg py-1.5 text-sm hover:bg-crane-dark disabled:opacity-50 transition-colors"
+									>
+										{signOutAllBusy ? 'Signing out…' : 'Sign out everywhere'}
+									</button>
+									<button
+										onClick={() => {
+											setSignOutAllArmed(false);
+											setSignOutAllPassword('');
+											setSignOutAllError(null);
+										}}
+										className="px-3 py-1.5 border border-crease-line-bold text-graphite rounded-lg text-sm hover:border-crease transition-colors"
+									>
+										Cancel
+									</button>
+								</div>
+							</div>
+						)}
+					</div>
+					<p className="text-xs text-graphite-40 mt-2">
+						&ldquo;Sign out&rdquo; ends this device&rsquo;s session. &ldquo;Sign out everywhere&rdquo; ends every
+						session at once, the blunt fix if you lost a device or think someone else got in. There&rsquo;s no
+						device list to show you, and that&rsquo;s on purpose. The server doesn&rsquo;t track your devices.
+					</p>
+				</section>
+
+				{/* Notifications + decoy label */}
+				<section>
+					<h3 className="text-sm font-semibold text-graphite mb-2 flex items-center gap-2">
+						{subscribed ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />} Notifications
+					</h3>
+					{!pushSupported ? (
+						<p className="text-sm text-graphite-40">Push notifications aren&rsquo;t supported in this browser.</p>
+					) : (
+						<>
+							<button
+								onClick={() => void toggleNotifications()}
+								disabled={busy}
+								className="w-full text-left border border-crease-line rounded-lg p-3 hover:bg-inset transition-colors disabled:opacity-50 flex items-center justify-between"
+							>
+								<div>
+									<p className="text-sm text-graphite">{subscribed ? 'Notifications on' : 'Enable notifications'}</p>
+									<p className="text-xs text-graphite-40">
+										Wake-ups only — the push carries no message text or sender, ever.
+									</p>
+								</div>
+								<span className={`text-xs font-mono px-2 py-1 rounded ${subscribed ? 'bg-sax/20 text-sax' : 'bg-inset text-graphite-40'}`}>
+									{subscribed ? 'ON' : 'OFF'}
+								</span>
+							</button>
+							{pushMessage && <p className="text-xs text-crane mt-2">{pushMessage}</p>}
+
+							<div className="mt-4">
+								<label className="text-xs text-graphite-60 block mb-1">
+									Decoy notification label (shoulder-surfing protection)
+								</label>
+								<div className="flex gap-2">
+									<input
+										value={decoy}
+										onChange={(e) => setDecoy(e.target.value)}
+										onBlur={() => void saveDecoy()}
+										placeholder={DEFAULT_DECOY_LABEL}
+										className="flex-1 rounded-lg border border-crease-line-bold bg-inset text-graphite placeholder-graphite-40 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-crease"
+									/>
+									<button onClick={() => void saveDecoy()} className="px-3 py-1.5 bg-crease text-white rounded-lg text-sm hover:opacity-90 transition-opacity">
+										Save
+									</button>
+								</div>
+								<p className="text-xs text-graphite-40 mt-1">
+									Notifications show this label (e.g. &ldquo;Calendar&rdquo;, &ldquo;News update&rdquo;) instead of
+									anything identifying FlatFold. Current user: {username}.
+								</p>
+							</div>
+						</>
+					)}
+				</section>
+
+				{/* Danger zone — account deletion */}
+				<section className="mt-6 border border-crane/40 rounded-lg p-4">
+					<h3 className="text-sm font-semibold text-crane mb-2 flex items-center gap-2">
+						<AlertTriangle className="w-4 h-4" /> Delete account
+					</h3>
+					<p className="text-xs text-graphite-40 mb-3">
+						Permanently deletes your account and everything the server holds — your row, published keys, and any
+						queued ciphertext — and wipes this device. This cannot be undone.
+					</p>
+					{!deleteArmed ? (
+						<button
+							onClick={() => setDeleteArmed(true)}
+							className="text-xs flex items-center gap-1 px-3 py-1.5 border border-crane/40 text-crane hover:border-crane rounded transition-colors"
+						>
+							<Trash2 className="w-3.5 h-3.5" /> Delete my account
+						</button>
+					) : (
+						<div className="space-y-2">
+							<input
+								type="password"
+								value={deletePassword}
+								onChange={(e) => setDeletePassword(e.target.value)}
+								placeholder="Confirm your password"
+								className="w-full rounded-lg border border-crane/40 bg-inset text-graphite placeholder-graphite-40 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-crane"
+							/>
+							{deleteError && <p className="text-xs text-crane">{deleteError}</p>}
+							<div className="flex gap-2">
+								<button
+									onClick={() => void deleteAccount()}
+									disabled={deleting || !deletePassword}
+									className="flex-1 bg-crane text-white rounded-lg py-1.5 text-sm hover:bg-crane-dark disabled:opacity-50 transition-colors"
+								>
+									{deleting ? 'Deleting…' : 'Permanently delete'}
+								</button>
+								<button
+									onClick={() => {
+										setDeleteArmed(false);
+										setDeletePassword('');
+										setDeleteError(null);
+									}}
+									className="px-3 py-1.5 border border-crease-line-bold text-graphite rounded-lg text-sm hover:border-crease transition-colors"
+								>
+									Cancel
+								</button>
+							</div>
+						</div>
+					)}
+				</section>
+			</div>
+		</div>
+	);
+};

@@ -1,0 +1,21 @@
+<svg viewBox="0 0 280 200" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="An unfolded crease pattern">
+  <!-- Empty-state art: a flat-foldable crease pattern, unfolded — nothing here yet.
+       Mountain folds solid, valley folds dashed, per CP convention. Theme-aware. -->
+  <defs>
+    <pattern id="ff-grid" width="20" height="20" patternUnits="userSpaceOnUse">
+      <path d="M20 0H0V20" stroke="var(--color-grid-line, rgba(46,94,140,0.07))" stroke-width="1" fill="none"/>
+    </pattern>
+  </defs>
+  <rect width="280" height="200" fill="url(#ff-grid)"/>
+  <!-- the sheet -->
+  <rect x="80" y="40" width="120" height="120" fill="var(--color-inset, #FFFFFF)"
+        stroke="var(--color-crease, #2E5E8C)" stroke-width="2"/>
+  <!-- mountain folds: diagonals -->
+  <path d="M80 40L200 160M200 40L80 160" stroke="var(--color-crease-line-bold, rgba(46,94,140,0.28))" stroke-width="1.5"/>
+  <!-- valley folds: medians, dashed -->
+  <path d="M140 40V160M80 100H200" stroke="var(--color-crease-line-bold, rgba(46,94,140,0.28))" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <!-- centre vertex: where it all folds flat -->
+  <circle cx="140" cy="100" r="4" fill="var(--color-crane, #E84A27)"/>
+  <!-- corner annotation ticks, engineering-drawing style -->
+  <path d="M72 40H64M80 32V24M208 160H216M200 168V176" stroke="var(--color-graphite-40, rgba(27,42,51,0.4))" stroke-width="1"/>
+</svg>

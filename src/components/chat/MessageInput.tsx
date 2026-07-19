@@ -28,8 +28,14 @@ const MessageInputComponent = ({
 	const [error, setError] = useState<string | null>(null);
 	const [recording, setRecording] = useState(false);
 	const fileInputRef = useRef<HTMLInputElement>(null);
+	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const recorderRef = useRef<MediaRecorder | null>(null);
 	const recordStartRef = useRef<number>(0);
+	// Double-submit guard. A ref, not the `sending` state: two synchronous
+	// submits (Enter held down, a double-tap on Send) both read the same stale
+	// `sending === false` from this closure before React re-renders, so a state
+	// check would let both through. A ref mutates immediately.
+	const sendingRef = useRef(false);
 
 	const handleChange = useCallback((e: ChangeEvent<HTMLTextAreaElement>) => {
 		setMessage(e.target.value);
@@ -105,20 +111,29 @@ const MessageInputComponent = ({
 			setError(null);
 
 			const trimmedMessage = message.trim();
-			if (!trimmedMessage) {
+			if (!trimmedMessage || sendingRef.current) {
 				return;
 			}
 
 			haptic(); // a brief tick as the message folds away
+			sendingRef.current = true;
 			setSending(true);
 
 			try {
 				await onSendMessage(trimmedMessage);
 				setMessage('');
+				// Put the caret straight back in the composer so you can keep
+				// typing. Synchronous, inside the submit handler's user-gesture
+				// context — that's what lets mobile Safari/Chrome reopen the
+				// keyboard. Usually a no-op (the field is never disabled now), but
+				// it matters when the user tapped Send, which moves focus to the
+				// button.
+				textareaRef.current?.focus();
 			} catch (err) {
 				const errorMessage = err instanceof Error ? err.message : 'Failed to send message';
 				setError(errorMessage);
 			} finally {
+				sendingRef.current = false;
 				setSending(false);
 			}
 		},
@@ -197,11 +212,17 @@ const MessageInputComponent = ({
 						<Plus className="w-5 h-5" />
 					</button>
 					<textarea
+						ref={textareaRef}
 						value={message}
 						onChange={handleChange}
 						onKeyDown={handleKeyDown}
 						placeholder={recording ? 'Recording…' : 'Message'}
-						disabled={disabled || sending || recording}
+						// Deliberately NOT disabled on `sending`: disabling blurs the
+						// field mid-send, which drops the mobile keyboard and forces a
+						// tap back into the box for every message. Sends are optimistic
+						// and near-instant, so there's nothing to lock — the
+						// double-submit guard in handleSubmit covers the race instead.
+						disabled={disabled || recording}
 						rows={1}
 						className="flex-1 resize-none rounded-3xl border border-crease-line-bold bg-inset text-graphite placeholder-graphite-40 px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-crease focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px] max-h-[120px]"
 					/>
@@ -209,6 +230,13 @@ const MessageInputComponent = ({
 						<button
 							type="submit"
 							disabled={isDisabled}
+							// Keep the tap from moving focus off the textarea at all.
+							// The refocus in handleSubmit runs after `await
+							// onSendMessage(...)`, which is outside the user-gesture
+							// context — enough to restore the caret on desktop, but iOS
+							// will not reopen the keyboard from there. Never losing
+							// focus is what actually keeps the mobile keyboard up.
+							onPointerDown={(e) => e.preventDefault()}
 							aria-label="Send message"
 							className="h-11 w-11 flex-shrink-0 flex items-center justify-center rounded-full bg-crane text-white hover:bg-crane-dark focus:outline-none focus:ring-2 focus:ring-crane focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
 						>

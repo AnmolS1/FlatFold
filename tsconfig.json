@@ -12,6 +12,9 @@
 		},
 		{
 			"path": "./test/tsconfig.json"
+		},
+		{
+			"path": "./test-ui/tsconfig.json"
 		}
 	]
 }

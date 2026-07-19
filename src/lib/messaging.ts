@@ -27,6 +27,7 @@ import { apiFetchBundle } from './api';
 import { apiFetchBundleAnonymous } from './sealedFetch';
 import { decodeChatPayload, encodeChatPayload, type ChatPayload } from './chatPayload';
 import { canDelete } from './deleteAuth';
+import { displayTsFor } from './messageOrder';
 import { generateSealToken } from './sealToken';
 import { NO_SEAL_TOKEN, unwrapSealed, wrapSealed } from './sealedWrap';
 import type {
@@ -616,8 +617,10 @@ export async function decryptIncoming(username: string, frame: WsMessageFrame): 
 			id: frame.id,
 			from: contactUsername,
 			text: payload.t === 'media' ? (payload.caption ?? '') : payload.text,
-			ts: frame.ts,
+			ts: displayTsFor(payload.sentAt, frame.ts),
 			direction: 'received',
+			// Expiry stays on the envelope `ts` on purpose: it's intentionally
+			// approximate and must not depend on the sender's clock.
 			...(expiresInSeconds ? { expiresAt: frame.ts + expiresInSeconds * 1000 } : {}),
 			...(payload.t === 'media' ? { media: payload.media } : {}),
 			// Carry the reply quote through from the encrypted payload (display-only).
@@ -811,11 +814,13 @@ export async function decryptGroupMessage(username: string, frame: WsGroupMessag
 		await keystore.saveReceiverSenderKey(username, frame.groupId, frame.from, receiver);
 
 		const payload = decodeChatPayload(plaintext);
+		// `payload` isn't narrowed here, so guard the variants that carry `sentAt`.
+		const sentAt = payload.t === 'text' || payload.t === 'media' ? payload.sentAt : undefined;
 		const displayMessage: DisplayMessage = {
 			id: frame.id,
 			from: frame.from,
 			text: payload.t === 'media' ? (payload.caption ?? '') : payload.t === 'text' ? payload.text : '',
-			ts: frame.ts,
+			ts: displayTsFor(sentAt, frame.ts),
 			direction: 'received',
 			...(payload.t === 'media' ? { media: payload.media } : {}),
 			...((payload.t === 'text' || payload.t === 'media') && payload.replyTo ? { replyTo: payload.replyTo } : {}),

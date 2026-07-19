@@ -30,8 +30,15 @@ export interface GroupInfoWire {
 export type ChatPayload =
 	// `replyTo` (optional) quotes another message — display-only, carried E2EE
 	// like everything else. Present on text and media so you can reply to either.
-	| { t: 'text'; text: string; expiresInSeconds?: number; replyTo?: ReplyRef }
-	| { t: 'media'; media: MediaRef; caption?: string; expiresInSeconds?: number; replyTo?: ReplyRef }
+	// `sentAt` (ms epoch) is the sender's precise send time, carried E2EE so both
+	// endpoints can order by the same clock. It exists because the server
+	// deliberately coarsens the envelope `ts` to the minute (invariant #5), which
+	// would otherwise collapse every received message to `:00.000` and sort it
+	// ahead of same-minute sent messages. Inside the AEAD plaintext the server
+	// still learns nothing finer than the minute. Optional: pre-`sentAt` senders
+	// and any in-flight message fall back to the envelope `ts`.
+	| { t: 'text'; text: string; sentAt?: number; expiresInSeconds?: number; replyTo?: ReplyRef }
+	| { t: 'media'; media: MediaRef; caption?: string; sentAt?: number; expiresInSeconds?: number; replyTo?: ReplyRef }
 	// A disappearing-messages timer change, negotiated in-channel so both
 	// sides' headers stay in sync. 0 = off. Applies going forward only — it
 	// never retroactively re-stamps existing messages (Signal's model).

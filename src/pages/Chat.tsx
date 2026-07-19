@@ -34,6 +34,7 @@ import { requestPanicWipe } from '../lib/panicWipe';
 import { encryptAndUploadMedia, type MediaUploadInput } from '../lib/media';
 import { summaryFromMessage, summariesEqual } from '../lib/conversationSummary';
 import { replyRefFrom } from '../lib/reply';
+import { orderedVisibleMessages } from '../lib/messageOrder';
 import { haptic } from '../lib/haptics';
 import { useVisualViewportHeight } from '../hooks/useVisualViewport';
 import { ContactList } from '../components/chat/ContactList';
@@ -993,7 +994,7 @@ export const Chat = () => {
 			if (activeGroup) {
 				await sendGroupPayload(
 					activeGroup,
-					{ t: 'text', text, ...replyField },
+					{ t: 'text', text, sentAt: now, ...replyField },
 					{ id, from: username, text, ts: now, direction: 'sent', status: 'sent', ...replyField }
 				);
 				return;
@@ -1002,7 +1003,7 @@ export const Chat = () => {
 			if (!activeContact) throw new Error('No active conversation.');
 			const contact = activeContact;
 			const seconds = contactsRef.current.find((c) => c.username === contact)?.disappearingSeconds ?? 0;
-			const payload: ChatPayload = { t: 'text', text, ...(seconds ? { expiresInSeconds: seconds } : {}), ...replyField };
+			const payload: ChatPayload = { t: 'text', text, sentAt: now, ...(seconds ? { expiresInSeconds: seconds } : {}), ...replyField };
 			const localMessage: DisplayMessage = {
 				id,
 				from: username,
@@ -1042,7 +1043,7 @@ export const Chat = () => {
 			const replyField = reply ? { replyTo: reply } : {};
 			setReplyingTo(null);
 
-			const payload: ChatPayload = { t: 'media', media, ...(seconds ? { expiresInSeconds: seconds } : {}), ...replyField };
+			const payload: ChatPayload = { t: 'media', media, sentAt: now, ...(seconds ? { expiresInSeconds: seconds } : {}), ...replyField };
 			const localMessage: DisplayMessage = {
 				id,
 				from: username,
@@ -1089,12 +1090,11 @@ export const Chat = () => {
 
 	// The active conversation key: a group's namespaced key, or a contact
 	// username. Sorted by ts (belt-and-suspenders alongside the server-side
-	// flush-order fix) and filtered for disappearing expiry.
+	// flush-order fix) and filtered for disappearing expiry. See messageOrder.ts
+	// for why `ts` is the sender's clock, not the envelope's.
 	const activeConversationKey = activeGroup ? groupConversationKey(activeGroup.id) : activeContact;
 	const activeMessages = activeConversationKey
-		? [...(messagesByContact[activeConversationKey] ?? [])]
-				.filter((m) => m.expiresAt === undefined || m.expiresAt > nowTick)
-				.sort((a, b) => a.ts - b.ts)
+		? orderedVisibleMessages(messagesByContact[activeConversationKey] ?? [], nowTick)
 		: [];
 	const activeContactRecord = activeContact ? contacts.find((c) => c.username === activeContact) : undefined;
 

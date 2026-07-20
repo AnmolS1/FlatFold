@@ -18,6 +18,7 @@ import {
 	encryptForSend,
 	ensureOwnSealToken,
 	ensureOwnSenderKey,
+	ensureContact,
 	ensureSession,
 	groupConversationKey,
 	groupEncryptForSend,
@@ -329,6 +330,17 @@ export const Chat = () => {
 			if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error('Not connected. Please wait and try again.');
 			const currentUsername = usernameRef.current;
 			if (!currentUsername) throw new Error('Not signed in.');
+
+			// Establish the session lazily, on the first send rather than at
+			// contact-add time — see docs/SESSION_COLLISION_OPTIONS.md. Every 1:1
+			// send funnels through here, so this is the single place the ratchet
+			// comes into existence. A no-op once a session exists, so the callers
+			// that already ensureSession before calling us (group sender-key and
+			// delivery-token distribution) just short-circuit.
+			const established = await ensureSession(currentUsername, contact);
+			if (established.status === 'not-found') throw new Error('No such user.');
+			if (established.status === 'not-published') throw new Error("That user hasn't set up encryption yet.");
+			if (established.pendingHandshake) pendingHandshakes.current.set(contact, established.pendingHandshake);
 
 			const pendingHandshake = pendingHandshakes.current.get(contact) ?? null;
 			const id = localMessage?.id ?? crypto.randomUUID();
@@ -897,9 +909,13 @@ export const Chat = () => {
 				return;
 			}
 
-			// On the shared chain: ensureSession writes the session + identity
-			// doc, which an inbound frame could otherwise clobber.
-			const result = await enqueueSessionOp(() => ensureSession(username, contactUsername));
+			// Validates the user and stores their identity, but deliberately does
+			// NOT establish a session — that happens on the first send. Building an
+			// initiator ratchet here is what let two people who add each other
+			// before either sends end up with colliding sessions (see
+			// docs/SESSION_COLLISION_OPTIONS.md). On the shared chain: it writes the
+			// identity doc, which an inbound frame could otherwise clobber.
+			const result = await enqueueSessionOp(() => ensureContact(username, contactUsername));
 			if (result.status === 'not-found') {
 				showToast('No such user.', 'error');
 				return;
@@ -909,7 +925,6 @@ export const Chat = () => {
 				return;
 			}
 
-			if (result.pendingHandshake) pendingHandshakes.current.set(contactUsername, result.pendingHandshake);
 			await refreshContacts();
 			await handleSelectContact(contactUsername);
 		},

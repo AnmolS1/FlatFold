@@ -36,7 +36,10 @@ export default defineConfig({
 				plugins: [react()],
 				test: {
 					name: 'ui',
-					include: ['test-ui/**/*.test.tsx'],
+					// .tsx for components, .ts for anything else needing browser APIs
+					// the workers pool doesn't have — notably IndexedDB, which the
+					// keystore is built on (backed by fake-indexeddb in setup).
+					include: ['test-ui/**/*.test.{ts,tsx}'],
 					environment: 'jsdom',
 					setupFiles: ['./test-ui/setup.ts'],
 				},

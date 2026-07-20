@@ -69,38 +69,76 @@ export type EnsureSessionResult =
 	| { status: 'not-found' }
 	| { status: 'not-published' };
 
+export type EnsureContactResult = { status: 'ok' } | { status: 'not-found' } | { status: 'not-published' };
+
+type BundleLookup = { status: 'ok'; bundle: PreKeyBundleResponse } | { status: 'not-found' } | { status: 'not-published' };
+
+// Fetch the peer's bundle ANONYMOUSLY (increment 7) so the server never learns
+// who we're about to contact — the send-side half of first-contact sealing.
+// Fall back to the authenticated fetch ONLY on a transport/decrypt error
+// (degraded privacy, documented, not silently preferred); a clean 'not-found'
+// (unknown OR unpublished, indistinguishable by design) is returned as-is. The
+// anon path returns no one-time prekey → first-contact X3DH is no-OPK.
+async function lookupBundle(contactUsername: string): Promise<BundleLookup> {
+	const anon = await apiFetchBundleAnonymous(contactUsername);
+	if (anon.status === 'ok') return { status: 'ok', bundle: anon.bundle };
+	if (anon.status === 'not-found') return { status: 'not-found' };
+
+	const authed = await apiFetchBundle(contactUsername);
+	if (authed.status !== 'ok') return authed;
+	return { status: 'ok', bundle: authed.bundle };
+}
+
+function identityFromBundle(bundle: PreKeyBundleResponse): IdentityPublicKeys {
+	return {
+		signingPublicKey: base64ToBytes(bundle.identityPubkey.signingPublicKey),
+		dhPublicKey: base64ToBytes(bundle.identityPubkey.dhPublicKey),
+	};
+}
+
+async function rememberContact(username: string, contactUsername: string, bundle: PreKeyBundleResponse): Promise<void> {
+	await keystore.addContact(username, contactUsername, identityFromBundle(bundle));
+	// Close the sealed-sender token seam: a first-contact bundle now carries the
+	// peer's delivery token, so store it (MUST come after addContact — the store
+	// is a no-op for an unknown contact) for a future sealed send to present.
+	if (bundle.sealToken) await keystore.savePeerSealToken(username, contactUsername, bundle.sealToken);
+}
+
+// Learns a contact — validates they exist and have published keys, and stores
+// their identity — WITHOUT establishing a session.
+//
+// Session creation is deliberately deferred to the first send. Building an
+// initiator ratchet at add time is what caused the mutual-add collision: two
+// people who add each other before either sends both end up holding an
+// initiator session, and the receive path's existing session then shadows the
+// incoming x3dh so respondX3DH never runs (see docs/SESSION_COLLISION_OPTIONS.md).
+// Not building ratchet state you might never use is better hygiene regardless.
+export async function ensureContact(username: string, contactUsername: string): Promise<EnsureContactResult> {
+	const looked = await lookupBundle(contactUsername);
+	if (looked.status !== 'ok') return looked;
+	await rememberContact(username, contactUsername, looked.bundle);
+	return { status: 'ok' };
+}
+
 // Ensures a Double Ratchet session with `contactUsername` exists, running
 // an X3DH handshake if it doesn't. Returns the X3DH material to attach to
 // the first outgoing message (null when a session already existed, since
 // only the first message of a session carries handshake material).
+//
+// Called at SEND time (1:1, group sender-key distribution, delivery-token
+// distribution) — never at contact-add time. Stands alone: a contact that was
+// never explicitly added is learned here.
 export async function ensureSession(username: string, contactUsername: string): Promise<EnsureSessionResult> {
 	if (await keystore.hasSession(username, contactUsername)) {
 		return { status: 'ok', pendingHandshake: null };
 	}
 
-	// Fetch the peer's bundle ANONYMOUSLY (increment 7) so the server never learns
-	// who we're about to contact — the send-side half of first-contact sealing.
-	// Fall back to the authenticated fetch ONLY on a transport/decrypt error
-	// (degraded privacy, documented, not silently preferred); a clean 'not-found'
-	// (unknown OR unpublished, indistinguishable by design) is returned as-is. The
-	// anon path returns no one-time prekey → first-contact X3DH is no-OPK.
-	let bundle: PreKeyBundleResponse;
-	const anon = await apiFetchBundleAnonymous(contactUsername);
-	if (anon.status === 'ok') {
-		bundle = anon.bundle;
-	} else if (anon.status === 'not-found') {
-		return { status: 'not-found' };
-	} else {
-		const authed = await apiFetchBundle(contactUsername);
-		if (authed.status !== 'ok') return authed;
-		bundle = authed.bundle;
-	}
+	const looked = await lookupBundle(contactUsername);
+	if (looked.status !== 'ok') return looked;
+	const bundle = looked.bundle;
 
 	const identity = await keystore.getIdentity(username);
-	const responderIdentity: IdentityPublicKeys = {
-		signingPublicKey: base64ToBytes(bundle.identityPubkey.signingPublicKey),
-		dhPublicKey: base64ToBytes(bundle.identityPubkey.dhPublicKey),
-	};
+	const responderIdentity = identityFromBundle(bundle);
 	const responderSignedPreKey = {
 		publicKey: base64ToBytes(bundle.signedPrekey.publicKey),
 		signature: base64ToBytes(bundle.signedPrekey.signature),
@@ -116,11 +154,7 @@ export async function ensureSession(username: string, contactUsername: string): 
 	const ratchet = initRatchetAsInitiator(handshake.sharedSecret, responderSignedPreKey.publicKey);
 
 	await keystore.saveSession(username, contactUsername, ratchet, handshake.associatedData);
-	await keystore.addContact(username, contactUsername, responderIdentity);
-	// Close the sealed-sender token seam: a first-contact bundle now carries the
-	// peer's delivery token, so store it (MUST come after addContact — the store
-	// is a no-op for an unknown contact) for a future sealed send to present.
-	if (bundle.sealToken) await keystore.savePeerSealToken(username, contactUsername, bundle.sealToken);
+	await rememberContact(username, contactUsername, bundle);
 
 	const pendingHandshake: X3dhHandshakeWire = {
 		initiatorIdentityDhPublicKey: bytesToBase64(identity.dh.publicKey),

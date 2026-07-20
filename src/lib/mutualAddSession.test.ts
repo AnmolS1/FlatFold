@@ -87,24 +87,26 @@ describe('mutual-add session collision (first contact)', () => {
 		expect(new TextDecoder().decode(ratchetDecrypt(bobSession.ratchet, sent.encryptedHeader, sent.ciphertext, bobSession.associatedData))).toBe('hello');
 	});
 
-	it('REPRODUCES THE BUG: when both sides added each other, the receiver cannot decrypt', () => {
-		// Both add each other before either sends — the exact reported scenario.
+	it('two competing initiator sessions cannot read each other — the collision itself', () => {
+		// The mechanism the bug rested on, kept as a regression pin. Option A
+		// prevents this state from arising (adding a contact no longer builds a
+		// ratchet); option C makes it survivable if it does. The underlying crypto
+		// fact is unchanged and worth asserting: two independent X3DH runs produce
+		// two different shared secrets, so their header keys never match.
 		const { alice, bob, aliceSpk, bobSpk } = setup();
 		const aliceSession = addContact(alice, bob, bobSpk);
 		const bobSession = addContact(bob, alice, aliceSpk);
 
 		const sent = ratchetEncrypt(aliceSession.ratchet, utf8('hello'), aliceSession.associatedData);
 
-		// This is what messaging.ts does today: an existing session shadows the
-		// incoming x3dh, so it decrypts against Bob's own INITIATOR session.
 		expect(() => ratchetDecrypt(bobSession.ratchet, sent.encryptedHeader, sent.ciphertext, bobSession.associatedData)).toThrow(
 			/no matching header key/
 		);
 	});
 
-	it('is deterministic, not a race — it fails on every attempt', () => {
+	it('the mismatch is deterministic, not a race', () => {
 		// Discriminates a session collision (always) from a write race
-		// (intermittent). Ten independent pairs, ten failures.
+		// (intermittent). Ten independent pairs, ten mismatches.
 		for (let i = 0; i < 10; i++) {
 			const { alice, bob, aliceSpk, bobSpk } = setup();
 			const aliceSession = addContact(alice, bob, bobSpk);

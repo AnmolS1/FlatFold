@@ -35,10 +35,13 @@ worker-configuration.d.ts
 .clinerules
 
 # Internal design/architecture/prompt/ops docs — kept LOCAL, not public.
-# The only public markdown is README.md and docs/THREAT_MODEL.md.
-/*_CHANGELOG.md
-/*_PROMPT.md
+# The only public markdown is README.md, LICENSE, SECURITY.md, and
+# docs/THREAT_MODEL.md — force-included below despite the blanket ignores.
+/*.md
 /docs/*.md
+!/README.md
+!/SECURITY.md
+!/docs/THREAT_MODEL.md
 
 # Playwright MCP screenshots / traces (local verification)
 .playwright-mcp/

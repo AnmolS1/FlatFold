@@ -1,8 +1,29 @@
 {
 	"name": "flatfold",
 	"private": true,
-	"version": "1.0",
+	"version": "1.0.0",
 	"type": "module",
+	"description": "A web-first, end-to-end encrypted messenger whose server stores no messages.",
+	"license": "AGPL-3.0-only",
+	"author": "Anmol Saxena",
+	"homepage": "https://flatfold.ponderance.dev",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/AnmolS1/FlatFold"
+	},
+	"keywords": [
+		"end-to-end-encryption",
+		"e2ee",
+		"messenger",
+		"signal-protocol",
+		"double-ratchet",
+		"sealed-sender",
+		"cloudflare-workers",
+		"privacy"
+	],
+	"engines": {
+		"node": ">=20"
+	},
 	"scripts": {
 		"dev": "vite",
 		"build": "tsc -b && vite build && node scripts/gen-sw-manifest.mjs",

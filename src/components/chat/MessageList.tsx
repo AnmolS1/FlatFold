@@ -13,6 +13,21 @@ interface MessageListProps {
 	onLongPress?: (message: DisplayMessage) => void;
 }
 
+/**
+ * How many messages are rendered before the user asks for more.
+ *
+ * Rendering an entire history is a DOM node per message, which janks and eats
+ * memory on low-end phones — the devices this app most needs to work on. A
+ * window plus a "load earlier" control rather than a virtualization library:
+ * no new runtime dependency (everything shipped to the client is in the trusted
+ * computing base), and it composes with the fold animation, day separators and
+ * scroll-to-bottom instead of fighting them.
+ *
+ * The window is anchored to the END of the list, so newly arrived messages are
+ * always inside it.
+ */
+export const MESSAGE_WINDOW = 150;
+
 // Centered mono day label between date-separated runs of messages.
 function dayLabel(ts: number): string {
 	const d = new Date(ts);
@@ -34,6 +49,8 @@ const MessageListComponent = ({ messages, currentUsername, loading, onReply, onL
 	const scrollContainerRef = useRef<HTMLDivElement>(null);
 	const [userHasScrolled, setUserHasScrolled] = useState(false);
 	const [showScrollButton, setShowScrollButton] = useState(false);
+	// Grows by a window each time the user asks for older messages.
+	const [windowSize, setWindowSize] = useState(MESSAGE_WINDOW);
 
 	// Screen-reader announcement for messages that arrive while the conversation
 	// is open. Seeded with the ids present on mount so existing history is never
@@ -132,6 +149,9 @@ const MessageListComponent = ({ messages, currentUsername, loading, onReply, onL
 		);
 	}
 
+	const visible = messages.length > windowSize ? messages.slice(-windowSize) : messages;
+	const hasEarlier = messages.length > visible.length;
+
 	return (
 		<div className="flex-1 relative">
 			{/* Announces only messages that ARRIVE while the conversation is open,
@@ -143,8 +163,18 @@ const MessageListComponent = ({ messages, currentUsername, loading, onReply, onL
 				{announcement}
 			</p>
 			<div ref={scrollContainerRef} onScroll={handleScroll} className="absolute inset-0 overflow-y-auto overscroll-contain p-4 scroll-smooth">
-				{messages.map((message, i) => {
-					const showDay = i === 0 || !isSameDay(messages[i - 1].ts, message.ts);
+				{hasEarlier && (
+					<div className="flex justify-center pb-3">
+						<button
+							onClick={() => setWindowSize((size) => size + MESSAGE_WINDOW)}
+							className="text-xs font-mono text-graphite-60 border border-crease-line-bold rounded-full px-3 py-1.5 hover:border-crease hover:text-graphite focus:outline-none focus:ring-2 focus:ring-crease"
+						>
+							Load earlier messages
+						</button>
+					</div>
+				)}
+				{visible.map((message, i) => {
+					const showDay = i === 0 || !isSameDay(visible[i - 1].ts, message.ts);
 					return (
 						<div key={message.id}>
 							{showDay && (

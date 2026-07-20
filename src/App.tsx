@@ -1,36 +1,57 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { Login } from './pages/Login';
-import { Chat } from './pages/Chat';
-import { Transparency } from './pages/Transparency';
+
+// Login stays in the entry chunk — it's the first thing an unauthenticated
+// visitor renders. Everything behind it is split off: the chat surface pulls in
+// the ratchet, HPKE, the search index and the QR encoder, none of which a
+// visitor sitting on the login screen needs. Split chunks land in
+// dist/client/assets/, which gen-sw-manifest.mjs pins wholesale, so they keep
+// the same app-shell integrity guarantee as the entry bundle.
+const Chat = lazy(() => import('./pages/Chat').then((m) => ({ default: m.Chat })));
+const Transparency = lazy(() => import('./pages/Transparency').then((m) => ({ default: m.Transparency })));
 
 function App() {
 	return (
-		<ThemeProvider>
-			<ToastProvider>
-				<BrowserRouter>
-					<AuthProvider>
-						<Routes>
-							<Route path="/login" element={<Login />} />
-							<Route path="/transparency" element={<Transparency />} />
-							<Route
-								path="/chat"
-								element={
-									<ProtectedRoute>
-										<Chat />
-									</ProtectedRoute>
-								}
-							/>
-							<Route path="/" element={<Navigate to="/chat" replace />} />
-							<Route path="*" element={<Navigate to="/chat" replace />} />
-						</Routes>
-					</AuthProvider>
-				</BrowserRouter>
-			</ToastProvider>
-		</ThemeProvider>
+		// Outermost, so a throw in a provider or the router still shows something
+		// recoverable rather than a blank document.
+		<ErrorBoundary>
+			<ThemeProvider>
+				<ToastProvider>
+					<BrowserRouter>
+						<AuthProvider>
+							<Suspense fallback={<div className="min-h-dvh bg-graph" aria-busy="true" aria-label="Loading" />}>
+								<Routes>
+								<Route path="/login" element={<Login />} />
+								<Route path="/transparency" element={<Transparency />} />
+								<Route
+									path="/chat"
+									element={
+										<ProtectedRoute>
+											{/* A second boundary around the conversation itself: a
+											    render error in one message leaves the rest of the app
+											    mounted, so you can still reach the UI that would
+											    delete it. */}
+											<ErrorBoundary>
+												<Chat />
+											</ErrorBoundary>
+										</ProtectedRoute>
+									}
+								/>
+								<Route path="/" element={<Navigate to="/chat" replace />} />
+									<Route path="*" element={<Navigate to="/chat" replace />} />
+								</Routes>
+							</Suspense>
+						</AuthProvider>
+					</BrowserRouter>
+				</ToastProvider>
+			</ThemeProvider>
+		</ErrorBoundary>
 	);
 }
 

@@ -1299,7 +1299,17 @@ export const Chat = () => {
 								</div>
 							)}
 
-							<MessageList messages={activeMessages} currentUsername={username ?? ''} loading={connecting} onReply={handleStartReply} onLongPress={handleLongPressMessage} />
+							<MessageList
+								/* Remount per conversation: resets the message window, the
+								   scroll position and the fold-animation seed, so switching
+								   chats doesn't carry an expanded window or replay folds. */
+								key={activeConversationKey ?? ''}
+								messages={activeMessages}
+								currentUsername={username ?? ''}
+								loading={connecting}
+								onReply={handleStartReply}
+								onLongPress={handleLongPressMessage}
+							/>
 							<MessageInput
 								onSendMessage={handleSendMessage}
 								onSendMedia={handleSendMedia}
@@ -1371,7 +1381,17 @@ export const Chat = () => {
 								</div>
 							)}
 
-							<MessageList messages={activeMessages} currentUsername={username ?? ''} loading={connecting} onReply={handleStartReply} onLongPress={handleLongPressMessage} />
+							<MessageList
+								/* Remount per conversation: resets the message window, the
+								   scroll position and the fold-animation seed, so switching
+								   chats doesn't carry an expanded window or replay folds. */
+								key={activeConversationKey ?? ''}
+								messages={activeMessages}
+								currentUsername={username ?? ''}
+								loading={connecting}
+								onReply={handleStartReply}
+								onLongPress={handleLongPressMessage}
+							/>
 							<MessageInput
 								onSendMessage={handleSendMessage}
 								onSendMedia={handleSendMedia}

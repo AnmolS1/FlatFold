@@ -28,6 +28,8 @@ Two documents say the rest, plainly: the [threat model](./docs/THREAT_MODEL.md),
 
 The crypto is the real Signal machinery, built on audited primitives (`@noble/*`, `@hpke/core`) rather than anything I hand-rolled: X3DH to start a conversation, the Double Ratchet with header encryption to keep it going, and sender keys for groups, where every message is signed per sender so no member can forge as another. Sealed sender routes a message through an OHTTP relay run by a different company, so no single party ever sees both your IP and your message.
 
+That covers sending, and it's worth being clear that it doesn't cover everything. To receive, your device holds an authenticated connection to the server, which means the server still sees your IP, when you're online, and when something arrives for you. Contents stay encrypted, but who talks to whom, and when, remains inferable from that. It's the biggest limitation FlatFold has and the [threat model](./docs/THREAT_MODEL.md) lists it first.
+
 The server is a Cloudflare Worker with a Durable Object "mailbox" per user. It stores only what it needs to move ciphertext: usernames, public keys, and envelopes for offline recipients (deleted on delivery, and after 14 days no matter what). It never holds a private key. The full accounting is in the [threat model](./docs/THREAT_MODEL.md).
 
 ## Running it locally

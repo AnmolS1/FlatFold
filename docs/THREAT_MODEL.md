@@ -194,6 +194,56 @@ right tool. The `/transparency` page says this to users directly.
     token (recipient rotated past the 3-slot grace) vanishes while the sender's
     view shows "sent." Increment 6's sealed delivered-receipt is the load-bearing
     fix; until then sealed sends are best-effort-unconfirmed.
+14. **One-time-prekey exhaustion is accepted, and a last-resort prekey is
+    deliberately NOT implemented.** An authenticated user can drain another
+    user's one-time-prekey pool (`worker/keys.ts` `handleGetBundle`, throttled to
+    one claim per requester/target/hour), forcing subsequent handshakes to fall
+    back to no-OTP X3DH. We accept this, for two reasons that compound:
+    - *No-OTP X3DH is already the normal case, not a degraded one.* The client
+      tries the anonymous sealed lookup first (`src/lib/messaging.ts`
+      `lookupBundle`), and that path cannot return a one-time prekey at all —
+      `lookupBundleForSeal` hardcodes `oneTimePreKey: null`, precisely so an
+      unauthenticated caller can't drain a pool. So the attack's payoff is to
+      drag the rare authenticated-fallback path down to where the default path
+      already sits.
+    - *A last-resort prekey would not restore what's lost.* The one-time
+      prekey's distinctive value is its one-time-ness: DH4 against a private key
+      that is deleted after use, giving first-message break-in recovery. A
+      last-resort key is reused by definition and discards exactly that
+      property, leaving it largely redundant with the signed prekey already
+      mixed into DH1/DH3. It would add a D1 migration, a worker path and client
+      handling to buy close to nothing.
+    **This residual depends on an invariant**: the anonymous lookup must stay
+    *first*. If `lookupBundle` is ever reordered to prefer the authenticated
+    fetch, an OTP is consumed on every first contact, the server learns who is
+    about to be contacted, and the reasoning above becomes false. Pinned by
+    `test-ui/bundleLookupPrivacy.test.ts`, which fails on that reordering.
+15. **Username enumeration is intentional and unavoidable given contact-by-
+    username.** Signup answers 409 for a taken name (`worker/index.ts`), and the
+    *authenticated* bundle endpoint distinguishes 404 (no such user) from 409
+    (exists, hasn't published keys) (`worker/keys.ts`). Both leak existence. You
+    cannot let people add each other by username and simultaneously hide which
+    usernames exist. Note the sealed path deliberately does *not* leak this: it
+    returns a length-uniform "not found" sentinel that collapses both cases, so
+    the anonymous lookup is a non-oracle.
+16. **Media `DELETE` is authenticated but not authorized.** `handleMediaDelete`
+    (`worker/media.ts`) deletes by object id with no ownership check, so any
+    logged-in user who *knows* an id can delete that object. It is gated on the
+    id being unguessable (random, only ever transmitted inside E2EE payloads to
+    conversation participants) rather than on an ownership record. The blast
+    radius is bounded: deletion only, no read; objects are already deleted on
+    fetch-ack; the ciphertext is undecryptable to anyone outside the
+    conversation. Worst case is denial of an undelivered attachment by someone
+    already in the conversation. Accepted, but it is a capability check standing
+    in for an access check, which is worth revisiting if media lifetimes ever
+    lengthen.
+17. **Account deletion leaves orphaned R2 media**, bounded by the 14-day bucket
+    TTL rather than by the deletion itself. This is not an oversight: the server
+    keeps no user→media mapping (invariant #5), so it *cannot* enumerate a
+    departing user's objects, and building the index that would let it undercuts
+    metadata minimization. Fully worked through under **invariant #6** in §5,
+    including why we chose metadata-minimization over deletion-completeness.
+    Listed here so the residual is findable from this list too.
 
 ---
 

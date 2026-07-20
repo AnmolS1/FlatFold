@@ -81,6 +81,34 @@ export const Login = () => {
 						See exactly what the server stores
 					</Link>
 				</p>
+				{/* The legal pages live on the ponderance site, which hosts them for
+				    every service, so these leave the app. rel="noopener" because a
+				    target=_blank link otherwise hands the opened page a window.opener
+				    handle back into this origin. Trailing slashes are deliberate: the
+				    site 307s without them, and a redirect hop to reach a privacy
+				    policy is a bad look for a product whose whole pitch is that you
+				    can check the claims yourself. */}
+				<p className="text-center mt-3 text-xs text-graphite-40">
+					<a
+						href="https://ponderance.dev/privacy/"
+						target="_blank"
+						rel="noopener noreferrer"
+						className="text-graphite-40 hover:text-graphite-60 transition-colors underline"
+					>
+						Privacy
+					</a>
+					<span className="mx-2" aria-hidden="true">
+						·
+					</span>
+					<a
+						href="https://ponderance.dev/terms/"
+						target="_blank"
+						rel="noopener noreferrer"
+						className="text-graphite-40 hover:text-graphite-60 transition-colors underline"
+					>
+						Terms
+					</a>
+				</p>
 			</div>
 		</div>
 	);

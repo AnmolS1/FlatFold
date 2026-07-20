@@ -555,7 +555,11 @@ export async function decryptIncoming(username: string, frame: WsMessageFrame): 
 		// with contact bookkeeping, before anything payload-specific. See the
 		// crash-safety note below on why markProcessed comes last.
 		//
-		// Three shapes, and picking the wrong one corrupts session state:
+		// Four shapes, and picking the wrong one corrupts session state:
+		//  - `keyChanged`: the contact re-handshaked under a DIFFERENT identity, so
+		//    every prior session is discarded. Must replace the whole set, not
+		//    merge into it — saveSession preserves siblings, which would leave a
+		//    session tied to the old identity alive as a decrypt candidate.
 		//  - `adoptSession`: an inbound handshake gave us an ADDITIONAL session
 		//    alongside one we already had (a glare) — append it, and let the
 		//    tie-break decide whether we now send on it.
@@ -563,7 +567,9 @@ export async function decryptIncoming(username: string, frame: WsMessageFrame): 
 		//    current one — write back THAT session; saving it as current would
 		//    overwrite the session we send on.
 		//  - otherwise: the ordinary single-session case.
-		if (adoptSession) {
+		if (keyChanged) {
+			await keystore.replaceSessionSet(username, contactUsername, session.ratchet, session.associatedData);
+		} else if (adoptSession) {
 			await keystore.addSession(username, contactUsername, session.ratchet, session.associatedData, adoptSession.makeCurrent);
 		} else if (sessionIndex !== null) {
 			await keystore.saveSessionAt(username, contactUsername, sessionIndex, session.ratchet, session.associatedData);

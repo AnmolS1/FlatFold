@@ -548,6 +548,24 @@ export async function saveSession(
 	await writeSessionRecord(username, contactUsername, { sessions, current: existing.current });
 }
 
+/**
+ * Discard every session held for a contact and start over with this one.
+ *
+ * Used when a contact re-handshakes under a DIFFERENT identity (reinstall,
+ * cleared data — or a man-in-the-middle presenting a fresh identity). Prior
+ * session state must go wholesale: anything retained would stay a live
+ * trial-decrypt candidate keyed to an identity we've just stopped trusting.
+ * Distinct from saveSession, which deliberately preserves siblings.
+ */
+export async function replaceSessionSet(
+	username: string,
+	contactUsername: string,
+	ratchet: RatchetState,
+	associatedData: Uint8Array
+): Promise<void> {
+	await writeSessionRecord(username, contactUsername, { sessions: [toStoredEntry(ratchet, associatedData)], current: 0 });
+}
+
 /** Persist one session of the set by index — used after a trial decrypt advances it. */
 export async function saveSessionAt(
 	username: string,

@@ -214,6 +214,31 @@ describe('glare through the real receive path', () => {
 		expect(after.status === 'ok' && after.displayMessage.text).toBe('still fine');
 	});
 
+	it('a key change purges the whole session set, not just the current session', async () => {
+		// Security-relevant, and only reachable in combination: a re-handshake
+		// under a NEW identity (reinstall, cleared data — or an MITM presenting a
+		// fresh identity) must discard prior session state wholesale. With a
+		// single session that happens naturally, because the fresh session
+		// replaces it. With sessions retained from an earlier glare, a
+		// replace-the-current-entry write would leave the others in place, keeping
+		// a session tied to the OLD identity alive as a trial-decrypt candidate.
+		await collide();
+		expect((await keystore.loadSessionSet(alice, bob))?.sessions).toHaveLength(2);
+
+		// Bob reinstalls: local state gone, fresh identity keys, new handshake.
+		await keystore.removeContact(bob, alice);
+		await keystore.createIdentity(bob, 'correcthorsebattery');
+		serveBundles([alice, bob]);
+
+		const afterReinstall = await firstSend(bob, alice, 'new device');
+		const received = await decryptIncoming(alice, afterReinstall);
+
+		expect(received.status).toBe('ok');
+		expect(received.status === 'ok' && received.keyChanged).toBe(true);
+		// Exactly one session — nothing keyed to Bob's old identity survives.
+		expect((await keystore.loadSessionSet(alice, bob))?.sessions).toHaveLength(1);
+	});
+
 	it('still reads a straggler that arrives on the retained session', async () => {
 		// Bob queued a second message on his own (now superseded) session before
 		// he learned about Alice's. Alice must still be able to read it off the

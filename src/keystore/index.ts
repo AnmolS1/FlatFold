@@ -56,6 +56,7 @@ import {
 	SUMMARY_STORE,
 } from './storage';
 import type { ReceiverSenderKeyState, SenderKeyState } from '../crypto';
+import { capSessions, normalizeSessionRecord, type StoredSessionBlobOf, type StoredSessionRecordOf } from './sessionRecord';
 
 export { deleteKeystoreDatabase };
 
@@ -131,6 +132,10 @@ interface StoredSession {
 	associatedData: string;
 	ratchet: StoredRatchetState;
 }
+
+// A contact's sessions are a SET (usually of one). See ./sessionRecord.
+type StoredSessionRecord = StoredSessionRecordOf<StoredSession>;
+type StoredSessionBlob = StoredSessionBlobOf<StoredSession>;
 
 interface IdentityRecord {
 	salt: string;
@@ -497,27 +502,107 @@ function sessionKey(username: string, contactUsername: string): string {
 	return `${username}:${contactUsername}`;
 }
 
+function toStoredEntry(ratchet: RatchetState, associatedData: Uint8Array): StoredSession {
+	return { associatedData: bytesToBase64(associatedData), ratchet: serializeRatchetState(ratchet) };
+}
+
+function fromStoredEntry(stored: StoredSession): { ratchet: RatchetState; associatedData: Uint8Array } {
+	return { ratchet: deserializeRatchetState(stored.ratchet), associatedData: base64ToBytes(stored.associatedData) };
+}
+
+/** The raw stored set for a contact, tolerating the legacy single-session shape. */
+async function readSessionRecord(username: string, contactUsername: string): Promise<StoredSessionRecord | null> {
+	const key = requireCachedKey(username);
+	const blob = await getRecord<EncryptedBlob>(SESSION_STORE, sessionKey(username, contactUsername));
+	if (!blob) return null;
+	return normalizeSessionRecord(decryptBlob<StoredSessionBlob>(key, blob) as StoredSessionBlob);
+}
+
+async function writeSessionRecord(username: string, contactUsername: string, record: StoredSessionRecord): Promise<void> {
+	const key = requireCachedKey(username);
+	await putRecord(SESSION_STORE, sessionKey(username, contactUsername), encryptBlob(key, record));
+}
+
+/**
+ * Persist the CURRENT session, leaving any others intact.
+ *
+ * The send path calls this after every message to store the advanced ratchet.
+ * It must not rewrite the whole record: a contact can hold additional sessions
+ * retained to read a glare peer, and clobbering them makes that peer's messages
+ * permanently undecryptable. Creates the record when there isn't one.
+ */
 export async function saveSession(
 	username: string,
 	contactUsername: string,
 	ratchet: RatchetState,
 	associatedData: Uint8Array
 ): Promise<void> {
-	const key = requireCachedKey(username);
-	const stored: StoredSession = { associatedData: bytesToBase64(associatedData), ratchet: serializeRatchetState(ratchet) };
-	await putRecord(SESSION_STORE, sessionKey(username, contactUsername), encryptBlob(key, stored));
+	const existing = await readSessionRecord(username, contactUsername);
+	const entry = toStoredEntry(ratchet, associatedData);
+	if (!existing) {
+		await writeSessionRecord(username, contactUsername, { sessions: [entry], current: 0 });
+		return;
+	}
+	const sessions = [...existing.sessions];
+	sessions[existing.current] = entry;
+	await writeSessionRecord(username, contactUsername, { sessions, current: existing.current });
 }
 
+/** Persist one session of the set by index — used after a trial decrypt advances it. */
+export async function saveSessionAt(
+	username: string,
+	contactUsername: string,
+	index: number,
+	ratchet: RatchetState,
+	associatedData: Uint8Array
+): Promise<void> {
+	const existing = await readSessionRecord(username, contactUsername);
+	if (!existing || index < 0 || index >= existing.sessions.length) return;
+	const sessions = [...existing.sessions];
+	sessions[index] = toStoredEntry(ratchet, associatedData);
+	await writeSessionRecord(username, contactUsername, { sessions, current: existing.current });
+}
+
+/**
+ * Add a session to a contact's set. `makeCurrent` decides whether outgoing
+ * messages move to it — the glare tie-break's yield (see sessionSet.ts).
+ */
+export async function addSession(
+	username: string,
+	contactUsername: string,
+	ratchet: RatchetState,
+	associatedData: Uint8Array,
+	makeCurrent: boolean
+): Promise<void> {
+	const existing = await readSessionRecord(username, contactUsername);
+	const entry = toStoredEntry(ratchet, associatedData);
+	if (!existing) {
+		await writeSessionRecord(username, contactUsername, { sessions: [entry], current: 0 });
+		return;
+	}
+	const sessions = [...existing.sessions, entry];
+	const current = makeCurrent ? sessions.length - 1 : existing.current;
+	await writeSessionRecord(username, contactUsername, capSessions(sessions, current));
+}
+
+/** Every session held for a contact, plus which one sends. */
+export async function loadSessionSet(
+	username: string,
+	contactUsername: string
+): Promise<{ sessions: { ratchet: RatchetState; associatedData: Uint8Array }[]; current: number } | null> {
+	const record = await readSessionRecord(username, contactUsername);
+	if (!record) return null;
+	return { sessions: record.sessions.map(fromStoredEntry), current: record.current };
+}
+
+/** The session outgoing messages are encrypted on. */
 export async function loadSession(
 	username: string,
 	contactUsername: string
 ): Promise<{ ratchet: RatchetState; associatedData: Uint8Array } | null> {
-	const key = requireCachedKey(username);
-	const blob = await getRecord<EncryptedBlob>(SESSION_STORE, sessionKey(username, contactUsername));
-	if (!blob) return null;
-
-	const stored = decryptBlob<StoredSession>(key, blob);
-	return { ratchet: deserializeRatchetState(stored.ratchet), associatedData: base64ToBytes(stored.associatedData) };
+	const record = await readSessionRecord(username, contactUsername);
+	if (!record) return null;
+	return fromStoredEntry(record.sessions[record.current]);
 }
 
 export async function hasSession(username: string, contactUsername: string): Promise<boolean> {

@@ -14,7 +14,6 @@ import {
 	ratchetEncrypt,
 	respondX3DH,
 	sealBox,
-	tryRatchetDecrypt,
 	senderKeyDecrypt,
 	senderKeyDistribution,
 	senderKeyEncrypt,
@@ -28,6 +27,7 @@ import { apiFetchBundleAnonymous } from './sealedFetch';
 import { decodeChatPayload, encodeChatPayload, type ChatPayload } from './chatPayload';
 import { canDelete } from './deleteAuth';
 import { displayTsFor } from './messageOrder';
+import { isDesignatedInitiator, trialDecryptSessions } from './sessionSet';
 import { generateSealToken } from './sealToken';
 import { NO_SEAL_TOKEN, unwrapSealed, wrapSealed } from './sealedWrap';
 import type {
@@ -250,14 +250,24 @@ export function sealedFirstContactEnvelope(
 async function trialDecryptSealed(
 	username: string,
 	frame: WsMessageFrame
-): Promise<{ contactUsername: string; session: NonNullable<Awaited<ReturnType<typeof keystore.loadSession>>>; plaintext: Uint8Array } | null> {
+): Promise<{
+	contactUsername: string;
+	session: NonNullable<Awaited<ReturnType<typeof keystore.loadSession>>>;
+	sessionIndex: number;
+	plaintext: Uint8Array;
+} | null> {
 	const header = encryptedHeaderFromWire(frame.header);
 	const ciphertext = base64ToBytes(frame.ciphertext);
 	for (const contactUsername of await keystore.listSessionContacts(username)) {
-		const session = await keystore.loadSession(username, contactUsername);
-		if (!session) continue;
-		const plaintext = tryRatchetDecrypt(session.ratchet, header, ciphertext, session.associatedData);
-		if (plaintext) return { contactUsername, session, plaintext };
+		// EVERY session for the contact, not just the current one: a contact can
+		// hold several after a glare, and a sealed message may well arrive on a
+		// retained one.
+		const held = await keystore.loadSessionSet(username, contactUsername);
+		if (!held) continue;
+		const matched = trialDecryptSessions(held.sessions, header, ciphertext);
+		if (matched) {
+			return { contactUsername, session: held.sessions[matched.index], sessionIndex: matched.index, plaintext: matched.plaintext };
+		}
 	}
 	return null;
 }
@@ -328,6 +338,13 @@ export async function decryptIncoming(username: string, frame: WsMessageFrame): 
 		let session: NonNullable<Awaited<ReturnType<typeof keystore.loadSession>>>;
 		let plaintext: Uint8Array;
 		let keyChanged = false;
+		// Which of the contact's sessions advanced, when it wasn't the current
+		// one — so the commit below writes back the session that actually moved.
+		let sessionIndex: number | null = null;
+		// Set when an inbound handshake produced an ADDITIONAL session for a
+		// contact we already had one for (a glare). Committed only after the
+		// message's AEAD verifies.
+		let adoptSession: { makeCurrent: boolean } | null = null;
 		let incomingIdentity: IdentityPublicKeys | null = null;
 		let knownContact: Awaited<ReturnType<typeof keystore.getContact>> = null;
 		// Set on the first-contact bootstrap path: the authenticated per-message rid
@@ -354,10 +371,24 @@ export async function decryptIncoming(username: string, frame: WsMessageFrame): 
 			// re-handshake) — never on an ongoing sealed message.
 			keyChanged = !!(knownContact && incomingIdentity && identityDiffers(knownContact.identity, incomingIdentity));
 
-			let sess = keyChanged ? null : await keystore.loadSession(username, contactUsername);
-			if (!sess) {
-				// Out of order: the handshake that establishes this session hasn't
-				// arrived. Non-terminal — don't mark processed / ack; redelivered later.
+			// A contact can hold more than one session after a glare (both sides
+			// sent before either received, so each built its own initiator
+			// session). Try them all — the peer may be sending on one we retained
+			// rather than the one we send on. A key change discards the lot.
+			const held = keyChanged ? null : await keystore.loadSessionSet(username, contactUsername);
+			const matched = held ? trialDecryptSessions(held.sessions, encryptedHeaderFromWire(frame.header), base64ToBytes(frame.ciphertext)) : null;
+
+			if (matched && held) {
+				plaintext = matched.plaintext;
+				session = held.sessions[matched.index];
+				// Persist the session that actually advanced, which is NOT
+				// necessarily the current one.
+				sessionIndex = matched.index;
+			} else {
+				// Nothing we hold can read it. With handshake material we can build
+				// the responder side; without it this is out of order — the
+				// handshake that establishes the session hasn't arrived, so it's
+				// non-terminal: don't mark processed / ack, and it's redelivered.
 				if (!frame.x3dh || !incomingIdentity) return { status: 'retry' };
 
 				const identity = await keystore.getIdentity(username);
@@ -376,10 +407,25 @@ export async function decryptIncoming(username: string, frame: WsMessageFrame): 
 					initiatorIdentityDhPublicKey: base64ToBytes(frame.x3dh.initiatorIdentityDhPublicKey),
 					initiatorEphemeralPublicKey: base64ToBytes(frame.x3dh.initiatorEphemeralPublicKey),
 				});
-				sess = { ratchet: initRatchetAsResponder(handshake.sharedSecret, signedPreKey.keyPair), associatedData: handshake.associatedData };
+				const responder = {
+					ratchet: initRatchetAsResponder(handshake.sharedSecret, signedPreKey.keyPair),
+					associatedData: handshake.associatedData,
+				};
+				// Throws (not returns null) if the AEAD fails — the session is
+				// identified by then, so a failure is corruption, not "wrong session".
+				plaintext = ratchetDecrypt(responder.ratchet, encryptedHeaderFromWire(frame.header), base64ToBytes(frame.ciphertext), responder.associatedData);
+				session = responder;
+
+				if (held) {
+					// We already had session(s) and this handshake gave us another —
+					// a glare. Keep ours so their in-flight messages stay readable, and
+					// let the tie-break decide who yields: the designated initiator
+					// keeps sending on its own session, the other side moves to this
+					// one. Applied on both sides, that lands them on one shared chain.
+					// Only committed once the AEAD above has verified.
+					adoptSession = { makeCurrent: !isDesignatedInitiator(username, contactUsername) };
+				}
 			}
-			plaintext = ratchetDecrypt(sess.ratchet, encryptedHeaderFromWire(frame.header), base64ToBytes(frame.ciphertext), sess.associatedData);
-			session = sess;
 		} else if (frame.x3dhSealed) {
 			// SEALED FIRST-CONTACT BOOTSTRAP (increment 7). The handshake identity is
 			// hidden from the gateway in `x3dhSealed` (ECIES to our identity key). We
@@ -486,6 +532,8 @@ export async function decryptIncoming(username: string, frame: WsMessageFrame): 
 			if (!trial) return { status: 'retry' };
 			contactUsername = trial.contactUsername;
 			session = trial.session;
+			// May have matched a retained session rather than the current one.
+			sessionIndex = trial.sessionIndex;
 			plaintext = trial.plaintext;
 			knownContact = await keystore.getContact(username, contactUsername);
 		}
@@ -506,7 +554,22 @@ export async function decryptIncoming(username: string, frame: WsMessageFrame): 
 		// The ratchet advance is the irreversible step — commit it first, along
 		// with contact bookkeeping, before anything payload-specific. See the
 		// crash-safety note below on why markProcessed comes last.
-		await keystore.saveSession(username, contactUsername, session.ratchet, session.associatedData);
+		//
+		// Three shapes, and picking the wrong one corrupts session state:
+		//  - `adoptSession`: an inbound handshake gave us an ADDITIONAL session
+		//    alongside one we already had (a glare) — append it, and let the
+		//    tie-break decide whether we now send on it.
+		//  - `sessionIndex`: the message decrypted on a session that isn't the
+		//    current one — write back THAT session; saving it as current would
+		//    overwrite the session we send on.
+		//  - otherwise: the ordinary single-session case.
+		if (adoptSession) {
+			await keystore.addSession(username, contactUsername, session.ratchet, session.associatedData, adoptSession.makeCurrent);
+		} else if (sessionIndex !== null) {
+			await keystore.saveSessionAt(username, contactUsername, sessionIndex, session.ratchet, session.associatedData);
+		} else {
+			await keystore.saveSession(username, contactUsername, session.ratchet, session.associatedData);
+		}
 		// Replay-guard the first-contact bootstrap on its authenticated rid, at the
 		// commit point (after anti-spoof passed).
 		if (bootstrapRid) await keystore.markProcessed(username, bootstrapRid);

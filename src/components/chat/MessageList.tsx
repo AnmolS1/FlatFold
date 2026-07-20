@@ -35,6 +35,28 @@ const MessageListComponent = ({ messages, currentUsername, loading, onReply, onL
 	const [userHasScrolled, setUserHasScrolled] = useState(false);
 	const [showScrollButton, setShowScrollButton] = useState(false);
 
+	// Screen-reader announcement for messages that arrive while the conversation
+	// is open. Seeded with the ids present on mount so existing history is never
+	// read out, and skipped for our own sends — you know what you just typed.
+	const [announcement, setAnnouncement] = useState('');
+	const announcedIds = useRef<Set<string> | null>(null);
+	useEffect(() => {
+		if (announcedIds.current === null) {
+			announcedIds.current = new Set(messages.map((m) => m.id));
+			return;
+		}
+		const seen = announcedIds.current;
+		const arrived = messages.filter((m) => !seen.has(m.id));
+		arrived.forEach((m) => seen.add(m.id));
+
+		const fromOthers = arrived.filter((m) => m.direction === 'received');
+		const latest = fromOthers[fromOthers.length - 1];
+		if (!latest) return;
+		// An attachment has no text to read; name it instead of announcing silence.
+		const body = latest.text.trim() || (latest.media ? 'sent an attachment' : '');
+		setAnnouncement(body ? `${latest.from}: ${body}` : `${latest.from} sent a message`);
+	}, [messages]);
+
 	// Paper-fold animation: play it only for messages appended AFTER the
 	// initial history load (a history load shouldn't fold every bubble at
 	// once). Track which ids we've already committed; anything new since the
@@ -112,6 +134,14 @@ const MessageListComponent = ({ messages, currentUsername, loading, onReply, onL
 
 	return (
 		<div className="flex-1 relative">
+			{/* Announces only messages that ARRIVE while the conversation is open,
+			    and only from the other person. Putting aria-live on the list itself
+			    would read the whole history out on mount and re-announce on every
+			    re-render; polite (not assertive) so it waits for a pause rather
+			    than interrupting. */}
+			<p className="sr-only" aria-live="polite" aria-atomic="true">
+				{announcement}
+			</p>
 			<div ref={scrollContainerRef} onScroll={handleScroll} className="absolute inset-0 overflow-y-auto overscroll-contain p-4 scroll-smooth">
 				{messages.map((message, i) => {
 					const showDay = i === 0 || !isSameDay(messages[i - 1].ts, message.ts);

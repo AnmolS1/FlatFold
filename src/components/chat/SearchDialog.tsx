@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useModalDialog } from '../../hooks/useModalDialog';
 import MiniSearch from 'minisearch';
 import { Search, X } from 'lucide-react';
 import * as keystore from '../../keystore';
@@ -23,6 +24,10 @@ interface IndexedMessage {
 // written to IndexedDB (that would put plaintext at rest) and never leaves
 // the device. Nothing here touches the network.
 export const SearchDialog = ({ username, onClose, onSelectResult }: SearchDialogProps) => {
+	// Focus trap, Esc-to-close, focus restore, scroll lock. The search input
+	// keeps its own autoFocus — the hook focuses the first focusable control,
+	// which is that input.
+	const panelRef = useModalDialog<HTMLDivElement>(onClose);
 	const [query, setQuery] = useState('');
 	const [results, setResults] = useState<IndexedMessage[]>([]);
 	const [ready, setReady] = useState(false);
@@ -70,8 +75,19 @@ export const SearchDialog = ({ username, onClose, onSelectResult }: SearchDialog
 	const placeholder = useMemo(() => (ready ? 'Search your messages…' : 'Indexing…'), [ready]);
 
 	return (
-		<div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 pt-20" onClick={onClose}>
-			<div className="bg-graph-card border border-crease-line rounded-2xl max-w-lg w-full max-h-[70vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+		<div
+			className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 pt-20"
+			onClick={onClose}
+			role="dialog"
+			aria-modal="true"
+			aria-label="Search your messages"
+		>
+			<div
+				ref={panelRef}
+				tabIndex={-1}
+				className="bg-graph-card border border-crease-line rounded-2xl max-w-lg w-full max-h-[70vh] flex flex-col focus:outline-none"
+				onClick={(e) => e.stopPropagation()}
+			>
 				<div className="flex items-center gap-2 p-3 border-b border-crease-line">
 					<Search className="w-5 h-5 text-graphite-40 flex-shrink-0" />
 					<input

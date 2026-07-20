@@ -1,0 +1,36 @@
+# Audit §9: automated dependency and advisory updates. On a security product the
+# supply chain is part of the threat model — @noble/*, @hpke/core and wrangler
+# are all in the trusted computing base, and a stale advisory there is a real
+# finding, not housekeeping.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    # Wait a week before proposing a newly published version. The failure mode
+    # this guards is a maintainer account compromise: a malicious release is
+    # typically caught and yanked within days, and auto-bumping to a version
+    # published an hour ago would pull it straight into the build. Security
+    # advisory updates are exempt from cooldown, so genuine fixes still land
+    # immediately.
+    cooldown:
+      default-days: 7
+    # Group the noisy, low-risk churn into one PR so genuine security bumps
+    # stay visible rather than being buried in a queue of patch updates.
+    groups:
+      dev-dependencies:
+        dependency-type: development
+        update-types: [minor, patch]
+      production-patches:
+        dependency-type: production
+        update-types: [patch]
+
+  # The workflow's own actions pin to major tags; keep them current too.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7

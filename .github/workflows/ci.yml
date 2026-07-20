@@ -1,0 +1,59 @@
+name: CI
+
+# Audit §9: the cheapest regression insurance, and a visible trust signal on a
+# public security project — anyone can see the suite is green on the commit
+# they're reading.
+on:
+  pull_request:
+  push:
+    branches: [prod, dev]
+
+# A newer push to the same branch makes the in-flight run redundant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Satisfies the `engines.node: >=20` that lands with the publishing
+          # branch, and matches the version this was developed against.
+          node-version: '24'
+          cache: npm
+
+      # `npm ci` (not `install`) so the lockfile is authoritative — it hard-fails
+      # on package.json/lockfile drift, which is what the reproducible-build
+      # claim on /transparency depends on.
+      #
+      # postinstall runs `wrangler types` to generate worker-configuration.d.ts,
+      # which tsc needs and which is gitignored. That's local codegen from
+      # wrangler.jsonc — verified to work with no Cloudflare credentials — so CI
+      # needs no secrets here.
+      - name: Install
+        run: npm ci
+        env:
+          WRANGLER_SEND_METRICS: false
+
+      - name: Generated worker types present
+        # Fails loudly here rather than as a confusing wall of tsc errors later.
+        run: test -f worker-configuration.d.ts
+
+      - name: Lint
+        run: npm run lint
+
+      # Hermetic: test-only secrets live in vitest.config.ts, so this needs no
+      # .dev.vars and no repository secrets.
+      - name: Test
+        run: npm test
+
+      # Also covers typecheck — `build` is `tsc -b && vite build && …`.
+      - name: Build
+        run: npm run build

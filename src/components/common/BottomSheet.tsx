@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode, type PointerEvent } from 'react';
+import { useCallback, useRef, useState, type ReactNode, type PointerEvent } from 'react';
+import { useModalDialog } from '../../hooks/useModalDialog';
 
 // A hand-rolled bottom sheet (no dependency): scrim + a bottom-anchored panel
 // with a drag handle, drag-to-dismiss, Esc-to-close, scrim-click-to-close, and
@@ -21,48 +22,11 @@ interface BottomSheetProps {
 const DISMISS_AFTER = 96; // px dragged down before release dismisses
 
 export const BottomSheet = ({ onClose, children, labelledBy, panelClassName = '' }: BottomSheetProps) => {
-	const panelRef = useRef<HTMLDivElement>(null);
+	// Scroll lock, focus-in, focus-restore, Esc and the Tab trap all live in the
+	// shared hook so the sheets and the centred dialogs behave identically.
+	const panelRef = useModalDialog<HTMLDivElement>(onClose);
 	const [dragY, setDragY] = useState(0);
 	const dragStart = useRef<number | null>(null);
-
-	// Lock body scroll while open, restore on close.
-	useEffect(() => {
-		const prev = document.body.style.overflow;
-		document.body.style.overflow = 'hidden';
-		return () => {
-			document.body.style.overflow = prev;
-		};
-	}, []);
-
-	// Focus the panel on open; Esc closes; Tab is trapped within the sheet.
-	useEffect(() => {
-		const panel = panelRef.current;
-		panel?.focus();
-		const onKeyDown = (e: KeyboardEvent) => {
-			if (e.key === 'Escape') {
-				e.preventDefault();
-				onClose();
-				return;
-			}
-			if (e.key !== 'Tab' || !panel) return;
-			const focusable = panel.querySelectorAll<HTMLElement>(
-				'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])'
-			);
-			if (focusable.length === 0) return;
-			const first = focusable[0];
-			const last = focusable[focusable.length - 1];
-			const active = document.activeElement;
-			if (e.shiftKey && (active === first || active === panel)) {
-				e.preventDefault();
-				last.focus();
-			} else if (!e.shiftKey && active === last) {
-				e.preventDefault();
-				first.focus();
-			}
-		};
-		document.addEventListener('keydown', onKeyDown);
-		return () => document.removeEventListener('keydown', onKeyDown);
-	}, [onClose]);
 
 	const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
 		dragStart.current = e.clientY;

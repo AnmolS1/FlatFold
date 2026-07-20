@@ -143,8 +143,15 @@ describe('key publish + bundle fetch', () => {
 		// Fire well past the 30/window limit at a nonexistent target (404s
 		// still count — the limiter runs before the existence check, so it
 		// throttles enumeration regardless of hit/miss). Expect some 429s.
+		//
+		// The count is 2*LIMIT+2, not a round 40, because the window is wall-clock
+		// (floor(now/60)) and the loop can straddle a boundary. With 40 requests a
+		// rollover halfway through splits them ~20/20, neither window exceeds 30,
+		// and the test fails with "expected 0 to be greater than 0" — which it did,
+		// about one run in twenty. At 2*LIMIT+2 the worst-case split still leaves
+		// one window over budget wherever the boundary falls.
 		const statuses: number[] = [];
-		for (let i = 0; i < 40; i++) {
+		for (let i = 0; i < 62; i++) {
 			const res = await SELF.fetch(`${BASE}/api/keys/bundle/target_${i}_keys`, { headers: { Cookie: requesterCookie } });
 			statuses.push(res.status);
 		}

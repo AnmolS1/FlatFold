@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useModalDialog } from '../hooks/useModalDialog';
 import { X, Monitor, Bell, BellOff, LogOut, Trash2, AlertTriangle } from 'lucide-react';
 import { apiDeleteAccount, apiLogoutAll, apiMe } from '../lib/api';
 import { panicWipe } from '../lib/panicWipe';
@@ -19,6 +20,9 @@ interface SettingsDialogProps {
 }
 
 export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogProps) => {
+	// Focus trap, Esc-to-close, focus restore, scroll lock — same contract the
+	// bottom sheets get.
+	const panelRef = useModalDialog<HTMLDivElement>(onClose);
 	const [sessionStart, setSessionStart] = useState<number | null>(null);
 	const [pushSupported] = useState(() => isPushSupported());
 	const [subscribed, setSubscribed] = useState(false);
@@ -100,10 +104,23 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 	}, [deletePassword]);
 
 	return (
-		<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-			<div className="bg-graph-card border border-crease-line rounded-2xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+		<div
+			className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+			onClick={onClose}
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="settings-dialog-title"
+		>
+			<div
+				ref={panelRef}
+				tabIndex={-1}
+				className="bg-graph-card border border-crease-line rounded-2xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto focus:outline-none"
+				onClick={(e) => e.stopPropagation()}
+			>
 				<div className="flex items-center justify-between mb-5">
-					<h2 className="font-display text-lg font-bold text-graphite">Settings</h2>
+					<h2 id="settings-dialog-title" className="font-display text-lg font-bold text-graphite">
+						Settings
+					</h2>
 					<button onClick={onClose} aria-label="Close" className="text-graphite-40 hover:text-graphite">
 						<X className="w-5 h-5" />
 					</button>

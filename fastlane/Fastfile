@@ -1,0 +1,23 @@
+default_platform(:ios)
+
+# Apple auth for all lanes: the App Store Connect API key (App Manager role), so
+# match/pilot/deliver run in CI with no Apple ID password and no 2FA. The key's
+# IDs and file path come from the environment (.match.env locally — gitignored;
+# GitHub Actions secrets in CI) so nothing account-identifying lands in this
+# PUBLIC (AGPL) repo. The .p8 private key itself is always gitignored (*.p8).
+def asc_api_key
+  key_path = ENV.fetch("ASC_KEY_PATH")
+  app_store_connect_api_key(
+    key_id: ENV.fetch("ASC_KEY_ID"),
+    issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+    key_filepath: File.expand_path(key_path, __dir__ + "/.."), # relative paths resolve from repo root
+    in_house: false,
+  )
+end
+
+platform :ios do
+  desc "Generate/sync App Store signing certs + profiles into flatfold-certs (encrypted)"
+  lane :certs do
+    match(type: "appstore", api_key: asc_api_key, readonly: false)
+  end
+end

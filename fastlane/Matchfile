@@ -1,0 +1,9 @@
+# Fastlane match: stores signing certs + provisioning profiles ENCRYPTED
+# (OpenSSL AES-256 via MATCH_PASSWORD) in a private git repo. Nothing here is
+# plaintext; the passphrase lives in .match.env locally (gitignored) and in CI
+# secrets later. Apple auth is the ASC API key (see Fastfile), so no 2FA.
+git_url("git@github.com:AnmolS1/flatfold-certs.git")
+storage_mode("git")
+type("appstore")
+app_identifier(["dev.flatfold"])
+team_id("G2KBQH7KWT")

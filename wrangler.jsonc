@@ -40,19 +40,26 @@
 	// server never sees a decryption key.
 	"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "flatfold-media" }],
 
-	// SESSION_SECRET, VAPID_PRIVATE_JWK, SEAL_GATEWAY_PRIVATE_KEY and
-	// SEAL_RELAY_AUTH are SECRETS — set in production via `wrangler secret put ...`
+	// SESSION_SECRET, VAPID_PRIVATE_JWK, SEAL_GATEWAY_PRIVATE_KEY, SEAL_RELAY_AUTH
+	// and APNS_KEY are SECRETS — set in production via `wrangler secret put ...`
 	// and locally via `.dev.vars` (gitignored). They are deliberately NOT in
 	// `vars` so they never enter git. The VAPID public key and subject are
 	// non-secret. SEAL_RELAY_AUTH is the shared secret the OHTTP relay injects as
 	// `X-Seal-Relay-Auth`; the gateway (worker/seal.ts) enforces it on POST
 	// /api/seal only when the secret is configured (unset ⇒ open, for local dev).
+	// APNS_KEY is the Apple ".p8" provider-auth private key (PEM PKCS8); its
+	// non-secret companions (key id / team id / bundle id) are `vars` below.
 	"vars": {
 		"VAPID_PUBLIC_KEY": "BLDjiJLQCbJUfqW-8pFSF-F_KVdX05Zyibj9k2fxKDZr7aFcv8NgYBO3g6-vjdTZGOojRGDStw8NtwQE6-S-VLU",
 		"VAPID_SUBJECT": "mailto:security@flatfold.ponderance.dev",
 		// Sealed-sender OHTTP gateway public key (non-secret; published via
 		// /api/seal/keys). Private key is SEAL_GATEWAY_PRIVATE_KEY (secret).
-		"SEAL_GATEWAY_PUBLIC_KEY": "BPMXXE6m+F7Py+eE4/KpegnOECQVwuu6JWW1TqZQZJPIW8G0w5Ovh/ap14iVcP9x1RuFuLUAH1MxO51FFqsyykU="
+		"SEAL_GATEWAY_PUBLIC_KEY": "BPMXXE6m+F7Py+eE4/KpegnOECQVwuu6JWW1TqZQZJPIW8G0w5Ovh/ap14iVcP9x1RuFuLUAH1MxO51FFqsyykU=",
+		// APNs provider-token identifiers (non-secret). The private key is the
+		// APNS_KEY secret. apns-topic is the app bundle id.
+		"APNS_KEY_ID": "MTT8A4GJJY",
+		"APNS_TEAM_ID": "G2KBQH7KWT",
+		"APNS_BUNDLE_ID": "dev.flatfold"
 	},
 
 	// PREVIEW environment for the Tier-1 relay validation (docs/RELAY_ONBOARDING.md).
@@ -91,7 +98,10 @@
 			"vars": {
 				"VAPID_PUBLIC_KEY": "BLDjiJLQCbJUfqW-8pFSF-F_KVdX05Zyibj9k2fxKDZr7aFcv8NgYBO3g6-vjdTZGOojRGDStw8NtwQE6-S-VLU",
 				"VAPID_SUBJECT": "mailto:security@flatfold.ponderance.dev",
-				"SEAL_GATEWAY_PUBLIC_KEY": "BPMXXE6m+F7Py+eE4/KpegnOECQVwuu6JWW1TqZQZJPIW8G0w5Ovh/ap14iVcP9x1RuFuLUAH1MxO51FFqsyykU="
+				"SEAL_GATEWAY_PUBLIC_KEY": "BPMXXE6m+F7Py+eE4/KpegnOECQVwuu6JWW1TqZQZJPIW8G0w5Ovh/ap14iVcP9x1RuFuLUAH1MxO51FFqsyykU=",
+				"APNS_KEY_ID": "MTT8A4GJJY",
+				"APNS_TEAM_ID": "G2KBQH7KWT",
+				"APNS_BUNDLE_ID": "dev.flatfold"
 			}
 		}
 	}

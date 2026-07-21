@@ -97,9 +97,90 @@ export async function buildWakeupRequest(env: Env, endpoint: string): Promise<Re
 	});
 }
 
-// Sends a content-free wake-up to every device `username` has subscribed.
-// Best-effort: a 404/410 means the subscription is gone, so we prune it.
+// ---- APNs (native iOS) ----
+//
+// Native clients run in a WKWebView, which has NO Service Worker, so Web Push
+// is unavailable to them. They register an APNs device token instead and we
+// wake them with a SILENT background push. The invariant is identical: the
+// push is content-free — its ONLY payload is `{"aps":{"content-available":1}}`,
+// carrying no message text and no sender. See test/push.test.ts.
+//
+// Provider auth is a token-based ES256 JWT (Apple's ".p8" key), NOT a per-app
+// certificate. The private key lives in env.APNS_KEY (a secret); the key id,
+// team id, and bundle id are non-secret vars.
+
+export type ApnsEnvironment = 'production' | 'sandbox';
+
+const APNS_HOSTS: Record<ApnsEnvironment, string> = {
+	production: 'api.push.apple.com',
+	sandbox: 'api.sandbox.push.apple.com',
+};
+
+// APNs device tokens are hex strings. Validating on BOTH the inbound subscribe
+// path and before building the outbound URL prevents a crafted token from
+// injecting path segments into `…/3/device/<token>` (defense in depth).
+export function isValidDeviceToken(value: unknown): value is string {
+	return typeof value === 'string' && /^[0-9a-fA-F]{64,200}$/.test(value);
+}
+
+// Decodes a PEM-wrapped PKCS8 private key (the .p8 file contents) to raw DER
+// bytes for crypto.subtle.importKey('pkcs8', …). Apple's .p8 is already PKCS8
+// (`-----BEGIN PRIVATE KEY-----`), so no SEC1→PKCS8 conversion is needed.
+function pemToDerBytes(pem: string): Uint8Array {
+	const b64 = pem
+		.replace(/-----BEGIN [^-]+-----/g, '')
+		.replace(/-----END [^-]+-----/g, '')
+		.replace(/\s+/g, '');
+	const binary = atob(b64);
+	const bytes = new Uint8Array(binary.length);
+	for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+	return bytes;
+}
+
+// Signs an APNs provider-authentication JWT (ES256). WebCrypto's ECDSA sign
+// already returns the raw r||s (JOSE) signature APNs wants — no DER unwrap,
+// mirroring signVapidJwt above. v1 signs per send; the token may be reused for
+// ~40 min, a later optimization.
+async function signApnsProviderToken(env: Env): Promise<string> {
+	const key = await crypto.subtle.importKey('pkcs8', pemToDerBytes(env.APNS_KEY), { name: 'ECDSA', namedCurve: 'P-256' }, false, [
+		'sign',
+	]);
+	const header = { alg: 'ES256', kid: env.APNS_KEY_ID };
+	const claims = { iss: env.APNS_TEAM_ID, iat: Math.floor(Date.now() / 1000) };
+	const signingInput = `${jsonToB64url(header)}.${jsonToB64url(claims)}`;
+	const signature = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, key, new TextEncoder().encode(signingInput));
+	return `${signingInput}.${bytesToB64url(new Uint8Array(signature))}`;
+}
+
+// Builds the content-free APNs wake-up request for one device token. Exported
+// so a test can assert the body carries ONLY the silent-push signal and no
+// message content or sender. The device token is the recipient's device, not
+// content — it necessarily rides in the URL path per Apple's protocol.
+export async function buildApnsRequest(env: Env, deviceToken: string, environment: ApnsEnvironment): Promise<Request> {
+	const host = APNS_HOSTS[environment] ?? APNS_HOSTS.production;
+	const jwt = await signApnsProviderToken(env);
+	return new Request(`https://${host}/3/device/${deviceToken}`, {
+		method: 'POST',
+		// APNs never redirects, but keep the SSRF-safe default of never following
+		// one — consistent with the Web Push path.
+		redirect: 'manual',
+		headers: {
+			authorization: `bearer ${jwt}`,
+			'apns-topic': env.APNS_BUNDLE_ID,
+			'apns-push-type': 'background',
+			'apns-priority': '5',
+			'apns-expiration': '0',
+		},
+		// The ONLY payload: a silent "content-available" background push. No
+		// message text, no sender, nothing else — this is the invariant.
+		body: JSON.stringify({ aps: { 'content-available': 1 } }),
+	});
+}
+
+// Sends a content-free wake-up to every device `username` has subscribed —
+// across BOTH transports. Best-effort: a dead subscription is pruned.
 export async function sendWakeupToUser(env: Env, username: string): Promise<void> {
+	// Web Push (browsers). Preserved unchanged. A 404/410 means it's gone.
 	const rows = await env.DB.prepare('SELECT endpoint FROM push_subscriptions WHERE username = ?')
 		.bind(username)
 		.all<{ endpoint: string }>();
@@ -119,6 +200,30 @@ export async function sendWakeupToUser(env: Env, username: string): Promise<void
 		} catch {
 			// Push service unreachable (or a fake local endpoint) — ignore; the
 			// client re-syncs on reconnect regardless.
+		}
+	}
+
+	// APNs (native iOS). The parallel sender for the other transport. A 410
+	// from APNs means the token is no longer valid ("Unregistered"), so prune.
+	const apnsRows = await env.DB.prepare('SELECT device_token, environment FROM apns_subscriptions WHERE username = ?')
+		.bind(username)
+		.all<{ device_token: string; environment: string }>();
+
+	for (const { device_token, environment } of apnsRows.results ?? []) {
+		// Defense in depth: never build a device URL from an unvalidated token.
+		if (!isValidDeviceToken(device_token)) {
+			await env.DB.prepare('DELETE FROM apns_subscriptions WHERE device_token = ?').bind(device_token).run();
+			continue;
+		}
+		const apnsEnv: ApnsEnvironment = environment === 'sandbox' ? 'sandbox' : 'production';
+		try {
+			const response = await fetch(await buildApnsRequest(env, device_token, apnsEnv));
+			if (response.status === 410) {
+				await env.DB.prepare('DELETE FROM apns_subscriptions WHERE device_token = ?').bind(device_token).run();
+			}
+		} catch {
+			// APNs unreachable (or local dev) — ignore; the client re-syncs on
+			// reconnect regardless.
 		}
 	}
 }
@@ -159,4 +264,39 @@ export async function handlePushUnsubscribe(request: Request, env: Env, username
 // Exposes the VAPID public key so the client can subscribe.
 export function handleVapidPublicKey(env: Env): Response {
 	return json({ publicKey: env.VAPID_PUBLIC_KEY });
+}
+
+// ---- APNs subscribe / unsubscribe (native iOS) ----
+
+// The native client posts { deviceToken, environment? }. We store ONLY the
+// token and its APNs environment — there is no payload and no encryption keys.
+export async function handleApnsSubscribe(request: Request, env: Env, username: string): Promise<Response> {
+	const body = (await request.json().catch(() => null)) as { deviceToken?: unknown; environment?: unknown } | null;
+	const deviceToken = body?.deviceToken;
+	if (!isValidDeviceToken(deviceToken)) {
+		return json({ error: 'Invalid device token.' }, { status: 400 });
+	}
+	const environment = body?.environment ?? 'production';
+	if (environment !== 'production' && environment !== 'sandbox') {
+		return json({ error: 'Invalid environment.' }, { status: 400 });
+	}
+	// On a conflict, only the CURRENT owner may refresh the row — a different
+	// user cannot reassign someone else's device token to themselves (the WHERE
+	// makes it a no-op). Ownership is never silently transferred.
+	await env.DB.prepare(
+		`INSERT INTO apns_subscriptions (username, device_token, environment, created_at) VALUES (?, ?, ?, ?)
+		 ON CONFLICT(device_token) DO UPDATE SET environment = excluded.environment, created_at = excluded.created_at
+		 WHERE username = excluded.username`
+	)
+		.bind(username, deviceToken, environment, Math.floor(Date.now() / 1000))
+		.run();
+	return json({ ok: true });
+}
+
+export async function handleApnsUnsubscribe(request: Request, env: Env, username: string): Promise<Response> {
+	const body = (await request.json().catch(() => null)) as { deviceToken?: unknown } | null;
+	const deviceToken = body?.deviceToken;
+	if (typeof deviceToken !== 'string') return json({ error: 'Missing device token.' }, { status: 400 });
+	await env.DB.prepare('DELETE FROM apns_subscriptions WHERE device_token = ? AND username = ?').bind(deviceToken, username).run();
+	return json({ ok: true });
 }

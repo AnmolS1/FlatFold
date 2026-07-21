@@ -35,6 +35,11 @@ const TEST_SECRETS = {
 	VAPID_SUBJECT: 'mailto:test@example.invalid',
 	VAPID_PRIVATE_JWK:
 		'{"key_ops":["sign"],"ext":true,"kty":"EC","x":"wfgwQP6yt-7OD-van-aci1FSDy8RObMeQTELfPHJZfQ","y":"iccTyKJSYzKkx1ys6L5eJJCZSbkBSwTtiOo8HNwvnf8","crv":"P-256","d":"ofZV_ukxheMIyubigR3iQ85IUvvIe1H6_tyTjKEqrsE"}',
+	// Throwaway APNs provider key (PEM PKCS8, P-256) so the APNs JWT signing
+	// round-trips hermetically in tests. NOT a real Apple key — it authorizes
+	// nothing. Prod's real .p8 lives in `wrangler secret put APNS_KEY`.
+	APNS_KEY:
+		'-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgwmesA5+A1ncUTOsG\nmGGFdMA6NBgY4DmEPQELKGn6AwChRANCAATllF+bIVL/Usv3JubUWxHFCy/Gefgv\nixtmZOmLj+8+1JOxIUkzQrD4qzUAhWSvUxucTbmjzOyfTYfRzH25zFuM\n-----END PRIVATE KEY-----\n',
 };
 
 export default defineConfig({

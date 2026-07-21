@@ -75,6 +75,20 @@ export const SERVER_STATE: PersistedStore[] = [
 		],
 	},
 	{
+		name: 'apns_subscriptions',
+		storage: 'D1',
+		purpose:
+			'The same content-free "wake up and sync" push as above, but for the native iOS app (which can’t use Web Push). No message content is ever pushed.',
+		driftChecked: true,
+		fields: [
+			{ name: 'id', description: 'Row identifier.' },
+			{ name: 'username', description: 'Whose device this is.' },
+			{ name: 'device_token', description: 'An opaque Apple push token for your device. It carries no content, only a nudge to wake up and sync.' },
+			{ name: 'environment', description: 'Which Apple push environment the token belongs to (sandbox during development, production otherwise). Says nothing about you.' },
+			{ name: 'created_at', description: 'When you turned notifications on.' },
+		],
+	},
+	{
 		name: 'Mailbox (Durable Object storage)',
 		storage: 'Durable Object',
 		purpose: 'Your personal mailbox. It holds encrypted envelopes only while you are offline. The moment your device confirms it got them, they are deleted, and anything still sitting there after 14 days is deleted anyway, no exceptions.',

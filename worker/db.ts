@@ -121,14 +121,15 @@ export async function checkRateLimit(
 }
 
 // Account deletion (invariant #6): synchronously remove EVERY D1 row tied to a
-// user — the account, its one-time prekeys, its push subscriptions, and its
-// rate-limit counters (bundle-lookup, login, and signup keys) — in one atomic
-// batch. The mailbox DO's queued ciphertext is purged separately (see
-// worker/account.ts). Nothing is soft-deleted.
+// user — the account, its one-time prekeys, its push subscriptions (Web Push
+// AND APNs), and its rate-limit counters (bundle-lookup, login, and signup
+// keys) — in one atomic batch. The mailbox DO's queued ciphertext is purged
+// separately (see worker/account.ts). Nothing is soft-deleted.
 export async function deleteUserData(db: D1Database, username: string): Promise<void> {
 	await db.batch([
 		db.prepare('DELETE FROM one_time_prekeys WHERE username = ?').bind(username),
 		db.prepare('DELETE FROM push_subscriptions WHERE username = ?').bind(username),
+		db.prepare('DELETE FROM apns_subscriptions WHERE username = ?').bind(username),
 		db.prepare('DELETE FROM rate_limits WHERE requester IN (?, ?, ?)').bind(username, `login:${username}`, `signup:${username}`),
 		db.prepare('DELETE FROM users WHERE username = ?').bind(username),
 	]);

@@ -49,7 +49,7 @@ import {
 } from './auth';
 import { handleGetBundle, handlePublishKeys } from './keys';
 import { handleMediaDelete, handleMediaDownload, handleMediaUpload } from './media';
-import { handlePushSubscribe, handlePushUnsubscribe, handleVapidPublicKey } from './push';
+import { handlePushSubscribe, handlePushUnsubscribe, handleVapidPublicKey, handleApnsSubscribe, handleApnsUnsubscribe } from './push';
 import { handleDeleteAccount } from './account';
 import { handleSeal, handleSealKeys } from './seal';
 
@@ -338,6 +338,20 @@ async function route(request: Request, env: Env): Promise<Response> {
 			const username = await readAuthenticatedUsername(request, env);
 			if (!username) return json({ error: 'Not authenticated.' }, { status: 401 });
 			return handlePushUnsubscribe(request, env, username);
+		}
+
+		// APNs push (native iOS — no Service Worker, so no Web Push). Same
+		// content-free wake-up; the device registers a token instead of an
+		// endpoint. Both paths require auth.
+		if (pathname === '/api/push/apns/subscribe' && method === 'POST') {
+			const username = await readAuthenticatedUsername(request, env);
+			if (!username) return json({ error: 'Not authenticated.' }, { status: 401 });
+			return handleApnsSubscribe(request, env, username);
+		}
+		if (pathname === '/api/push/apns/unsubscribe' && method === 'POST') {
+			const username = await readAuthenticatedUsername(request, env);
+			if (!username) return json({ error: 'Not authenticated.' }, { status: 401 });
+			return handleApnsUnsubscribe(request, env, username);
 		}
 
 		return json({ error: 'Not found.' }, { status: 404 });

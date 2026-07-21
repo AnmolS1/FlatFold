@@ -21,4 +21,9 @@ interface __BaseEnv_Env {
 	VAPID_PRIVATE_JWK: string;
 	SEAL_GATEWAY_PRIVATE_KEY: string;
 	SEAL_RELAY_AUTH: string;
+	// APNs provider-auth private key — the CONTENTS of the Apple ".p8" file
+	// (PEM PKCS8). Secret; set via `wrangler secret put APNS_KEY` in prod and
+	// `.dev.vars` locally. The non-secret APNS_KEY_ID / APNS_TEAM_ID /
+	// APNS_BUNDLE_ID live in wrangler.jsonc `vars`.
+	APNS_KEY: string;
 }

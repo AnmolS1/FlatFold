@@ -28,6 +28,8 @@ import {
 	sealedFirstContactEnvelope,
 } from '../lib/messaging';
 import { apiRegisterSealToken } from '../lib/api';
+import { isNativePlatform, wsOrigin } from '../lib/platform';
+import { cachedNativeToken } from '../lib/nativeToken';
 import { apiSealedSend } from '../lib/sealedFetch';
 import { generateSealToken } from '../lib/sealToken';
 import type { ChatPayload } from '../lib/chatPayload';
@@ -708,8 +710,21 @@ export const Chat = () => {
 		// error — only genuine unexpected errors/closes should toast.
 		let intentionalClose = false;
 
-		const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-		const ws = new WebSocket(`${protocol}//${location.host}/ws`);
+		// Web: same-origin, the SameSite=Strict cookie authenticates the upgrade.
+		// Native (capacitor://localhost): cross-origin, no cookie — so target the
+		// absolute wss:// API and smuggle the bearer token as a subprotocol offer
+		// (the JS WebSocket constructor can't set headers; `protocols` is the one
+		// channel, and the Worker reads it at upgrade to route to the mailbox DO).
+		// The token is read synchronously from cache, warmed by the startup /me.
+		let ws: WebSocket;
+		if (isNativePlatform()) {
+			const token = cachedNativeToken();
+			const url = `${wsOrigin()}/ws`;
+			ws = new WebSocket(url, token ? ['flatfold', `flatfold.bearer.${token}`] : ['flatfold']);
+		} else {
+			const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+			ws = new WebSocket(`${protocol}//${location.host}/ws`);
+		}
 		wsRef.current = ws;
 
 		ws.onopen = () => {

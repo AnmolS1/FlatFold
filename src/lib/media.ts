@@ -7,6 +7,7 @@
 
 import { aeadDecrypt, aeadEncrypt, randomBytes, sha256Hash } from '../crypto/primitives';
 import { base64ToBytes, bytesToBase64 } from '../keystore/codec';
+import { apiFetch } from './apiClient';
 import type { MediaRef } from '../types';
 
 const KEY_LENGTH = 32;
@@ -35,9 +36,8 @@ export async function encryptAndUploadMedia(input: MediaUploadInput): Promise<Me
 	const ciphertext = aeadEncrypt(key, nonce, input.bytes);
 	const digest = sha256Hash(ciphertext);
 
-	const response = await fetch('/api/media', {
+	const response = await apiFetch('/api/media', {
 		method: 'POST',
-		credentials: 'include',
 		headers: { 'Content-Type': 'application/octet-stream' },
 		// Copy into a fresh ArrayBuffer so we hand fetch a plain BufferSource,
 		// never a SharedArrayBuffer-backed view.
@@ -62,7 +62,7 @@ export async function encryptAndUploadMedia(input: MediaUploadInput): Promise<Me
 // Downloads, verifies, and decrypts the ciphertext referenced by `ref`.
 // Throws if the object is gone or the digest doesn't match (fail closed).
 export async function downloadAndDecryptMedia(ref: MediaRef): Promise<Uint8Array> {
-	const response = await fetch(`/api/media/${encodeURIComponent(ref.id)}`, { credentials: 'include' });
+	const response = await apiFetch(`/api/media/${encodeURIComponent(ref.id)}`);
 	if (!response.ok) throw new Error('Attachment is no longer available.');
 	const ciphertext = new Uint8Array(await response.arrayBuffer());
 
@@ -77,7 +77,7 @@ export async function downloadAndDecryptMedia(ref: MediaRef): Promise<Uint8Array
 // go. Best-effort — a failure just leaves it for the deploy-time TTL sweep.
 export async function ackMediaFetched(id: string): Promise<void> {
 	try {
-		await fetch(`/api/media/${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'include' });
+		await apiFetch(`/api/media/${encodeURIComponent(id)}`, { method: 'DELETE' });
 	} catch {
 		/* ignore — TTL will reap it */
 	}

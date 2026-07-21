@@ -1,9 +1,15 @@
-// Typed fetch wrappers for the /api/* endpoints. `credentials: 'include'`
-// sends/receives the httpOnly session cookie on every call — see
-// worker/auth.ts for why a cookie (not a header/localStorage token) is the
-// one auth mechanism shared by both /api/* and the /ws handshake.
+// Typed wrappers for the /api/* endpoints. All calls go through `apiFetch`
+// (lib/apiClient), which handles the web-vs-native split: web uses a relative
+// URL + the httpOnly SameSite=Strict cookie; native uses the absolute origin +
+// `Authorization: Bearer`. See worker/auth.ts for why web is cookie-only.
+//
+// The session token is returned in the BODY only for native (signup/login/me);
+// those three capture it into the native token store. Web bodies carry no token.
 
 import type { PreKeyBundleResponse, PublishKeysRequest } from '../types';
+import { apiFetch } from './apiClient';
+import { isNativePlatform } from './platform';
+import { clearNativeToken, setNativeToken } from './nativeToken';
 
 async function parseJsonOrThrow(response: Response): Promise<unknown> {
 	const body = await response.json().catch(() => null);
@@ -14,24 +20,34 @@ async function parseJsonOrThrow(response: Response): Promise<unknown> {
 	return body;
 }
 
+// Native auth responses carry the token in the body — persist it so later calls
+// (and the WebSocket) can attach it. No-op for web (body has no token).
+async function captureNativeToken(body: unknown): Promise<void> {
+	if (!isNativePlatform()) return;
+	const token = (body as { token?: unknown } | null)?.token;
+	if (typeof token === 'string' && token.length > 0) await setNativeToken(token);
+}
+
 export async function apiSignup(username: string, password: string): Promise<{ username: string }> {
-	const response = await fetch('/api/auth/signup', {
+	const response = await apiFetch('/api/auth/signup', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		credentials: 'include',
 		body: JSON.stringify({ username, password }),
 	});
-	return parseJsonOrThrow(response) as Promise<{ username: string }>;
+	const body = (await parseJsonOrThrow(response)) as { username: string; token?: string };
+	await captureNativeToken(body);
+	return { username: body.username };
 }
 
 export async function apiLogin(username: string, password: string): Promise<{ username: string }> {
-	const response = await fetch('/api/auth/login', {
+	const response = await apiFetch('/api/auth/login', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		credentials: 'include',
 		body: JSON.stringify({ username, password }),
 	});
-	return parseJsonOrThrow(response) as Promise<{ username: string }>;
+	const body = (await parseJsonOrThrow(response)) as { username: string; token?: string };
+	await captureNativeToken(body);
+	return { username: body.username };
 }
 
 export interface MeResponse {
@@ -40,13 +56,22 @@ export interface MeResponse {
 }
 
 export async function apiMe(): Promise<MeResponse | null> {
-	const response = await fetch('/api/auth/me', { credentials: 'include' });
-	if (response.status === 401) return null;
-	return parseJsonOrThrow(response) as Promise<MeResponse>;
+	const response = await apiFetch('/api/auth/me');
+	if (response.status === 401) {
+		// The token is dead (expired / epoch-bumped) — drop it so we stop
+		// re-sending a credential the server will only reject. Web clears via
+		// its own cookie lifecycle; this is the native equivalent.
+		if (isNativePlatform()) await clearNativeToken();
+		return null;
+	}
+	const body = (await parseJsonOrThrow(response)) as MeResponse & { token?: string };
+	await captureNativeToken(body); // native: sliding refresh returns a fresh token
+	return { username: body.username, sessionCreatedAt: body.sessionCreatedAt };
 }
 
 export async function apiLogout(): Promise<void> {
-	await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+	await apiFetch('/api/auth/logout', { method: 'POST' });
+	await clearNativeToken(); // web clears via Set-Cookie; native drops its stored token
 }
 
 // "Sign out everywhere" (L3): password re-auth, then the server bumps the
@@ -54,21 +79,20 @@ export async function apiLogout(): Promise<void> {
 // caller redirects to login; the local keystore is left intact (this ends
 // logins, not the account).
 export async function apiLogoutAll(password: string): Promise<void> {
-	const response = await fetch('/api/auth/logout-all', {
+	const response = await apiFetch('/api/auth/logout-all', {
 		method: 'POST',
-		credentials: 'include',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ password }),
 	});
 	await parseJsonOrThrow(response);
+	await clearNativeToken(); // the epoch bump invalidated this token server-side too
 }
 
 // Irreversible: deletes the server-side account (D1 rows + queued ciphertext)
 // after password re-auth. The caller must ALSO wipe the local keystore.
 export async function apiDeleteAccount(password: string): Promise<void> {
-	const response = await fetch('/api/account', {
+	const response = await apiFetch('/api/account', {
 		method: 'DELETE',
-		credentials: 'include',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ password }),
 	});
@@ -76,10 +100,9 @@ export async function apiDeleteAccount(password: string): Promise<void> {
 }
 
 export async function apiPublishKeys(request: PublishKeysRequest): Promise<void> {
-	const response = await fetch('/api/keys/publish', {
+	const response = await apiFetch('/api/keys/publish', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		credentials: 'include',
 		body: JSON.stringify(request),
 	});
 	await parseJsonOrThrow(response);
@@ -93,10 +116,9 @@ export async function apiPublishKeys(request: PublishKeysRequest): Promise<void>
 // accept breaks first-contact, whereas a DO token not yet in the bundle is
 // simply not handed out — the safe failure direction.
 export async function apiRegisterSealToken(token: string): Promise<void> {
-	const response = await fetch('/api/seal/register-token', {
+	const response = await apiFetch('/api/seal/register-token', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		credentials: 'include',
 		body: JSON.stringify({ token }),
 	});
 	await parseJsonOrThrow(response);
@@ -108,7 +130,7 @@ export type FetchBundleResult =
 	| { status: 'not-published' };
 
 export async function apiFetchBundle(username: string): Promise<FetchBundleResult> {
-	const response = await fetch(`/api/keys/bundle/${encodeURIComponent(username)}`, { credentials: 'include' });
+	const response = await apiFetch(`/api/keys/bundle/${encodeURIComponent(username)}`);
 	if (response.status === 404) return { status: 'not-found' };
 	if (response.status === 409) return { status: 'not-published' };
 	const bundle = (await parseJsonOrThrow(response)) as PreKeyBundleResponse;

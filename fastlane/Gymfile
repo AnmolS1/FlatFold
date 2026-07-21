@@ -1,0 +1,13 @@
+# gym (build_app) configuration for the `beta` lane. Kept out of the Fastfile so
+# the build settings are declarative and reviewable in one place.
+#
+# The app is a Capacitor shell: `npm run build:native` builds dist/client and
+# runs `cap sync ios`, so by the time gym runs the web assets are already inside
+# the Xcode project. Signing comes from match (App Store profile for dev.flatfold)
+# — see the beta lane in Fastfile.
+scheme("App")
+project("ios/App/App.xcodeproj")
+export_method("app-store")
+clean(true)
+output_directory("build")
+output_name("FlatFold")

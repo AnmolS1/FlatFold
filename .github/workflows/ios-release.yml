@@ -1,0 +1,97 @@
+name: iOS Release
+
+# Phase 1 native automation: on a version tag, build the Capacitor iOS app and
+# ship it to TestFlight. Separate from ci.yml on purpose — this needs a macOS
+# runner, real signing material, and repository secrets, none of which the PR
+# test suite (ci.yml) should ever touch.
+#
+# Trigger: pushing a tag like `v1.2.0`. (git tag v1.2.0 && git push origin v1.2.0)
+on:
+  push:
+    tags:
+      - 'v*'
+
+# One release build per tag; a re-push of the same tag supersedes an in-flight run.
+concurrency:
+  group: ios-release-${{ github.ref }}
+  cancel-in-progress: true
+
+# Only checkout needs the repo. flatfold-certs is cloned by match over HTTPS with
+# MATCH_GIT_BASIC_AUTHORIZATION, NOT the GITHUB_TOKEN — so no extra token scope here.
+permissions:
+  contents: read
+
+jobs:
+  testflight:
+    runs-on: macos-14
+    env:
+      # fastlane emits warnings and can misbehave under a non-UTF-8 locale.
+      LC_ALL: en_US.UTF-8
+      LANG: en_US.UTF-8
+      FASTLANE_SKIP_UPDATE_CHECK: 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Same Node as ci.yml (satisfies engines.node >=20; dev baseline is 24).
+          node-version: '24'
+          cache: npm
+
+      # npm ci (not install) so the lockfile is authoritative. postinstall runs
+      # `wrangler types` to generate worker-configuration.d.ts (gitignored) — local
+      # codegen from wrangler.jsonc, needs no Cloudflare credentials.
+      - name: Install JS deps
+        run: npm ci
+        env:
+          WRANGLER_SEND_METRICS: false
+
+      - name: Generated worker types present
+        run: test -f worker-configuration.d.ts
+
+      # Builds dist/client, generates the SW manifest, injects the native CSP, and
+      # runs `cap sync ios` so the web assets are inside the Xcode project before
+      # gym builds it.
+      - name: Build web + sync iOS
+        run: npm run build:native
+        env:
+          WRANGLER_SEND_METRICS: false
+
+      - name: Select Xcode
+        # macos-14 ships a recent stable Xcode that builds a Capacitor (SwiftPM)
+        # app fine. To pin a version, uncomment and point at the desired app
+        # bundle (e.g. /Applications/Xcode_16.1.app). Printing aids debugging.
+        run: |
+          # sudo xcode-select -switch /Applications/Xcode_16.app
+          xcodebuild -version
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          # Matches the local toolchain (ruby 3.4). bundler-cache installs the
+          # pinned fastlane from the Gemfile and caches it between runs.
+          ruby-version: '3.4'
+          bundler-cache: true
+
+      # Decode the App Store Connect API private key (.p8) from a secret to a file
+      # OUTSIDE the repo tree (RUNNER_TEMP), so it can never be committed. ASC_KEY_PATH
+      # (absolute) is read by asc_api_key in the Fastfile. Never echoed.
+      - name: Write App Store Connect API key
+        env:
+          ASC_KEY_BASE64: ${{ secrets.ASC_KEY_BASE64 }}
+        run: |
+          echo "$ASC_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+
+      - name: Build and upload to TestFlight
+        run: bundle exec fastlane ios beta
+        env:
+          # Passphrase that decrypts the certs/profiles in flatfold-certs.
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          # base64 of "x-access-token:<PAT>"; lets match clone flatfold-certs over
+          # HTTPS (CI has no SSH key). Its presence also flips the Matchfile git_url
+          # to https. match reads this env var automatically.
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+          # App Store Connect API key identity (App Manager role). ASC_KEY_PATH points
+          # at the .p8 decoded above; asc_api_key in the Fastfile reads all three.
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_PATH: ${{ runner.temp }}/AuthKey.p8

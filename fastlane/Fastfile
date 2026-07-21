@@ -20,4 +20,49 @@ platform :ios do
   lane :certs do
     match(type: "appstore", api_key: asc_api_key, readonly: false)
   end
+
+  desc "Build the signed app and upload it to TestFlight (CI: on a v* tag)"
+  lane :beta do
+    # On a CI runner, create + unlock a temporary keychain so match can import the
+    # distribution cert non-interactively (sets MATCH_KEYCHAIN_*). Guarded so local
+    # runs use the login keychain unchanged.
+    setup_ci if ENV["CI"]
+
+    # readonly: certs/profiles already exist in flatfold-certs. CI must NEVER mint
+    # new signing material — that's the `certs` lane's job, run by a human. In CI
+    # match clones flatfold-certs over HTTPS using MATCH_GIT_BASIC_AUTHORIZATION
+    # (the Matchfile git_url auto-switches to https when that env var is present).
+    match(type: "appstore", readonly: true, api_key: asc_api_key)
+
+    # Capacitor's Xcode project defaults to AUTOMATIC signing, which fails on a
+    # runner with no signed-in Xcode account. Force manual signing onto the match
+    # profile so the ARCHIVE step (not just the export) uses it.
+    update_code_signing_settings(
+      path: "ios/App/App.xcodeproj",
+      use_automatic_signing: false,
+      team_id: "G2KBQH7KWT",
+      code_sign_identity: "Apple Distribution",
+      bundle_identifier: "dev.flatfold",
+      profile_name: "match AppStore dev.flatfold",
+    )
+
+    # Build settings (scheme, project, export_method, output) live in Gymfile.
+    # export_options pins the provisioning profile to match's default name so the
+    # export is deterministic and never falls back to automatic signing.
+    build_app(
+      export_options: {
+        provisioningProfiles: {
+          "dev.flatfold" => "match AppStore dev.flatfold",
+        },
+      },
+    )
+
+    # skip_waiting_for_build_processing: return as soon as the upload is accepted;
+    # Apple's server-side processing (and any TestFlight distribution) happens
+    # asynchronously, so the runner isn't billed for the wait.
+    upload_to_testflight(
+      api_key: asc_api_key,
+      skip_waiting_for_build_processing: true,
+    )
+  end
 end

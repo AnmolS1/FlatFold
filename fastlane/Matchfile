@@ -2,7 +2,15 @@
 # (OpenSSL AES-256 via MATCH_PASSWORD) in a private git repo. Nothing here is
 # plaintext; the passphrase lives in .match.env locally (gitignored) and in CI
 # secrets later. Apple auth is the ASC API key (see Fastfile), so no 2FA.
-git_url("git@github.com:AnmolS1/flatfold-certs.git")
+# Locally we clone flatfold-certs over SSH. CI has no SSH key, so it authenticates
+# over HTTPS with MATCH_GIT_BASIC_AUTHORIZATION (base64 of "x-access-token:<PAT>",
+# which match reads automatically). We select the matching URL scheme by whether
+# that env var is set — no code path in CI ever touches SSH.
+git_url(
+  (ENV["MATCH_GIT_BASIC_AUTHORIZATION"].to_s.empty? ?
+    "git@github.com:AnmolS1/flatfold-certs.git" :
+    "https://github.com/AnmolS1/flatfold-certs.git")
+)
 storage_mode("git")
 type("appstore")
 app_identifier(["dev.flatfold"])

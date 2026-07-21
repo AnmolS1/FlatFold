@@ -122,7 +122,17 @@ export class Mailbox extends DurableObject<Env> {
 
 		this.ctx.waitUntil(this.flushQueued(server));
 
-		return new Response(null, { status: 101, webSocket: client });
+		// Echo the selected subprotocol. The Worker sanitized it to just
+		// 'flatfold' for a native (bearer-in-subprotocol) upgrade, and stripped
+		// it entirely for the web cookie path — so this echoes 'flatfold' for
+		// native and nothing for web. Some WebKit builds fail the handshake if
+		// the client offered a subprotocol and the server selects none.
+		const selectedProtocol = request.headers.get('Sec-WebSocket-Protocol');
+		return new Response(null, {
+			status: 101,
+			webSocket: client,
+			headers: selectedProtocol ? { 'Sec-WebSocket-Protocol': selectedProtocol } : undefined,
+		});
 	}
 
 	// Account deletion (invariant #6): synchronously wipe THIS user's mailbox —

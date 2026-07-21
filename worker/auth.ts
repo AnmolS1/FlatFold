@@ -116,6 +116,49 @@ export async function verifySessionToken(token: string, secret: string): Promise
 	return (await verifySessionPayload(token, secret))?.sub ?? null;
 }
 
+// ---- native-client token delivery (Phase 1: native apps) ----
+// Web authenticates with the httpOnly SameSite=Strict cookie below. Native
+// clients (capacitor://localhost) are cross-origin — that cookie can't ride —
+// so they signal themselves with this header, receive the token in the response
+// BODY, and return it as `Authorization: Bearer`. `Origin` is deliberately NOT
+// the signal: this selects RESPONSE FORMAT only (cookie vs body), never
+// authorization, so a spoofed value gains nothing — every path still requires
+// valid credentials. Never promote this into an auth decision.
+export const NATIVE_CLIENT_HEADER = 'X-FlatFold-Native';
+
+export function isNativeClient(request: Request): boolean {
+	return request.headers.get(NATIVE_CLIENT_HEADER) !== null;
+}
+
+// The subprotocol prefix native smuggles the token under on /ws. The in-webview
+// JS `new WebSocket(url, protocols)` constructor can't set request headers, but
+// its `protocols` argument becomes the `Sec-WebSocket-Protocol` header — the one
+// channel the Worker CAN read at upgrade time, which it must, to route the
+// socket to the per-user mailbox DO (`getByName(username)`) before any frame is
+// exchanged. The token charset (base64url + '.') is all valid RFC 6455 tokens.
+export const WS_BEARER_PREFIX = 'flatfold.bearer.';
+// The benign subprotocol the client also offers and the server echoes in the
+// 101 (some WebKit builds fail the handshake if the server selects none).
+export const WS_ECHO_SUBPROTOCOL = 'flatfold';
+
+// A bearer token from `Authorization: Bearer …` (/api/*) or a
+// `flatfold.bearer.<token>` subprotocol offer (/ws). Null if neither is present.
+export function readBearerToken(request: Request): string | null {
+	const authz = request.headers.get('Authorization');
+	if (authz && authz.startsWith('Bearer ')) {
+		const token = authz.slice('Bearer '.length).trim();
+		if (token) return token;
+	}
+	const protocols = request.headers.get('Sec-WebSocket-Protocol');
+	if (protocols) {
+		for (const raw of protocols.split(',')) {
+			const p = raw.trim();
+			if (p.startsWith(WS_BEARER_PREFIX)) return p.slice(WS_BEARER_PREFIX.length);
+		}
+	}
+	return null;
+}
+
 // ---- cookie plumbing ----
 // httpOnly + Secure + SameSite=Strict: a browser WebSocket constructor can't
 // set an Authorization header, so a cookie is the one mechanism that

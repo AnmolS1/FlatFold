@@ -37,12 +37,15 @@ import {
 	buildClearSessionCookie,
 	buildSessionCookie,
 	hashPassword,
+	isNativeClient,
 	isValidPassword,
 	isValidUsername,
+	readBearerToken,
 	readSessionCookie,
 	signSessionToken,
 	verifyPassword,
 	verifySessionPayload,
+	WS_ECHO_SUBPROTOCOL,
 } from './auth';
 import { handleGetBundle, handlePublishKeys } from './keys';
 import { handleMediaDelete, handleMediaDownload, handleMediaUpload } from './media';
@@ -59,8 +62,39 @@ function json(body: unknown, init: ResponseInit = {}): Response {
 	});
 }
 
+// CORS for native cross-origin callers (capacitor://localhost). Safe with a
+// wildcard origin BECAUSE we never set Allow-Credentials: native authenticates
+// with a bearer token, and the web cookie is SameSite=Strict so it never rides
+// a cross-site request. So a cross-origin page can neither read a credentialed
+// response nor borrow a victim's cookie — an unauthenticated caller just gets
+// 401. Wildcard here does not widen the non-browser attack surface (any client
+// can already call a public HTTPS endpoint; CORS only gates browser JS reads).
+const CORS_HEADERS: Record<string, string> = {
+	'Access-Control-Allow-Origin': '*',
+	'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+	'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-FlatFold-Native',
+	'Access-Control-Max-Age': '86400',
+};
+
+// Auth response: native gets the token in the BODY (the cross-origin cookie
+// can't ride; a JS-readable token is native's only option and lives in the
+// Keychain). Web gets the httpOnly cookie and NEVER the token in the body — XSS
+// can't read a cookie but could read a response body.
+//
+// `native` is decided per-endpoint: login/signup have no incoming token, so
+// they key on the `X-FlatFold-Native` header; authenticated endpoints (me)
+// instead key on "did this request arrive via bearer?" — so a native client's
+// sliding refresh never silently returns a Set-Cookie it can't use, even if it
+// forgets the header.
+function authResponse(body: Record<string, unknown>, token: string, native: boolean): Response {
+	if (native) return json({ ...body, token });
+	return json(body, { headers: { 'Set-Cookie': buildSessionCookie(token) } });
+}
+
 async function readAuthenticatedUsername(request: Request, env: Env): Promise<string | null> {
-	const token = readSessionCookie(request);
+	// Bearer (native /api/* or /ws subprotocol) or the web session cookie —
+	// both are the same signed token verified identically below.
+	const token = readBearerToken(request) ?? readSessionCookie(request);
 	if (!token) return null;
 	const payload = await verifySessionPayload(token, env.SESSION_SECRET);
 	if (!payload) return null;
@@ -99,7 +133,7 @@ async function handleSignup(request: Request, env: Env): Promise<Response> {
 	await createUser(env.DB, { username, passwordVerifier, createdAt });
 
 	const token = await signSessionToken(username, env.SESSION_SECRET, 0); // fresh user ⇒ epoch 0
-	return json({ username }, { headers: { 'Set-Cookie': buildSessionCookie(token) } });
+	return authResponse({ username }, token, isNativeClient(request));
 }
 
 async function handleLogin(request: Request, env: Env): Promise<Response> {
@@ -126,11 +160,11 @@ async function handleLogin(request: Request, env: Env): Promise<Response> {
 	}
 
 	const token = await signSessionToken(username, env.SESSION_SECRET, user.token_epoch);
-	return json({ username }, { headers: { 'Set-Cookie': buildSessionCookie(token) } });
+	return authResponse({ username }, token, isNativeClient(request));
 }
 
 async function handleMe(request: Request, env: Env): Promise<Response> {
-	const token = readSessionCookie(request);
+	const token = readBearerToken(request) ?? readSessionCookie(request);
 	const payload = token ? await verifySessionPayload(token, env.SESSION_SECRET) : null;
 	if (!payload) return json({ error: 'Not authenticated.' }, { status: 401 });
 	// L3 revocation check + sliding refresh: reject a stale-epoch token, else
@@ -140,10 +174,7 @@ async function handleMe(request: Request, env: Env): Promise<Response> {
 	const user = await getUser(env.DB, payload.sub);
 	if (!user || user.token_epoch !== payload.epoch) return json({ error: 'Not authenticated.' }, { status: 401 });
 	const refreshed = await signSessionToken(payload.sub, env.SESSION_SECRET, user.token_epoch, payload.iat);
-	return json(
-		{ username: payload.sub, sessionCreatedAt: payload.iat },
-		{ headers: { 'Set-Cookie': buildSessionCookie(refreshed) } }
-	);
+	return authResponse({ username: payload.sub, sessionCreatedAt: payload.iat }, refreshed, readBearerToken(request) !== null);
 }
 
 function handleLogout(): Response {
@@ -179,14 +210,20 @@ async function handleWebSocketUpgrade(request: Request, env: Env): Promise<Respo
 	// trusted choke point can't be spoofed by the original client request).
 	const headers = new Headers(request.headers);
 	headers.set('X-Authenticated-User', username);
+	// Don't leak the bearer token (smuggled as a `flatfold.bearer.<token>`
+	// subprotocol offer) into the DO layer — the Worker already authenticated.
+	// Keep only the benign `flatfold` marker so the DO can echo it in the 101.
+	// Web (cookie path) offers no subprotocol, so this deletes the header.
+	const offered = (request.headers.get('Sec-WebSocket-Protocol') ?? '').split(',').map((p) => p.trim());
+	if (offered.includes(WS_ECHO_SUBPROTOCOL)) headers.set('Sec-WebSocket-Protocol', WS_ECHO_SUBPROTOCOL);
+	else headers.delete('Sec-WebSocket-Protocol');
 	const forwardedRequest = new Request(request, { headers });
 
 	const stub = env.MAILBOX.getByName(username);
 	return stub.fetch(forwardedRequest);
 }
 
-export default {
-	async fetch(request: Request, env: Env): Promise<Response> {
+async function route(request: Request, env: Env): Promise<Response> {
 		const url = new URL(request.url);
 		const { pathname } = url;
 		const { method } = request;
@@ -304,5 +341,21 @@ export default {
 		}
 
 		return json({ error: 'Not found.' }, { status: 404 });
+}
+
+export default {
+	async fetch(request: Request, env: Env): Promise<Response> {
+		const url = new URL(request.url);
+		// Native cross-origin preflight — answer it before routing.
+		if (request.method === 'OPTIONS' && url.pathname.startsWith('/api/')) {
+			return new Response(null, { status: 204, headers: CORS_HEADERS });
+		}
+		const response = await route(request, env);
+		// Let native (capacitor://localhost) read /api responses cross-origin.
+		// /ws is not CORS-relevant (WS upgrades bypass CORS).
+		if (url.pathname.startsWith('/api/')) {
+			for (const [key, value] of Object.entries(CORS_HEADERS)) response.headers.set(key, value);
+		}
+		return response;
 	},
 } satisfies ExportedHandler<Env>;

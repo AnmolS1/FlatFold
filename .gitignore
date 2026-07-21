@@ -48,3 +48,6 @@ worker-configuration.d.ts
 *-mobile.png
 *-desktop.png
 m?-*.png
+
+# App Store Connect API private keys — never commit
+*.p8

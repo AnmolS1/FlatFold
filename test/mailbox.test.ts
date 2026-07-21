@@ -27,6 +27,27 @@ function nextMessage(ws: WebSocket): Promise<WsMessageFrame> {
 	});
 }
 
+// Poll a mailbox DO's queued-envelope keys until they reach `expected` (or a
+// timeout). The send/ack round trip is async across two DOs, so a fixed 10ms
+// sleep races under load — flaky in the full suite (fails ~50% locally, and on
+// clean prod too). Polling makes it deterministic without slowing the happy path.
+async function waitForEnvelopeKeys(
+	stub: ReturnType<typeof env.MAILBOX.getByName>,
+	expected: number
+): Promise<string[]> {
+	const deadline = Date.now() + 2000;
+	let keys: string[] = [];
+	do {
+		keys = await runInDurableObject(stub, async (_instance, state) => {
+			const list = await state.storage.list({ prefix: 'envelope:' });
+			return [...list.keys()];
+		});
+		if (keys.length === expected) return keys;
+		await new Promise((resolve) => setTimeout(resolve, 5));
+	} while (Date.now() < deadline);
+	return keys; // timed out — return the real count so the assertion reports it
+}
+
 // Collects the next `count` frames a socket receives, in the order the
 // socket actually emits them (not necessarily the order `send` was called
 // server-side — that's exactly what these ordering tests are checking).
@@ -174,13 +195,9 @@ describe('mailbox durable object — real routing (M3)', () => {
 		if (!judyCookie) throw new Error('Expected a Set-Cookie header from signup');
 
 		ivan.send(JSON.stringify({ type: 'send', id: 'msg-ack-1', to: 'judy_mailbox', ciphertext: 'ct-ack', header: FAKE_HEADER }));
-		await new Promise((resolve) => setTimeout(resolve, 10));
 
 		const judyStub = env.MAILBOX.getByName('judy_mailbox');
-		const queuedBeforeAck = await runInDurableObject(judyStub, async (_i, state) => {
-			const list = await state.storage.list({ prefix: 'envelope:' });
-			return [...list.keys()];
-		});
+		const queuedBeforeAck = await waitForEnvelopeKeys(judyStub, 1);
 		expect(queuedBeforeAck.length).toBe(1);
 
 		// Judy connects, receives the envelope, and acks it.
@@ -190,12 +207,8 @@ describe('mailbox durable object — real routing (M3)', () => {
 		judy.accept();
 		const envelope = await nextMessage(judy);
 		judy.send(JSON.stringify({ type: 'ack', messageId: envelope.id, to: 'ivan_mailbox' }));
-		await new Promise((resolve) => setTimeout(resolve, 10));
 
-		const queuedAfterAck = await runInDurableObject(judyStub, async (_i, state) => {
-			const list = await state.storage.list({ prefix: 'envelope:' });
-			return [...list.keys()];
-		});
+		const queuedAfterAck = await waitForEnvelopeKeys(judyStub, 0);
 		expect(queuedAfterAck.length).toBe(0);
 
 		ivan.close();

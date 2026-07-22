@@ -23,6 +23,14 @@ For _fastlane_ installation instructions, see [Installing _fastlane_](https://do
 
 Generate/sync App Store signing certs + profiles into flatfold-certs (encrypted)
 
+### ios beta
+
+```sh
+[bundle exec] fastlane ios beta
+```
+
+Build the signed app and upload it to TestFlight (CI: on a v* tag)
+
 ----
 
 This README.md is auto-generated and will be re-generated every time [_fastlane_](https://fastlane.tools) is run.

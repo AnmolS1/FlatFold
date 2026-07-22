@@ -244,6 +244,26 @@ right tool. The `/transparency` page says this to users directly.
     metadata minimization. Fully worked through under **invariant #6** in §5,
     including why we chose metadata-minimization over deletion-completeness.
     Listed here so the residual is findable from this list too.
+18. **App-level TLS pinning of the native transport is not feasible for the JS
+    channel, and is deliberately not done.** The iOS app is a WKWebView loading a
+    bundled shell from `capacitor://localhost`; all server traffic is JS `fetch`
+    and `WebSocket`, which WKWebView routes through the OS with standard CA
+    validation and App Transport Security (TLS 1.2+, valid chain) — but gives the
+    app no supported hook to pin (WKWebView's cert-challenge delegate covers
+    top-level navigations, not JS `fetch`/`WebSocket`, and the shell never
+    navigates to the origin at all). Routing `/api` through a native HTTP plugin
+    (CapacitorHttp + a pinning delegate) could pin that leg, but the WebSocket —
+    which carries the same session bearer token as its `flatfold.bearer.<token>`
+    subprotocol — stays unpinnable short of a native WS rewrite, so partial
+    pinning would guard only the login password while leaving the token exposed
+    to the very CA-level MITM it claims to stop. That is the SRI tradeoff again
+    (§2): a real-looking control that does not close the threat, while adding a
+    hard cert-rotation outage risk (the shell is signed and not remotely
+    updatable, so a broken pin needs an App Store cycle to recover). The
+    transport therefore relies on OS TLS + ATS + CA validation. Message content
+    is E2E-encrypted regardless of transport, so this affects only the bearer
+    token, login password, and metadata against an active mis-issued-CA
+    adversary — a threat outside §3's current adversary set.
 
 ---
 

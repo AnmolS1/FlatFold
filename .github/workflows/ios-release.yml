@@ -23,7 +23,7 @@ permissions:
 
 jobs:
   testflight:
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       # fastlane emits warnings and can misbehave under a non-UTF-8 locale.
       LC_ALL: en_US.UTF-8
@@ -57,12 +57,13 @@ jobs:
         env:
           WRANGLER_SEND_METRICS: false
 
-      - name: Select Xcode
-        # macos-14 ships a recent stable Xcode that builds a Capacitor (SwiftPM)
-        # app fine. To pin a version, uncomment and point at the desired app
-        # bundle (e.g. /Applications/Xcode_16.1.app). Printing aids debugging.
+      - name: Select newest Xcode
+        # Capacitor 8's generated AppDelegate.swift needs Xcode 16+ (the default
+        # on macos-14 is 15.4, which fails to compile it). Select the newest
+        # Xcode installed on the runner rather than pinning a patch version that
+        # image updates could remove.
         run: |
-          # sudo xcode-select -switch /Applications/Xcode_16.app
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
           xcodebuild -version
 
       # Pinned to a full commit SHA (supply-chain: this workflow holds the Apple

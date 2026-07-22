@@ -124,6 +124,27 @@ export async function apiRegisterSealToken(token: string): Promise<void> {
 	await parseJsonOrThrow(response);
 }
 
+// Native APNs push subscription (iOS). The device token is opaque; the server
+// stores it to send content-free wake-ups. environment omitted → server default
+// 'production' (matches the app's aps-environment for TestFlight/App Store).
+export async function apiSubscribeApns(deviceToken: string): Promise<void> {
+	const response = await apiFetch('/api/push/apns/subscribe', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ deviceToken }),
+	});
+	await parseJsonOrThrow(response);
+}
+
+export async function apiUnsubscribeApns(deviceToken: string): Promise<void> {
+	const response = await apiFetch('/api/push/apns/unsubscribe', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ deviceToken }),
+	});
+	await parseJsonOrThrow(response);
+}
+
 export type FetchBundleResult =
 	| { status: 'ok'; bundle: PreKeyBundleResponse }
 	| { status: 'not-found' }

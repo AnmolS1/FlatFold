@@ -3,10 +3,15 @@
 // content-free "wake up and sync" signal — so nothing sensitive is involved
 // here beyond the (opaque) subscription endpoint.
 
+import { isNativePlatform } from './platform';
+import { isApnsSubscribed, subscribeToApnsNative, unsubscribeApnsNative } from './nativePush';
+
 const PREFS_CACHE = 'flatfold-prefs';
 const DECOY_KEY = '/__decoy_label';
 
 export function isPushSupported(): boolean {
+	// Native iOS supports push via APNs (no Service Worker / Web Push needed).
+	if (isNativePlatform()) return true;
 	return (
 		typeof navigator !== 'undefined' &&
 		'serviceWorker' in navigator &&
@@ -30,6 +35,7 @@ function base64urlToBytes(value: string): Uint8Array<ArrayBuffer> {
 export type SubscribeResult = 'subscribed' | 'denied' | 'unsupported' | 'error';
 
 export async function subscribeToPush(): Promise<SubscribeResult> {
+	if (isNativePlatform()) return subscribeToApnsNative(); // iOS APNs, not Web Push
 	if (!isPushSupported()) return 'unsupported';
 	try {
 		const permission = await Notification.requestPermission();
@@ -54,6 +60,7 @@ export async function subscribeToPush(): Promise<SubscribeResult> {
 }
 
 export async function unsubscribeFromPush(): Promise<void> {
+	if (isNativePlatform()) return unsubscribeApnsNative();
 	if (!isPushSupported()) return;
 	const registration = await navigator.serviceWorker.getRegistration();
 	const subscription = await registration?.pushManager.getSubscription();
@@ -68,6 +75,7 @@ export async function unsubscribeFromPush(): Promise<void> {
 }
 
 export async function isSubscribedToPush(): Promise<boolean> {
+	if (isNativePlatform()) return isApnsSubscribed();
 	if (!isPushSupported()) return false;
 	const registration = await navigator.serviceWorker.getRegistration();
 	const subscription = await registration?.pushManager.getSubscription();

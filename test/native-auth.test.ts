@@ -78,6 +78,18 @@ describe('native bearer auth — /api/*', () => {
 		expect(res.status).toBe(401);
 	});
 
+	it('a MALFORMED Bearer token fails closed with 401, never a 500', async () => {
+		// "not.a.token": the sig part "a" is not valid base64url, so base64urlDecode's
+		// atob would throw — which pre-fix propagated as a 500 (verifySessionPayload
+		// decoded the sig outside its try/catch). Every shape below must be a clean 401.
+		for (const bad of ['not.a.token', 'Bearer', '....', 'a.', 'onlyonepart', '.sig', '%%%.%%%']) {
+			const res = await SELF.fetch(`${BASE}/api/auth/me`, {
+				headers: { Authorization: `Bearer ${bad}`, ...NATIVE },
+			});
+			expect(res.status, `malformed token "${bad}"`).toBe(401);
+		}
+	});
+
 	it('a Bearer token is revoked by sign-out-everywhere (epoch bump)', async () => {
 		const token = await nativeToken('native_erin');
 		const out = await SELF.fetch(`${BASE}/api/auth/logout-all`, {

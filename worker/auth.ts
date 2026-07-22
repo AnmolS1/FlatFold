@@ -94,14 +94,19 @@ export async function signSessionToken(username: string, secret: string, epoch: 
 // Returns the verified payload (or null). The narrower verifySessionToken
 // below wraps this for the common "just the username" case.
 export async function verifySessionPayload(token: string, secret: string): Promise<TokenPayload | null> {
-	const [payloadB64, sigB64] = token.split('.');
-	if (!payloadB64 || !sigB64) return null;
-
-	const key = await importHmacKey(secret);
-	const valid = await crypto.subtle.verify('HMAC', key, base64urlDecode(sigB64), textEncoder.encode(payloadB64));
-	if (!valid) return null;
-
+	// The whole verify is fail-closed: ANY malformed token → null (→ 401), never
+	// a throw. This matters now that clients can send an ARBITRARY bearer token —
+	// `base64urlDecode`'s atob throws on a non-base64 signature (e.g. "not.a.token"),
+	// which pre-bearer only the server-set (always-valid) cookie fed this, so the
+	// throw used to be unreachable and surfaced as a 500.
 	try {
+		const [payloadB64, sigB64] = token.split('.');
+		if (!payloadB64 || !sigB64) return null;
+
+		const key = await importHmacKey(secret);
+		const valid = await crypto.subtle.verify('HMAC', key, base64urlDecode(sigB64), textEncoder.encode(payloadB64));
+		if (!valid) return null;
+
 		const payload = JSON.parse(textDecoder.decode(base64urlDecode(payloadB64))) as TokenPayload;
 		if (typeof payload.sub !== 'string' || payload.exp < Math.floor(Date.now() / 1000)) return null;
 		// Normalize epoch: pre-L3 tokens have none ⇒ 0 (matches the default user epoch).

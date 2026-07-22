@@ -36,6 +36,7 @@
 		"build:native": "vite build && node scripts/gen-sw-manifest.mjs && node scripts/inject-native-csp.mjs && cap sync ios"
 	},
 	"dependencies": {
+		"@aparajita/capacitor-secure-storage": "^8.0.0",
 		"@hpke/core": "^1.9.0",
 		"@noble/ciphers": "^2.2.0",
 		"@noble/curves": "^2.2.0",

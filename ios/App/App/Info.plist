@@ -47,5 +47,12 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<!-- Export compliance: FlatFold's encryption is publicly-available open source
+	     and free, so it is NOT subject to the EAR (US) — exempt. Declaring false
+	     records that determination and stops the export-compliance prompt on every
+	     TestFlight/App Store build. Basis + Apple answers: docs/ENCRYPTION_COMPLIANCE.md.
+	     (France/ANSSI is a separate human filing, not covered by this key.) -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>

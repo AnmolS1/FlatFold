@@ -153,6 +153,25 @@ body {
 	-moz-osx-font-smoothing: grayscale;
 }
 
+/* ── 16px input floor (D2 §0.1) ─────────────────────────────────
+   iOS Safari/WKWebView auto-zooms any focused form control whose computed
+   font-size is < 16px and never restores it — the root of the "tap a field,
+   the viewport zooms and sticks" bug. A hard floor on every text-entry control
+   removes it on the WEB build, where the viewport stays user-zoomable for
+   accessibility so we cannot lock it. (The NATIVE build additionally pins
+   `maximum-scale=1` in inject-native-csp.mjs — a stronger, native-only
+   guarantee.) `max(1rem, 16px)` never drops below 16px but still lets a
+   component opt into a larger size via a utility (utilities sit above the base
+   layer). No input in the app sets a smaller size today; this keeps it so. */
+@layer base {
+	input:not([type='checkbox']):not([type='radio']),
+	textarea,
+	select,
+	[contenteditable]:not([contenteditable='false']) {
+		font-size: max(1rem, 16px);
+	}
+}
+
 /* ── Mobile primitives ──────────────────────────────────────────
    Safe-area insets for notch/home-indicator devices. Applied to the
    OUTER header / composer wrappers (whose own padding lives on inner
@@ -165,7 +184,12 @@ body {
 	padding-top: env(safe-area-inset-top);
 }
 .env-safe-bottom {
-	padding-bottom: env(safe-area-inset-bottom);
+	/* Subtract the on-screen keyboard height (set on <html> by the native shell,
+	   Keyboard resize: 'none') so a bottom-docked bar sits flush against the
+	   keyboard with no home-indicator gap when it's up. `--keyboard-height` is 0
+	   on web and whenever the keyboard is closed, so this is just the safe inset
+	   then. */
+	padding-bottom: max(0px, calc(env(safe-area-inset-bottom) - var(--keyboard-height, 0px)));
 }
 .env-safe-x {
 	padding-left: env(safe-area-inset-left);

@@ -39,5 +39,21 @@ html = html.replace(
 	/(<meta charset="[^"]*" \/>)/i,
 	`$1\n\t<meta http-equiv="Content-Security-Policy" content="${CSP}" />`
 );
+
+// D2 §0.2 — lock the viewport in the NATIVE context only. The source
+// index.html keeps a user-zoomable viewport (web a11y: pinch-zoom must work).
+// In a bundled native app there is no browser chrome to restore zoom, so we
+// pin `maximum-scale=1` (+ `user-scalable=no`): this is the hard guarantee
+// that focusing an input never auto-zooms the WKWebView — the root of the
+// "tap a field, viewport zooms and sticks" bug class. `interactive-widget`
+// stays for Android Chrome (resizes the layout viewport for the keyboard);
+// iOS drives its keyboard-aware layout off `visualViewport` (useVisualViewport).
+const NATIVE_VIEWPORT =
+	'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content';
+if (!/<meta name="viewport"[^>]*>/i.test(html)) {
+	throw new Error('inject-native-csp: no <meta name="viewport"> found to lock');
+}
+html = html.replace(/<meta name="viewport"[^>]*>/i, `<meta name="viewport" content="${NATIVE_VIEWPORT}" />`);
+
 writeFileSync(FILE, html);
-console.log(`inject-native-csp: meta CSP written to ${FILE} (connect-src → ${API})`);
+console.log(`inject-native-csp: meta CSP + locked native viewport written to ${FILE} (connect-src → ${API})`);

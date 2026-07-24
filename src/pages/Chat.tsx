@@ -637,16 +637,16 @@ export const Chat = () => {
 					// The sender the ratchet authenticated (server-stamped on the normal
 					// path, or trial-decrypt-identified for a sealed message).
 					const sender = result.displayMessage.from;
-					// Blocked: ack so the sender stops resending, send NO delivery
-					// receipt (don't confirm receipt to someone you've blocked), and —
-					// since decryptIncoming already persisted the plaintext — HARD-DELETE
-					// it so a blocked sender's message is never retained on-device. This
-					// uses the same local delete as "delete for me" (an existing keystore
-					// API; no crypto/keystore source changed). The ratchet advance stands:
-					// the message was cryptographically received either way, and un-
-					// advancing it would wedge the session.
+					// Blocked: ack WITHOUT `to` (pass only the id) so the server deletes
+					// the queued copy and stops resends, but sends the blocked sender NO
+					// "delivered" receipt (worker/mailbox.ts returns early when `to` is
+					// undefined — the same path sealed messages use). Then HARD-DELETE the
+					// just-persisted plaintext so nothing is retained on-device (the same
+					// local delete as "delete for me"; no crypto/keystore source changed).
+					// The ratchet advance stands: the message was cryptographically
+					// received either way, and un-advancing it would wedge the session.
 					if (isBlocked(currentUsername, sender)) {
-						sendAck(frame);
+						sendAck({ id: frame.id });
 						await keystore.deleteMessageLocal(currentUsername, sender, result.displayMessage.id);
 						return;
 					}

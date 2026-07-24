@@ -144,3 +144,78 @@ describe('session revocation — sign out everywhere (L3)', () => {
 		expect(res.headers.get('Set-Cookie')).toBeTruthy();
 	});
 });
+
+describe('change password (D7 §1)', () => {
+	async function signupCookie(u: string, password: string): Promise<string> {
+		const res = await SELF.fetch(`${BASE}/api/auth/signup`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ username: u, password }),
+		});
+		return extractSessionCookie(res);
+	}
+	const me = (cookie: string) => SELF.fetch(`${BASE}/api/auth/me`, { headers: { Cookie: cookie } });
+	const changePassword = (cookie: string, current: string, next: string) =>
+		SELF.fetch(`${BASE}/api/auth/change-password`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json', Cookie: cookie },
+			body: JSON.stringify({ current, new: next }),
+		});
+	const login = (u: string, password: string) =>
+		SELF.fetch(`${BASE}/api/auth/login`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ username: u, password }),
+		});
+
+	it('changes the password: the new one logs in, the old is rejected', async () => {
+		const cookie = await signupCookie('cp_happy', 'old-password-1');
+		expect((await changePassword(cookie, 'old-password-1', 'new-password-2')).status).toBe(200);
+
+		expect((await login('cp_happy', 'new-password-2')).status).toBe(200);
+		expect((await login('cp_happy', 'old-password-1')).status).toBe(401);
+	});
+
+	it('returns a fresh, still-valid token for THIS session (signed at the bumped epoch)', async () => {
+		const cookie = await signupCookie('cp_freshtoken', 'old-password-1');
+		const res = await changePassword(cookie, 'old-password-1', 'new-password-2');
+		expect(res.status).toBe(200);
+		// The response re-issues the cookie; it must authenticate /me despite the
+		// epoch bump (regression guard: signing at the pre-bump epoch would 401 here).
+		const fresh = extractSessionCookie(res);
+		expect((await me(fresh)).status).toBe(200);
+	});
+
+	it('revokes OTHER existing sessions (epoch bump)', async () => {
+		const first = await signupCookie('cp_revoke', 'old-password-1');
+		// A second session for the same user (login issues its own cookie).
+		const second = extractSessionCookie(await login('cp_revoke', 'old-password-1'));
+		expect((await me(second)).status).toBe(200);
+
+		expect((await changePassword(first, 'old-password-1', 'new-password-2')).status).toBe(200);
+		// The other session's token carried the pre-bump epoch — now dead.
+		expect((await me(second)).status).toBe(401);
+	});
+
+	it('rejects a wrong current password (401) and leaves the password unchanged', async () => {
+		const cookie = await signupCookie('cp_wrongcurrent', 'old-password-1');
+		expect((await changePassword(cookie, 'not-the-password', 'new-password-2')).status).toBe(401);
+		// Unchanged: the old password still works, the never-set new one does not.
+		expect((await login('cp_wrongcurrent', 'old-password-1')).status).toBe(200);
+		expect((await login('cp_wrongcurrent', 'new-password-2')).status).toBe(401);
+	});
+
+	it('rejects a too-short new password (400)', async () => {
+		const cookie = await signupCookie('cp_weak', 'old-password-1');
+		expect((await changePassword(cookie, 'old-password-1', 'short')).status).toBe(400);
+	});
+
+	it('requires authentication', async () => {
+		const res = await SELF.fetch(`${BASE}/api/auth/change-password`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ current: 'old-password-1', new: 'new-password-2' }),
+		});
+		expect(res.status).toBe(401);
+	});
+});

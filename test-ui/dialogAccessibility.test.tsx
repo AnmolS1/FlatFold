@@ -12,6 +12,21 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { BottomSheet } from '../src/components/common/BottomSheet';
 import { SettingsDialog } from '../src/components/SettingsDialog';
+import { AuthContext } from '../src/hooks/useAuth';
+import type { AuthContextType } from '../src/types';
+
+// SettingsDialog now reads changePassword from auth context — a minimal stub is
+// enough for the accessibility harness (it never submits the form).
+const stubAuth: AuthContextType = {
+	username: 'alice',
+	loading: false,
+	keystoreLocked: false,
+	signup: vi.fn(),
+	login: vi.fn(),
+	logout: vi.fn(),
+	unlockKeystore: vi.fn(),
+	changePassword: vi.fn(),
+};
 
 vi.mock('../src/lib/api', () => ({
 	apiMe: vi.fn().mockResolvedValue(null),
@@ -44,7 +59,11 @@ describe.each([
 	},
 	{
 		name: 'SettingsDialog',
-		render: (close: () => void) => <SettingsDialog username="alice" onClose={close} onSignOut={vi.fn()} />,
+		render: (close: () => void) => (
+			<AuthContext.Provider value={stubAuth}>
+				<SettingsDialog username="alice" onClose={close} onSignOut={vi.fn()} />
+			</AuthContext.Provider>
+		),
 	},
 ])('$name accessibility', ({ render: renderDialog }) => {
 	it('exposes dialog semantics with an accessible name', async () => {

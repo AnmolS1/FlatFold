@@ -44,7 +44,11 @@ import { decryptBlob, encryptBlob, generateMasterKey, type EncryptedBlob } from 
 import {
 	sealIdentityRecord,
 	openIdentityRecord,
+	stageRewrap,
+	promoteRewrap,
+	abortRewrap,
 	WrongPasswordError,
+	type IdentityRecordV2,
 	type StoredIdentityRecord,
 } from './identityRecord';
 import type { DisplayMessage } from '../types';
@@ -320,6 +324,47 @@ export async function unlock(username: string, password: string): Promise<Unlock
 			},
 		},
 	};
+}
+
+// ---- change password (D7 §1) — a durable two-wrap dance ----
+// MK never changes, so no store is re-encrypted and the cached key stays valid.
+// Only the wrap over MK is rewritten. The three steps map onto the server round
+// trip: stage BEFORE the call (durable, opens with either password), then either
+// finalize (server accepted → keep the new password) or rollback (server rejected
+// → keep the old). A crash between stage and settle is safe: the record still
+// opens with whichever password the server ended up on, and the next unlock
+// collapses it (see openIdentityRecord).
+
+export async function stageChangePassword(
+	username: string,
+	currentPassword: string,
+	newPassword: string
+): Promise<'ok' | 'wrong-password'> {
+	const record = await getRecord<StoredIdentityRecord>(IDENTITY_STORE, username);
+	if (!record) throw new Error(`No local identity for ${username}.`);
+	let staged: IdentityRecordV2;
+	try {
+		staged = await stageRewrap(record, currentPassword, newPassword);
+	} catch (err) {
+		if (err instanceof WrongPasswordError) return 'wrong-password';
+		throw err;
+	}
+	await putRecord<StoredIdentityRecord>(IDENTITY_STORE, username, staged);
+	return 'ok';
+}
+
+// Server accepted the change: promote the new password's wrap to be the only one.
+export async function finalizeChangePassword(username: string): Promise<void> {
+	const record = await getRecord<StoredIdentityRecord>(IDENTITY_STORE, username);
+	if (!record || !(record as IdentityRecordV2).altWrap) return;
+	await putRecord<StoredIdentityRecord>(IDENTITY_STORE, username, promoteRewrap(record as IdentityRecordV2));
+}
+
+// Server rejected the change: drop the staged wrap, keeping the old password.
+export async function rollbackChangePassword(username: string): Promise<void> {
+	const record = await getRecord<StoredIdentityRecord>(IDENTITY_STORE, username);
+	if (!record || !(record as IdentityRecordV2).altWrap) return;
+	await putRecord<StoredIdentityRecord>(IDENTITY_STORE, username, abortRewrap(record as IdentityRecordV2));
 }
 
 async function loadDoc(username: string): Promise<{ key: Uint8Array; doc: StoredIdentityDoc }> {

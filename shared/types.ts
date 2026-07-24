@@ -18,6 +18,11 @@ export interface AuthContextType {
 	login: (username: string, password: string) => Promise<void>;
 	logout: () => Promise<void>;
 	unlockKeystore: (password: string) => Promise<'unlocked' | 'wrong-password'>;
+	// Change the account password (D7 §1). Re-wraps the local keystore master key
+	// under the new password and rotates the server verifier + session epoch.
+	// Resolves 'wrong-password' if the current password is wrong; throws on a
+	// server/network failure (the staged local re-wrap is rolled back either way).
+	changePassword: (current: string, next: string) => Promise<'ok' | 'wrong-password'>;
 }
 
 export interface FormErrors {

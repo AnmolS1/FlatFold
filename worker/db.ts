@@ -21,6 +21,17 @@ export async function bumpTokenEpoch(db: D1Database, username: string): Promise<
 	await db.prepare('UPDATE users SET token_epoch = token_epoch + 1 WHERE username = ?').bind(username).run();
 }
 
+// Change password (D7 §1): swap the verifier AND bump the epoch in ONE statement
+// so the two can't diverge on a crash — a verifier-changed-but-epoch-not state
+// would leave old sessions alive under the new password. The epoch bump kills
+// every existing session (the caller re-issues a fresh token at the new epoch).
+export async function updatePassword(db: D1Database, username: string, newVerifier: string): Promise<void> {
+	await db
+		.prepare('UPDATE users SET password_verifier = ?, token_epoch = token_epoch + 1 WHERE username = ?')
+		.bind(newVerifier, username)
+		.run();
+}
+
 export async function getUser(db: D1Database, username: string): Promise<UserRow | null> {
 	const row = await db.prepare('SELECT * FROM users WHERE username = ?').bind(username).first<UserRow>();
 	return row ?? null;

@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { apiLogin, apiLogout, apiMe, apiPublishKeys, apiSignup } from '../lib/api';
+import { apiChangePassword, apiLogin, apiLogout, apiMe, apiPublishKeys, apiSignup } from '../lib/api';
 import * as keystore from '../keystore';
 import { bytesToBase64 } from '../keystore/codec';
 import type { AuthContextType } from '../types';
@@ -118,6 +118,30 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 		return 'unlocked';
 	};
 
+	// Change password (D7 §1). Ordering is what makes it crash-safe across two
+	// independent stores (local keystore + server verifier):
+	//   1. stage — durably add a SECOND wrap of the master key under the new
+	//      password to the local record. It now opens with EITHER password.
+	//   2. server — re-auth with the current password; the server rotates the
+	//      verifier + epoch and returns a fresh token for this session.
+	//   3. finalize — promote the new wrap to be the only one; the old dies.
+	// A crash between (1) and (3) is safe: the record still opens with whichever
+	// password the server ended up on, and the next unlock collapses it. On a
+	// server rejection we roll the staged wrap back so the old password is intact.
+	const changePassword = async (current: string, next: string): Promise<'ok' | 'wrong-password'> => {
+		if (!username) throw new Error('Cannot change password with no authenticated user.');
+		const staged = await keystore.stageChangePassword(username, current, next);
+		if (staged === 'wrong-password') return 'wrong-password';
+		try {
+			await apiChangePassword(current, next);
+		} catch (err) {
+			await keystore.rollbackChangePassword(username);
+			throw err;
+		}
+		await keystore.finalizeChangePassword(username);
+		return 'ok';
+	};
+
 	const value: AuthContextType = {
 		username,
 		loading,
@@ -126,6 +150,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 		login,
 		logout,
 		unlockKeystore,
+		changePassword,
 	};
 
 	return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

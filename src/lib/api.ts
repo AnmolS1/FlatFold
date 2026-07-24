@@ -88,6 +88,21 @@ export async function apiLogoutAll(password: string): Promise<void> {
 	await clearNativeToken(); // the epoch bump invalidated this token server-side too
 }
 
+// Change password (D7 §1): re-auth with the current password, set the new one,
+// and bump the epoch (other sessions die). The server returns a FRESH token for
+// this session at the new epoch — captured here for native so this device stays
+// signed in (web gets the refreshed cookie). Throws on any non-2xx (wrong current
+// password → the caller rolls back its staged local re-wrap).
+export async function apiChangePassword(current: string, next: string): Promise<void> {
+	const response = await apiFetch('/api/auth/change-password', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ current, new: next }),
+	});
+	const body = await parseJsonOrThrow(response);
+	await captureNativeToken(body);
+}
+
 // Irreversible: deletes the server-side account (D1 rows + queued ciphertext)
 // after password re-auth. The caller must ALSO wipe the local keystore.
 export async function apiDeleteAccount(password: string): Promise<void> {

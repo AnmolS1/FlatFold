@@ -11,7 +11,7 @@
 //   GET  /api/keys/bundle/:username
 //   GET  /ws            (WebSocket upgrade -> the caller's mailbox DO)
 
-import { bumpTokenEpoch, checkRateLimit, createUser, getUser, setUserSealToken } from './db';
+import { bumpTokenEpoch, checkRateLimit, createUser, getUser, setUserSealToken, updatePassword } from './db';
 
 // Auth rate limits. Keyed by the TARGET username, not an IP — FlatFold
 // deliberately does not log IPs (invariant #5), so per-actor throttling isn't
@@ -199,6 +199,41 @@ async function handleLogoutAll(request: Request, env: Env, username: string): Pr
 	return json({ ok: true }, { headers: { 'Set-Cookie': buildClearSessionCookie() } });
 }
 
+// Change password (D7 §1): re-auth with the CURRENT password, store the new
+// verifier + bump the epoch atomically (kills every other session), and hand back
+// a fresh token at the NEW epoch so THIS session survives the change. The client
+// has already staged the local keystore re-wrap durably; it finalizes that on our
+// 2xx (rolls it back on our 4xx). Rate-limited so a hijacked session can't
+// brute-force the current password to lock the real owner out.
+async function handleChangePassword(request: Request, env: Env, username: string): Promise<Response> {
+	const body = (await request.json().catch(() => null)) as { current?: unknown; new?: unknown } | null;
+	const current = body?.current;
+	const next = body?.new;
+	if (typeof current !== 'string' || current.length === 0) {
+		return json({ error: 'Current password required.' }, { status: 400 });
+	}
+	if (!isValidPassword(next)) {
+		return json({ error: 'New password must be at least 8 characters.' }, { status: 400 });
+	}
+
+	const window = rateLimitWindow(LOGIN_WINDOW_SECONDS);
+	if (!(await checkRateLimit(env.DB, `changepw:${username}`, window, LOGIN_LIMIT))) {
+		return json({ error: 'Too many attempts. Please try again later.' }, { status: 429 });
+	}
+
+	const user = await getUser(env.DB, username);
+	if (!user || !(await verifyPassword(current, user.password_verifier))) {
+		return json({ error: 'Incorrect password.' }, { status: 401 });
+	}
+
+	const newVerifier = await hashPassword(next);
+	await updatePassword(env.DB, username, newVerifier); // verifier + epoch bump, atomic
+	// Sign at the POST-bump epoch (user.token_epoch + 1) — signing at the old epoch
+	// would hand back a token that's already stale against the row we just bumped.
+	const token = await signSessionToken(username, env.SESSION_SECRET, user.token_epoch + 1);
+	return authResponse({ ok: true }, token, isNativeClient(request));
+}
+
 async function handleWebSocketUpgrade(request: Request, env: Env): Promise<Response> {
 	const username = await readAuthenticatedUsername(request, env);
 	if (!username) return json({ error: 'Not authenticated.' }, { status: 401 });
@@ -248,6 +283,11 @@ async function route(request: Request, env: Env): Promise<Response> {
 			const username = await readAuthenticatedUsername(request, env);
 			if (!username) return json({ error: 'Not authenticated.' }, { status: 401 });
 			return handleLogoutAll(request, env, username);
+		}
+		if (pathname === '/api/auth/change-password' && method === 'POST') {
+			const username = await readAuthenticatedUsername(request, env);
+			if (!username) return json({ error: 'Not authenticated.' }, { status: 401 });
+			return handleChangePassword(request, env, username);
 		}
 
 		// Sealed-sender OHTTP gateway (reached via a third-party relay that blinds

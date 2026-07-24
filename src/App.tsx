@@ -1,5 +1,6 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { isNativePlatform } from './lib/platform';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { ToastProvider } from './contexts/ToastContext';
@@ -17,6 +18,13 @@ const Chat = lazy(() => import('./pages/Chat').then((m) => ({ default: m.Chat })
 const Transparency = lazy(() => import('./pages/Transparency').then((m) => ({ default: m.Transparency })));
 
 function App() {
+	// Mark the document as the native shell so native-only CSS applies (e.g.
+	// disabling the long-press text-selection callout). Set in an effect so the
+	// Capacitor bridge is guaranteed attached.
+	useEffect(() => {
+		if (isNativePlatform()) document.documentElement.classList.add('capacitor-native');
+	}, []);
+
 	return (
 		// Outermost, so a throw in a provider or the router still shows something
 		// recoverable rather than a blank document.

@@ -6,16 +6,11 @@ import * as keystore from '../../keystore';
 import type { ContactRecord } from '../../keystore';
 import { BottomSheet } from '../common/BottomSheet';
 
-// The BarcodeDetector API is a native browser capability (Chromium) not yet
-// in the standard TS DOM lib. Declared minimally rather than pulling in a
-// JS QR-decode dependency; scanning gracefully degrades to "compare the
-// digits" where it's unavailable.
-interface BarcodeDetectorLike {
-	detect(source: CanvasImageSource): Promise<{ rawValue: string }[]>;
-}
-interface BarcodeDetectorCtor {
-	new (options?: { formats: string[] }): BarcodeDetectorLike;
-}
+// QR scanning decodes camera frames with jsQR (pure JS, lazy-loaded). We do NOT
+// use the `BarcodeDetector` API: WKWebView (the native app) doesn't implement it,
+// which silently hid the scan button on iOS — leaving a security feature
+// (safety-number verification by camera) non-functional. jsQR runs anywhere
+// `getUserMedia` does.
 
 interface SafetyNumberDialogProps {
 	selfUsername: string;
@@ -64,9 +59,11 @@ export const SafetyNumberDialog = ({ selfUsername, contact, onClose, onSetVerifi
 	const [scanError, setScanError] = useState<string | null>(null);
 	const [verified, setVerified] = useState(contact.verified);
 	const videoRef = useRef<HTMLVideoElement>(null);
+	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 	const streamRef = useRef<MediaStream | null>(null);
 
-	const scanSupported = typeof window !== 'undefined' && 'BarcodeDetector' in window;
+	const scanSupported =
+		typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getUserMedia === 'function';
 
 	useEffect(() => {
 		let cancelled = false;
@@ -112,6 +109,9 @@ export const SafetyNumberDialog = ({ selfUsername, contact, onClose, onSetVerifi
 		setScanError(null);
 		setScanning(true);
 		try {
+			// Lazy-load the decoder so it (and the camera path) stay out of the
+			// initial bundle — only pulled when someone actually verifies by QR.
+			const { default: jsQR } = await import('jsqr');
 			const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
 			streamRef.current = stream;
 			const video = videoRef.current;
@@ -119,30 +119,32 @@ export const SafetyNumberDialog = ({ selfUsername, contact, onClose, onSetVerifi
 			video.srcObject = stream;
 			await video.play();
 
-			const Detector = (window as unknown as { BarcodeDetector: BarcodeDetectorCtor }).BarcodeDetector;
-			const detector = new Detector({ formats: ['qr_code'] });
+			const canvas = canvasRef.current ?? document.createElement('canvas');
+			canvasRef.current = canvas;
+			const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-			const tick = async () => {
+			const tick = () => {
 				if (!streamRef.current) return; // stopped
-				try {
-					const codes = await detector.detect(video);
-					const match = codes.find((c) => c.rawValue === safetyNumber);
-					if (match) {
-						stopScanning();
-						await markVerified(true);
-						return;
-					}
-					if (codes.length > 0) {
+				if (ctx && video.readyState >= video.HAVE_ENOUGH_DATA && video.videoWidth > 0) {
+					canvas.width = video.videoWidth;
+					canvas.height = video.videoHeight;
+					ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+					const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+					const code = jsQR(image.data, image.width, image.height, { inversionAttempts: 'dontInvert' });
+					if (code) {
+						if (code.data === safetyNumber) {
+							stopScanning();
+							void markVerified(true);
+							return;
+						}
 						// A QR was read but it doesn't match — a genuine mismatch is
 						// exactly the MITM signal safety numbers exist to catch.
 						setScanError('That code does not match. Do NOT trust this conversation until it does.');
 					}
-				} catch {
-					// transient detect error; keep trying
 				}
-				requestAnimationFrame(() => void tick());
+				requestAnimationFrame(tick);
 			};
-			void tick();
+			requestAnimationFrame(tick);
 		} catch {
 			setScanError('Could not access the camera.');
 			stopScanning();

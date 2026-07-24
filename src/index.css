@@ -172,6 +172,25 @@ body {
 	}
 }
 
+/* ── Native long-press: our sheet, not iOS's ────────────────────
+   In WKWebView a long-press fires the native text-selection + callout ("Copy /
+   Look Up / Translate") on top of our own long-press action sheet. Disable
+   user-select and the touch callout in the native shell so long-press only opens
+   our sheet (its "Copy text" item handles copying). Re-enable selection inside
+   text-entry controls so you can still edit/select what you type. */
+html.capacitor-native,
+html.capacitor-native * {
+	-webkit-user-select: none;
+	user-select: none;
+	-webkit-touch-callout: none;
+}
+html.capacitor-native input,
+html.capacitor-native textarea,
+html.capacitor-native [contenteditable]:not([contenteditable='false']) {
+	-webkit-user-select: text;
+	user-select: text;
+}
+
 /* ── Mobile primitives ──────────────────────────────────────────
    Safe-area insets for notch/home-indicator devices. Applied to the
    OUTER header / composer wrappers (whose own padding lives on inner

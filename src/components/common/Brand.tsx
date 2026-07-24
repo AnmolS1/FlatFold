@@ -19,6 +19,10 @@ const LogoMarkComponent = ({ className, size = 24 }: LogoMarkProps) => (
 		xmlns="http://www.w3.org/2000/svg"
 		role="img"
 		aria-label="FlatFold"
+		// Panic-wipe touch target: 5 rapid taps on the mark triggers the wipe
+		// confirmation (PanicWipe) — the touch equivalent of the triple-Esc chord,
+		// and it works on the locked unlock screen (which also shows this mark).
+		data-panic-tap=""
 		className={className}
 	>
 		<path d="M8 8H32L56 32V56H8Z" fill="var(--color-inset, #FFFFFF)" />

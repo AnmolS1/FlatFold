@@ -10,11 +10,17 @@ import { PANIC_EVENT, panicWipe } from '../lib/panicWipe';
 const CHORD_KEY = 'Escape';
 const CHORD_COUNT = 3;
 const CHORD_WINDOW_MS = 1500;
+// Touch equivalent of the keyboard chord (no hardware Esc on a phone): rapid
+// taps on the FlatFold mark ([data-panic-tap], present even on the locked unlock
+// screen). More taps than the keyboard chord so it isn't tripped by fidgeting.
+const TOUCH_CHORD_COUNT = 5;
+const TOUCH_CHORD_WINDOW_MS = 2000;
 
 export const PanicWipe = () => {
 	const [confirmOpen, setConfirmOpen] = useState(false);
 	const [wiping, setWiping] = useState(false);
 	const tapsRef = useRef<number[]>([]);
+	const touchTapsRef = useRef<number[]>([]);
 
 	useEffect(() => {
 		const open = () => setConfirmOpen(true);
@@ -33,9 +39,24 @@ export const PanicWipe = () => {
 		};
 		window.addEventListener('keydown', onKeyDown);
 
+		const onPointerDown = (e: PointerEvent) => {
+			const target = e.target as Element | null;
+			if (!target?.closest('[data-panic-tap]')) return;
+			const now = Date.now();
+			const taps = touchTapsRef.current.filter((t) => now - t < TOUCH_CHORD_WINDOW_MS);
+			taps.push(now);
+			touchTapsRef.current = taps;
+			if (taps.length >= TOUCH_CHORD_COUNT) {
+				touchTapsRef.current = [];
+				setConfirmOpen(true);
+			}
+		};
+		window.addEventListener('pointerdown', onPointerDown);
+
 		return () => {
 			window.removeEventListener(PANIC_EVENT, open);
 			window.removeEventListener('keydown', onKeyDown);
+			window.removeEventListener('pointerdown', onPointerDown);
 		};
 	}, []);
 

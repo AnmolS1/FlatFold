@@ -12,6 +12,7 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { BottomSheet } from '../src/components/common/BottomSheet';
 import { SettingsDialog } from '../src/components/SettingsDialog';
+import { useModalDialog } from '../src/hooks/useModalDialog';
 import { AuthContext } from '../src/hooks/useAuth';
 import type { AuthContextType } from '../src/types';
 
@@ -123,5 +124,35 @@ describe.each([
 		await user.keyboard('{Escape}');
 
 		await waitFor(() => expect(document.activeElement).toBe(trigger));
+	});
+});
+
+// Regression (native change-password keyboard drop): callers pass a fresh
+// `onClose` closure every render (`onClose={() => setOpen(false)}`). A parent
+// re-render must NOT make the dialog re-grab focus — on iOS that blurs the
+// focused input and dismisses the keyboard mid-entry. Focus-in is once-on-open.
+describe('modal focus survives a parent re-render', () => {
+	function Dialog({ onClose }: { onClose: () => void }) {
+		const ref = useModalDialog<HTMLDivElement>(onClose);
+		return (
+			<div ref={ref} role="dialog" aria-modal="true" aria-label="test" tabIndex={-1}>
+				<button>first control</button>
+				<input aria-label="field" />
+			</div>
+		);
+	}
+
+	it('does not steal focus from a focused input when onClose identity changes', () => {
+		// A fresh closure each render mimics `onClose={() => setOpen(false)}`.
+		const { rerender } = render(<Dialog onClose={() => {}} />);
+		const field = screen.getByLabelText('field');
+		field.focus(); // user tapped the input (not the first control)
+		expect(document.activeElement).toBe(field);
+
+		rerender(<Dialog onClose={() => {}} />); // parent re-rendered → new onClose
+
+		// Buggy version re-runs focus-in and lands on "first control"; fixed keeps
+		// the user's focus (and therefore the keyboard) on the input.
+		expect(document.activeElement).toBe(field);
 	});
 });

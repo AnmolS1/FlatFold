@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, memo, type FormEvent, type KeyboardEvent, type ChangeEvent } from 'react';
+import { useState, useCallback, useEffect, useRef, memo, type FormEvent, type KeyboardEvent, type ChangeEvent } from 'react';
 import { Send, AlertCircle, Plus, Mic, Square, Reply, X, Image as ImageIcon, Paperclip } from 'lucide-react';
 import type { MediaUploadInput } from '../../lib/media';
 import type { DisplayMessage } from '../../types';
@@ -33,6 +33,21 @@ const MessageInputComponent = ({
 	const [attachOpen, setAttachOpen] = useState(false);
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const photoInputRef = useRef<HTMLInputElement>(null);
+
+	// Collapse the attach sheet when the native file/photo picker is dismissed.
+	// The `cancel` DOM event fires on a file input on dismiss, but @types/react
+	// doesn't expose it as an `onCancel` prop — so bind it imperatively.
+	useEffect(() => {
+		const collapse = () => setAttachOpen(false);
+		const file = fileInputRef.current;
+		const photo = photoInputRef.current;
+		file?.addEventListener('cancel', collapse);
+		photo?.addEventListener('cancel', collapse);
+		return () => {
+			file?.removeEventListener('cancel', collapse);
+			photo?.removeEventListener('cancel', collapse);
+		};
+	}, []);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const recorderRef = useRef<MediaRecorder | null>(null);
 	const recordStartRef = useRef<number>(0);
@@ -256,7 +271,6 @@ const MessageInputComponent = ({
 						type="file"
 						className="hidden"
 						onChange={(e) => void handleFilePick(e)}
-						onCancel={() => setAttachOpen(false)}
 					/>
 					<input
 						ref={photoInputRef}
@@ -264,7 +278,6 @@ const MessageInputComponent = ({
 						accept="image/*"
 						className="hidden"
 						onChange={(e) => void handleFilePick(e)}
-						onCancel={() => setAttachOpen(false)}
 					/>
 					<button
 						type="button"

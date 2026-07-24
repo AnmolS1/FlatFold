@@ -35,7 +35,7 @@ import { generateSealToken } from '../lib/sealToken';
 import type { ChatPayload } from '../lib/chatPayload';
 import { requestPanicWipe } from '../lib/panicWipe';
 import { encryptAndUploadMedia, type MediaUploadInput } from '../lib/media';
-import { summaryFromMessage, summariesEqual } from '../lib/conversationSummary';
+import { summaryFromMessage, summariesEqual, isUnread } from '../lib/conversationSummary';
 import { replyRefFrom } from '../lib/reply';
 import { orderedVisibleMessages } from '../lib/messageOrder';
 import { haptic } from '../lib/haptics';
@@ -52,6 +52,8 @@ import { SafetyNumberDialog } from '../components/chat/SafetyNumberDialog';
 import { MessageActionSheet } from '../components/chat/MessageActionSheet';
 import { LogoMark } from '../components/common/Brand';
 import { ThemeToggle } from '../components/common/ThemeToggle';
+import { TabBar, type NativeTab } from '../components/native/TabBar';
+import { ContactsPane } from '../components/native/ContactsPane';
 
 export const Chat = () => {
 	const { username, logout } = useAuth();
@@ -91,6 +93,23 @@ export const Chat = () => {
 	// view state — nothing in the WS/session-op layer depends on it. At
 	// ≥900px both panes render side-by-side and this bit is ignored.
 	const [mobileView, setMobileView] = useState<'list' | 'conversation'>('list');
+	// Native phone shell (Direction C): a bottom tab bar switches the top-level
+	// surface. Native-only — the web build keeps its ≥900px master/detail
+	// sidebar untouched (this bit is ignored there). The chat detail pushes
+	// full-screen over the Chats tab (mobileView==='conversation'), which hides
+	// the tab bar, so nav never fights the composer/keyboard.
+	const native = isNativePlatform();
+	const [activeTab, setActiveTab] = useState<NativeTab>('chats');
+	// True while the Chats list's "New message" compose bar is open. Hides the
+	// tab bar so the add-username input is the bottom-most element above the
+	// keyboard (see ContactList's onComposeOpenChange).
+	const [composeOpen, setComposeOpen] = useState(false);
+	// WebSocket reconnect: bumping this nonce re-runs the socket effect (a fresh
+	// connection). iOS suspends a backgrounded app and closes the socket; without
+	// this it stayed dead until a force-quit + keystore re-unlock. We reconnect on
+	// unintended close (backoff) and whenever the app returns to the foreground.
+	const [connectNonce, setConnectNonce] = useState(0);
+	const reconnectAttempts = useRef(0);
 	// Keyboard-aware shell height (see the hook): keeps the composer above the
 	// on-screen keyboard on iOS. Falls back to the h-dvh class until it resolves.
 	const viewportHeight = useVisualViewportHeight();
@@ -709,6 +728,8 @@ export const Chat = () => {
 		// connection failure. Guard against surfacing that as a user-facing
 		// error — only genuine unexpected errors/closes should toast.
 		let intentionalClose = false;
+		let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+		setConnecting(true);
 
 		// Web: same-origin, the SameSite=Strict cookie authenticates the upgrade.
 		// Native (capacitor://localhost): cross-origin, no cookie — so target the
@@ -728,6 +749,7 @@ export const Chat = () => {
 		wsRef.current = ws;
 
 		ws.onopen = () => {
+			reconnectAttempts.current = 0; // healthy connection resets the backoff
 			setConnecting(false);
 			setConnected(true);
 			setError(null);
@@ -757,21 +779,82 @@ export const Chat = () => {
 
 		ws.onerror = () => {
 			if (intentionalClose) return;
-			const message = 'Connection error. Please try refreshing the page.';
-			setError(message);
-			showToast(message, 'error');
+			// Native auto-reconnects (below) and the header shows "connecting…", so
+			// don't spam a toast on every flaky attempt — a quiet banner is enough.
+			// Web has no reconnect, so it keeps the actionable "refresh" toast.
+			if (isNativePlatform()) {
+				setError('Connection lost. Reconnecting…');
+			} else {
+				const message = 'Connection error. Please try refreshing the page.';
+				setError(message);
+				showToast(message, 'error');
+			}
 		};
 
 		ws.onclose = () => {
 			setConnected(false);
+			if (intentionalClose) return;
+			// Reconnect with exponential backoff. On iOS the app is suspended while
+			// backgrounded, so this timer won't fire until the foreground — the
+			// appStateChange listener below also nudges a reconnect on resume.
+			const delay = Math.min(1000 * 2 ** reconnectAttempts.current, 15000);
+			reconnectAttempts.current += 1;
+			reconnectTimer = setTimeout(() => setConnectNonce((n) => n + 1), delay);
 		};
 
 		return () => {
 			intentionalClose = true;
+			clearTimeout(reconnectTimer);
 			ws.close();
 			wsRef.current = null;
 		};
-	}, [username, showToast, handleIncomingMessage, handleIncomingGroupMessage, handleDeliveredFrame, enqueueSessionOp]);
+	}, [username, connectNonce, showToast, handleIncomingMessage, handleIncomingGroupMessage, handleDeliveredFrame, enqueueSessionOp]);
+
+	// Reconnect the socket when the app returns to the foreground (native). iOS
+	// closes the WebSocket when it suspends a backgrounded app; without this the
+	// user had to force-quit and re-unlock to get messages flowing again.
+	useEffect(() => {
+		if (!isNativePlatform()) return;
+		let remove: (() => void) | undefined;
+		void (async () => {
+			const { App } = await import('@capacitor/app');
+			const handle = await App.addListener('appStateChange', ({ isActive }) => {
+				if (isActive && wsRef.current?.readyState !== WebSocket.OPEN) {
+					reconnectAttempts.current = 0;
+					setConnectNonce((n) => n + 1);
+				}
+			});
+			remove = () => void handle.remove();
+		})();
+		return () => remove?.();
+	}, []);
+
+	// Native: expose the keyboard height as a CSS variable so the shell height
+	// (and `.env-safe-bottom`) can shrink in sync with the keyboard animation.
+	// willShow/WillHide fire at the animation's start, so the CSS transition on
+	// the root runs concurrently with the keyboard — no catch-up jump.
+	useEffect(() => {
+		if (!native) return;
+		const root = document.documentElement;
+		let showRemove: (() => void) | undefined;
+		let hideRemove: (() => void) | undefined;
+		void (async () => {
+			const { Keyboard } = await import('@capacitor/keyboard');
+			const show = await Keyboard.addListener('keyboardWillShow', (info) => {
+				root.style.setProperty('--keyboard-height', `${info.keyboardHeight}px`);
+			});
+			const hide = await Keyboard.addListener('keyboardWillHide', () => {
+				root.style.setProperty('--keyboard-height', '0px');
+			});
+			showRemove = () => void show.remove();
+			hideRemove = () => void hide.remove();
+		})();
+		return () => {
+			showRemove?.();
+			hideRemove?.();
+			root.style.removeProperty('--keyboard-height');
+		};
+	}, [native]);
 
 	// Sealed sender: on connect, make sure my delivery token exists and both
 	// server stores know it (register-token writes the DO validator + the D1
@@ -1148,7 +1231,25 @@ export const Chat = () => {
 	return (
 		<div
 			className="h-dvh flex flex-col overflow-hidden"
-			style={viewportHeight ? { height: `${viewportHeight}px` } : undefined}
+			// Native: height = full viewport minus the keyboard, where
+			// `--keyboard-height` is set from keyboardWillShow/WillHide (below). The
+			// transition makes the composer slide up in lockstep with the keyboard
+			// (no lag), and shrinking the app keeps content above the keyboard so
+			// WKWebView never scroll-reveals the input. Web: pin to visualViewport
+			// height (the keyboard overlays the page there; `dvh` won't shrink).
+			style={
+				native
+					? {
+							height: 'calc(100dvh - var(--keyboard-height, 0px))',
+							// Front-loaded easing (fast start) so the composer catches the
+							// keyboard from the first frame despite the ~1-frame JS delay
+							// before the transition begins.
+							transition: 'height 0.25s cubic-bezier(0.16, 0.8, 0.3, 1)',
+						}
+					: viewportHeight
+						? { height: `${viewportHeight}px` }
+						: undefined
+			}
 		>
 			<header className="bg-graph-card border-b border-crease-line flex-shrink-0 env-safe-top env-safe-x">
 				<div className="px-4 py-3">
@@ -1178,14 +1279,18 @@ export const Chat = () => {
 								<Search className="w-4 h-4" />
 								<span className="hidden sm:inline">Search</span>
 							</button>
-							<button
-								onClick={() => setSettingsOpen(true)}
-								className="flex items-center justify-center min-w-11 min-h-11 border border-crease-line-bold hover:border-crease text-graphite rounded-lg transition-colors text-sm"
-								title="Settings"
-								aria-label="Settings"
-							>
-								<Settings className="w-4 h-4" />
-							</button>
+							{/* On native, Settings is a bottom-tab, not a header button
+							    (D2 §2: cap header actions). Web keeps the header glyph. */}
+							{!native && (
+								<button
+									onClick={() => setSettingsOpen(true)}
+									className="flex items-center justify-center min-w-11 min-h-11 border border-crease-line-bold hover:border-crease text-graphite rounded-lg transition-colors text-sm"
+									title="Settings"
+									aria-label="Settings"
+								>
+									<Settings className="w-4 h-4" />
+								</button>
+							)}
 							<ThemeToggle />
 							<button
 								onClick={() => requestPanicWipe()}
@@ -1196,14 +1301,18 @@ export const Chat = () => {
 								<ShieldOff className="w-4 h-4" />
 								<span className="hidden sm:inline">Panic</span>
 							</button>
-							<button
-								onClick={handleLogout}
-								className="flex items-center justify-center gap-2 min-w-11 min-h-11 sm:px-3 sm:min-w-0 border border-crease-line-bold hover:border-crease text-graphite rounded-lg transition-colors text-sm"
-								aria-label="Log out"
-							>
-								<LogOut className="w-4 h-4" />
-								<span className="hidden sm:inline">Logout</span>
-							</button>
+							{/* On native, Sign out lives in the Settings tab (with "sign
+							    out everywhere"); no header button. Web keeps it. */}
+							{!native && (
+								<button
+									onClick={handleLogout}
+									className="flex items-center justify-center gap-2 min-w-11 min-h-11 sm:px-3 sm:min-w-0 border border-crease-line-bold hover:border-crease text-graphite rounded-lg transition-colors text-sm"
+									aria-label="Log out"
+								>
+									<LogOut className="w-4 h-4" />
+									<span className="hidden sm:inline">Logout</span>
+								</button>
+							)}
 						</div>
 					</div>
 				</div>
@@ -1221,31 +1330,55 @@ export const Chat = () => {
 				<div
 					className={`${mobileView === 'conversation' ? 'hidden' : 'flex'} min-[900px]:flex w-full min-[900px]:w-80 min-[900px]:flex-shrink-0 min-h-0`}
 				>
-					<ContactList
-						contacts={contacts}
-						groups={groups}
-						summaries={summaries}
-						currentUsername={username ?? ''}
-						activeContact={activeContact}
-						activeGroupId={activeGroup?.id ?? null}
-						onSelectContact={(u) => {
-							setMobileView('conversation');
-							setReplyingTo(null);
-							void handleSelectContact(u);
-						}}
-						onSelectGroup={(g) => {
-							setMobileView('conversation');
-							setReplyingTo(null);
-							void handleSelectGroup(g);
-						}}
-						onAddContact={handleAddContact}
-						onNewGroup={() => setCreateGroupOpen(true)}
-					/>
+					{native && activeTab === 'contacts' ? (
+						<ContactsPane
+							contacts={contacts}
+							onAddContact={handleAddContact}
+							onOpenChat={(u) => {
+								setActiveTab('chats');
+								setMobileView('conversation');
+								setReplyingTo(null);
+								void handleSelectContact(u);
+							}}
+							onVerify={(u) => {
+								setActiveTab('chats');
+								setMobileView('conversation');
+								setReplyingTo(null);
+								void handleSelectContact(u);
+								setVerifyDialogOpen(true);
+							}}
+							onRemove={(u) => void handleRemoveContact(u)}
+						/>
+					) : (
+						<ContactList
+							contacts={contacts}
+							groups={groups}
+							summaries={summaries}
+							currentUsername={username ?? ''}
+							activeContact={activeContact}
+							activeGroupId={activeGroup?.id ?? null}
+							onSelectContact={(u) => {
+								setComposeOpen(false);
+								setMobileView('conversation');
+								setReplyingTo(null);
+								void handleSelectContact(u);
+							}}
+							onSelectGroup={(g) => {
+								setComposeOpen(false);
+								setMobileView('conversation');
+								setReplyingTo(null);
+								void handleSelectGroup(g);
+							}}
+							onAddContact={handleAddContact}
+							onNewGroup={() => setCreateGroupOpen(true)}
+							onComposeOpenChange={setComposeOpen}
+						/>
+					)}
 				</div>
 
 				{/* Conversation pane — hidden on phones while the list is showing. */}
 				<div
-					className={`${mobileView === 'list' ? 'hidden' : 'flex'} min-[900px]:flex flex-1 flex-col min-h-0`}
+					className={`${mobileView === 'list' ? 'hidden' : 'flex'} min-[900px]:flex flex-1 flex-col min-h-0 min-w-0`}
 				>
 					{activeGroup ? (
 						<>
@@ -1423,6 +1556,24 @@ export const Chat = () => {
 					)}
 				</div>
 			</div>
+
+			{/* Native bottom tab bar — only on the list surface, so the chat
+			    detail (composer + keyboard) is never crowded by nav chrome. The
+			    Settings tab opens the existing settings modal for now; it becomes
+			    a full grouped screen (themes + About) in the themes step. */}
+			{native && mobileView === 'list' && !composeOpen && (
+				<TabBar
+					active={activeTab}
+					onChange={(t) => {
+						if (t === 'settings') {
+							setSettingsOpen(true);
+							return;
+						}
+						setActiveTab(t);
+					}}
+					chatsUnread={Object.values(summaries).some((s) => isUnread(s, username ?? ''))}
+				/>
+			)}
 
 			{verifyDialogOpen && activeContactRecord && username && (
 				<SafetyNumberDialog

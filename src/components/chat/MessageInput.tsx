@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, memo, type FormEvent, type KeyboardEvent, type ChangeEvent } from 'react';
-import { Send, AlertCircle, Plus, Mic, Square, Reply, X } from 'lucide-react';
+import { Send, AlertCircle, Plus, Mic, Square, Reply, X, Image as ImageIcon, Paperclip } from 'lucide-react';
 import type { MediaUploadInput } from '../../lib/media';
 import type { DisplayMessage } from '../../types';
 import { haptic } from '../../lib/haptics';
@@ -27,7 +27,12 @@ const MessageInputComponent = ({
 	const [sending, setSending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [recording, setRecording] = useState(false);
+	// The attach bottom-sheet (D2 §Composer/§Media): one "+" control opens a
+	// sheet of Photo / File / Voice, instead of the "+" firing the file picker
+	// directly. Keeps the composer's visible footprint to two controls.
+	const [attachOpen, setAttachOpen] = useState(false);
 	const fileInputRef = useRef<HTMLInputElement>(null);
+	const photoInputRef = useRef<HTMLInputElement>(null);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const recorderRef = useRef<MediaRecorder | null>(null);
 	const recordStartRef = useRef<number>(0);
@@ -45,6 +50,7 @@ const MessageInputComponent = ({
 		async (e: ChangeEvent<HTMLInputElement>) => {
 			const file = e.target.files?.[0];
 			e.target.value = ''; // allow re-picking the same file
+			setAttachOpen(false); // picker returned — collapse the attach sheet
 			if (!file) return;
 			setError(null);
 			setSending(true);
@@ -199,17 +205,80 @@ const MessageInputComponent = ({
 				{/* plus (attach) — pill input — mic/send. The trailing control morphs:
 				    mic when the field is empty (tap to record a voice note), send
 				    when there's text. */}
+				{/* Attach sheet — one control opens Photo / File / Voice, in normal
+				    flow above the input row (a bottom sheet, never a floating menu:
+				    D2 §Media). The sheet stays up while the native picker is open and
+				    closes only once a file is chosen (handleFilePick) or the picker is
+				    cancelled (the input's `cancel` event) — so it doesn't flash away
+				    before the picker appears. Voice starts recording immediately. */}
+				{attachOpen && (
+					<div
+						role="menu"
+						aria-label="Attach"
+						className="mb-2 grid grid-cols-3 gap-2 rounded-2xl border border-crease-line-bold bg-inset p-2"
+					>
+						<button
+							type="button"
+							role="menuitem"
+							onClick={() => photoInputRef.current?.click()}
+							className="flex flex-col items-center justify-center gap-1 min-h-[64px] rounded-xl hover:bg-graph-card text-graphite transition-colors"
+						>
+							<ImageIcon className="w-6 h-6 text-crease" aria-hidden="true" />
+							<span className="text-xs font-medium">Photo</span>
+						</button>
+						<button
+							type="button"
+							role="menuitem"
+							onClick={() => fileInputRef.current?.click()}
+							className="flex flex-col items-center justify-center gap-1 min-h-[64px] rounded-xl hover:bg-graph-card text-graphite transition-colors"
+						>
+							<Paperclip className="w-6 h-6 text-crease" aria-hidden="true" />
+							<span className="text-xs font-medium">File</span>
+						</button>
+						<button
+							type="button"
+							role="menuitem"
+							onClick={() => {
+								setAttachOpen(false);
+								void startRecording();
+							}}
+							className="flex flex-col items-center justify-center gap-1 min-h-[64px] rounded-xl hover:bg-graph-card text-graphite transition-colors"
+						>
+							<Mic className="w-6 h-6 text-crease" aria-hidden="true" />
+							<span className="text-xs font-medium">Voice</span>
+						</button>
+					</div>
+				)}
+
 				<form onSubmit={handleSubmit} className="flex gap-2 items-end">
-					<input ref={fileInputRef} type="file" className="hidden" onChange={(e) => void handleFilePick(e)} />
+					<input
+						ref={fileInputRef}
+						type="file"
+						className="hidden"
+						onChange={(e) => void handleFilePick(e)}
+						onCancel={() => setAttachOpen(false)}
+					/>
+					<input
+						ref={photoInputRef}
+						type="file"
+						accept="image/*"
+						className="hidden"
+						onChange={(e) => void handleFilePick(e)}
+						onCancel={() => setAttachOpen(false)}
+					/>
 					<button
 						type="button"
-						onClick={() => fileInputRef.current?.click()}
+						onClick={() => setAttachOpen((v) => !v)}
 						disabled={disabled || sending || recording}
-						title="Attach a file"
-						aria-label="Attach a file"
-						className="h-11 w-11 flex-shrink-0 flex items-center justify-center rounded-full border border-crease-line-bold text-graphite hover:border-crease disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+						aria-label="Attach"
+						aria-expanded={attachOpen}
+						aria-haspopup="menu"
+						title="Attach a photo, file, or voice note"
+						className={`h-11 w-11 flex-shrink-0 flex items-center justify-center rounded-full border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+							attachOpen ? 'border-crease bg-crease/10 text-crease rotate-45' : 'border-crease-line-bold text-graphite hover:border-crease'
+						}`}
 					>
-						<Plus className="w-5 h-5" />
+						<Plus className="w-5 h-5 transition-transform" />
 					</button>
 					<textarea
 						ref={textareaRef}

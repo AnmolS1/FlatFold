@@ -4,13 +4,14 @@ import { MoreVertical } from 'lucide-react';
 interface ContactMenuProps {
 	contactUsername: string;
 	onRemoveContact: () => void;
+	onBlockContact: () => void;
 }
 
 // Conversation-header overflow menu. Minimal by design — its one action today
 // is removing the contact (which rotates my sealed-sender delivery token and
 // purges local conversation state). Hand-rolled dropdown (no dep), with an
 // inline confirm because removal deletes conversation history on this device.
-export function ContactMenu({ contactUsername, onRemoveContact }: ContactMenuProps) {
+export function ContactMenu({ contactUsername, onRemoveContact, onBlockContact }: ContactMenuProps) {
 	const [open, setOpen] = useState(false);
 	const [confirming, setConfirming] = useState(false);
 	const ref = useRef<HTMLDivElement>(null);
@@ -50,13 +51,25 @@ export function ContactMenu({ contactUsername, onRemoveContact }: ContactMenuPro
 			{open && (
 				<div role="menu" className="absolute right-0 top-full mt-1 z-20 w-60 bg-inset border border-crease-line-bold rounded-md shadow-lg p-1">
 					{!confirming ? (
-						<button
-							role="menuitem"
-							onClick={() => setConfirming(true)}
-							className="w-full text-left text-sm text-crane px-3 py-2 rounded hover:bg-crane/10 transition-colors"
-						>
-							Remove contact
-						</button>
+						<>
+							<button
+								role="menuitem"
+								onClick={() => {
+									close();
+									onBlockContact();
+								}}
+								className="w-full text-left text-sm text-graphite px-3 py-2 rounded hover:bg-inset transition-colors"
+							>
+								Block contact
+							</button>
+							<button
+								role="menuitem"
+								onClick={() => setConfirming(true)}
+								className="w-full text-left text-sm text-crane px-3 py-2 rounded hover:bg-crane/10 transition-colors"
+							>
+								Remove contact
+							</button>
+						</>
 					) : (
 						<div className="px-3 py-2">
 							<p className="text-xs text-graphite-60 mb-2">

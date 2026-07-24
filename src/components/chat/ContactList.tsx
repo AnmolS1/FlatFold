@@ -3,6 +3,7 @@ import { ShieldAlert, ShieldCheck, UserPlus, Users, Plus, Search, Clock, X } fro
 import type { ContactRecord, GroupRecord, ConversationSummary } from '../../keystore';
 import { groupConversationKey } from '../../lib/messaging';
 import { isUnread, previewLabel } from '../../lib/conversationSummary';
+import { isBlocked } from '../../lib/blocklist';
 import { formatListTimestamp } from '../../utils/formatTimestamp';
 import { Avatar } from '../common/Avatar';
 import { EmptyStateIllustration } from '../common/Brand';
@@ -22,6 +23,8 @@ interface ContactListProps {
 	    tab bar — keeping the add-username input the bottom-most element above the
 	    keyboard (otherwise iOS scroll-to-reveal drags the list under the bar). */
 	onComposeOpenChange?: (open: boolean) => void;
+	/** Bumps when the block list changes, to re-run the (blocked-filtered) rows. */
+	blockVersion?: number;
 }
 
 // A single normalized conversation row, whether it's a 1:1 or a group.
@@ -53,6 +56,7 @@ const ContactListComponent = ({
 	onAddContact,
 	onNewGroup,
 	onComposeOpenChange,
+	blockVersion,
 }: ContactListProps) => {
 	const [query, setQuery] = useState('');
 	const [newChatOpen, setNewChatOpen] = useState(false);
@@ -89,6 +93,7 @@ const ContactListComponent = ({
 	// Unified, activity-sorted conversation list (groups + contacts together),
 	// then filtered by the local search box.
 	const rows = useMemo<Row[]>(() => {
+		void blockVersion; // re-run the blocked filter when the block list changes
 		const all: Row[] = [
 			...groups.map((group) => ({
 				key: groupConversationKey(group.id),
@@ -105,8 +110,10 @@ const ContactListComponent = ({
 				summary: summaries[contact.username],
 			})),
 		];
+		// Hide blocked contacts' conversations (groups are unaffected).
+		const visible = all.filter((r) => r.isGroup || !isBlocked(currentUsername, r.key));
 		const q = query.trim().toLowerCase();
-		const filtered = q ? all.filter((r) => r.name.toLowerCase().includes(q)) : all;
+		const filtered = q ? visible.filter((r) => r.name.toLowerCase().includes(q)) : visible;
 		// Most-recent conversation first; those with no activity fall to the
 		// bottom, ordered by name.
 		return filtered.sort((a, b) => {
@@ -115,7 +122,7 @@ const ContactListComponent = ({
 			if (at !== bt) return bt - at;
 			return a.name.localeCompare(b.name);
 		});
-	}, [contacts, groups, summaries, query]);
+	}, [contacts, groups, summaries, query, currentUsername, blockVersion]);
 
 	const renderPreview = (row: Row): { text: string; muted: boolean } => {
 		if (row.summary) return { text: previewLabel(row.summary, currentUsername), muted: false };

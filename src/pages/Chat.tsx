@@ -36,6 +36,7 @@ import type { ChatPayload } from '../lib/chatPayload';
 import { requestPanicWipe } from '../lib/panicWipe';
 import { encryptAndUploadMedia, type MediaUploadInput } from '../lib/media';
 import { summaryFromMessage, summariesEqual, isUnread } from '../lib/conversationSummary';
+import { isBlocked, blockContact, unblockContact } from '../lib/blocklist';
 import { replyRefFrom } from '../lib/reply';
 import { orderedVisibleMessages } from '../lib/messageOrder';
 import { haptic } from '../lib/haptics';
@@ -110,6 +111,28 @@ export const Chat = () => {
 	// unintended close (backoff) and whenever the app returns to the foreground.
 	const [connectNonce, setConnectNonce] = useState(0);
 	const reconnectAttempts = useRef(0);
+	// Bumps when the block list changes, to re-filter the conversation list.
+	const [blockVersion, setBlockVersion] = useState(0);
+
+	const handleBlock = useCallback(
+		(contactUsername: string) => {
+			blockContact(username ?? '', contactUsername);
+			setBlockVersion((v) => v + 1);
+			// Close the conversation if it's the one being blocked (it's now hidden).
+			setActiveContact((prev) => (prev === contactUsername ? null : prev));
+			setMobileView('list');
+			showToast(`Blocked ${contactUsername}.`, 'success');
+		},
+		[username, showToast]
+	);
+
+	const handleUnblock = useCallback(
+		(contactUsername: string) => {
+			unblockContact(username ?? '', contactUsername);
+			setBlockVersion((v) => v + 1);
+		},
+		[username]
+	);
 	// Keyboard-aware shell height (see the hook): keeps the composer above the
 	// on-screen keyboard on iOS. Falls back to the h-dvh class until it resolves.
 	const viewportHeight = useVisualViewportHeight();
@@ -614,6 +637,19 @@ export const Chat = () => {
 					// The sender the ratchet authenticated (server-stamped on the normal
 					// path, or trial-decrypt-identified for a sealed message).
 					const sender = result.displayMessage.from;
+					// Blocked: ack so the sender stops resending, send NO delivery
+					// receipt (don't confirm receipt to someone you've blocked), and —
+					// since decryptIncoming already persisted the plaintext — HARD-DELETE
+					// it so a blocked sender's message is never retained on-device. This
+					// uses the same local delete as "delete for me" (an existing keystore
+					// API; no crypto/keystore source changed). The ratchet advance stands:
+					// the message was cryptographically received either way, and un-
+					// advancing it would wedge the session.
+					if (isBlocked(currentUsername, sender)) {
+						sendAck(frame);
+						await keystore.deleteMessageLocal(currentUsername, sender, result.displayMessage.id);
+						return;
+					}
 					setMessagesByContact((prev) => ({
 						...prev,
 						[sender]: [...(prev[sender] ?? []), result.displayMessage],
@@ -1333,6 +1369,8 @@ export const Chat = () => {
 					{native && activeTab === 'contacts' ? (
 						<ContactsPane
 							contacts={contacts}
+							currentUsername={username ?? ''}
+							blockVersion={blockVersion}
 							onAddContact={handleAddContact}
 							onOpenChat={(u) => {
 								setActiveTab('chats');
@@ -1348,12 +1386,15 @@ export const Chat = () => {
 								setVerifyDialogOpen(true);
 							}}
 							onRemove={(u) => void handleRemoveContact(u)}
+							onBlock={handleBlock}
+							onUnblock={handleUnblock}
 						/>
 					) : (
 						<ContactList
 							contacts={contacts}
 							groups={groups}
 							summaries={summaries}
+							blockVersion={blockVersion}
 							currentUsername={username ?? ''}
 							activeContact={activeContact}
 							activeGroupId={activeGroup?.id ?? null}
@@ -1480,24 +1521,28 @@ export const Chat = () => {
 										<ChevronLeft className="w-5 h-5" />
 									</button>
 									<span className="truncate">{activeContactRecord.username}</span>
-									{activeContactRecord.verified && (
-										<span className="flex items-center gap-1 text-sax text-xs flex-shrink-0">
-											<ShieldCheck className="w-3.5 h-3.5" /> verified
-										</span>
-									)}
 								</span>
-								<div className="flex items-center gap-2">
+								<div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
 									<DisappearingTimerMenu seconds={activeContactRecord.disappearingSeconds} onChange={(s) => void handleSetTimer(s)} />
+									{/* Icon-only: the "verified" state already shows next to the name,
+									    so a shield glyph is enough (the "Safety number"/"Verify" label
+									    was redundant and crowded the header). */}
 									<button
 										onClick={() => setVerifyDialogOpen(true)}
-										className="text-xs flex items-center gap-1 px-2 py-1 border border-crease-line-bold hover:border-crease text-graphite rounded transition-colors"
+										aria-label={activeContactRecord.verified ? 'Safety number (verified)' : 'Verify safety number'}
+										title={activeContactRecord.verified ? 'Safety number' : 'Verify'}
+										className={`flex items-center justify-center w-9 h-9 border rounded transition-colors ${
+											activeContactRecord.verified
+												? 'border-sax/50 text-sax hover:border-sax'
+												: 'border-crease-line-bold text-graphite hover:border-crease'
+										}`}
 									>
-										<ShieldCheck className="w-3.5 h-3.5" />
-										{activeContactRecord.verified ? 'Safety number' : 'Verify'}
+										<ShieldCheck className="w-4 h-4" />
 									</button>
 									<ContactMenu
 										contactUsername={activeContactRecord.username}
 										onRemoveContact={() => void handleRemoveContact(activeContactRecord.username)}
+										onBlockContact={() => handleBlock(activeContactRecord.username)}
 									/>
 								</div>
 							</div>

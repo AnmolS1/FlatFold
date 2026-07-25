@@ -1,4 +1,5 @@
 import { useState, useEffect, type FormEvent, type ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Fingerprint } from 'lucide-react';
 import { LogoMark } from './common/Brand';
 import { useAuth } from '../hooks/useAuth';
@@ -14,11 +15,22 @@ interface KeystoreUnlockGateProps {
 // sessionStorage-scoped key. See AuthContext.tsx for why unlocking the
 // local keystore is a step separate from the server session.
 export const KeystoreUnlockGate = ({ children }: KeystoreUnlockGateProps) => {
-	const { username, keystoreLocked, unlockKeystore, unlockWithBiometric } = useAuth();
+	const { username, keystoreLocked, unlockKeystore, unlockWithBiometric, logout } = useAuth();
 	const [password, setPassword] = useState('');
 	const [error, setError] = useState<string | null>(null);
 	const [unlocking, setUnlocking] = useState(false);
 	const [bioEnrolled, setBioEnrolled] = useState(false);
+	const navigate = useNavigate();
+
+	// Escape hatches. Without these the gate is a trap: the server session is still
+	// valid, so `username` is set and /login bounces straight back here — leaving a
+	// forgotten password with no way out except the (destructive) panic wipe.
+	// Navigate FIRST so /login is mounted with the right intent, then drop the
+	// session; Login skips its usual redirect while the keystore is locked.
+	const leaveGate = (to: string) => {
+		navigate(to, { replace: true });
+		void logout();
+	};
 
 	// If biometric unlock is enrolled, offer it — and auto-try once so the Face ID
 	// sheet comes up straight away (password stays as the fallback).
@@ -77,12 +89,19 @@ export const KeystoreUnlockGate = ({ children }: KeystoreUnlockGateProps) => {
 					</button>
 				)}
 				<form onSubmit={handleSubmit} className="space-y-3">
+					{/* Hidden username + current-password autocomplete so a password
+					    manager (1Password, iCloud Keychain) recognises this as a sign-in
+					    for THIS account and offers to fill it. The key is memory-only by
+					    design, so this screen recurs on every reload — autofill is what
+					    makes that livable without weakening the tradeoff. */}
+					<input type="text" name="username" value={username ?? ''} readOnly hidden autoComplete="username" />
 					<input
 						type="password"
 						value={password}
 						onChange={(e) => setPassword(e.target.value)}
 						placeholder="Password"
 						autoFocus
+						autoComplete="current-password"
 						className="w-full rounded-lg border border-crease-line-bold bg-inset text-graphite placeholder-graphite-40 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-crease focus:border-transparent"
 					/>
 					{error && <p className="text-sm text-crane">{error}</p>}
@@ -94,6 +113,20 @@ export const KeystoreUnlockGate = ({ children }: KeystoreUnlockGateProps) => {
 						{unlocking ? 'Unlocking…' : 'Unlock'}
 					</button>
 				</form>
+				<div className="mt-5 flex flex-col gap-2 text-sm">
+					<button
+						onClick={() => leaveGate('/login?recover=1')}
+						className="text-crease hover:text-crane transition-colors"
+					>
+						Forgot your password?
+					</button>
+					<button
+						onClick={() => leaveGate('/login')}
+						className="text-graphite-60 hover:text-graphite transition-colors"
+					>
+						Not {username}? Sign in to another account
+					</button>
+				</div>
 				<button
 					onClick={() => requestPanicWipe()}
 					className="mt-6 text-xs text-graphite-40 hover:text-crane transition-colors underline"

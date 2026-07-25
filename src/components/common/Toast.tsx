@@ -100,12 +100,16 @@ const ToastComponent = ({ id, message, variant, duration = 5000, onClose }: Toas
 			style={{
 				transform: dragY ? `translateY(${dragY}px)` : undefined,
 				opacity: dragY ? Math.max(0.2, 1 + dragY / 120) : undefined,
-				touchAction: 'none',
+				touchAction: native ? 'none' : undefined,
 			}}
-			onPointerDown={onPointerDown}
-			onPointerMove={onPointerMove}
-			onPointerUp={onPointerUp}
-			onClick={onClick}
+			{...(native
+				? { onPointerDown, onPointerMove, onPointerUp, onClick }
+				: // Web: attach NO pointer handlers. `setPointerCapture` on this div
+					// retargets the following click to the captured element, which
+					// swallowed the close button's own onClick — the button looked dead.
+					// The swipe/tap-to-dismiss gesture is a native affordance anyway; web
+					// dismisses with the explicit button.
+					{})}
 		>
 			<div className={config.iconColor}>{config.icon}</div>
 			<p className={`${config.textColor} text-sm flex-1`}>{message}</p>
@@ -125,13 +129,18 @@ const ToastComponent = ({ id, message, variant, duration = 5000, onClose }: Toas
 export const Toast = memo(ToastComponent);
 
 export const ToastContainer = ({ children }: { children: ReactNode }) => {
+	// Native reads as an iOS system banner, which is centred and full-width. Web
+	// follows the desktop convention: stacked in the top-RIGHT corner, out of the
+	// way of the app's own header.
+	const native = isNativePlatform();
 	return (
-		// A centred top banner that clears the status bar / Dynamic Island via the
-		// safe-area inset (0 on web, so it just falls back to a top margin).
-		// pointer-events-none lets taps pass through the empty gutter; each toast
-		// re-enables its own.
+		// Clears the status bar / Dynamic Island via the safe-area inset (0 on web,
+		// so it just falls back to a top margin). pointer-events-none lets clicks
+		// pass through the empty gutter; each toast re-enables its own.
 		<div
-			className="fixed left-0 right-0 top-0 z-50 flex flex-col items-center gap-2 px-4 pointer-events-none"
+			className={`fixed left-0 right-0 top-0 z-50 flex flex-col gap-2 px-4 pointer-events-none ${
+				native ? 'items-center' : 'items-end'
+			}`}
 			style={{ paddingTop: 'max(1rem, calc(env(safe-area-inset-top) + 0.5rem))' }}
 			aria-live="polite"
 			aria-atomic="true"

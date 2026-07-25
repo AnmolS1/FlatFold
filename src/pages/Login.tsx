@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { LoginForm } from '../components/auth/LoginForm';
 import { SignupForm } from '../components/auth/SignupForm';
 import { RecoverForm } from '../components/auth/RecoverForm';
@@ -13,18 +13,25 @@ type Tab = 'login' | 'signup';
 
 export const Login = () => {
 	const [activeTab, setActiveTab] = useState<Tab>('login');
-	const [recovering, setRecovering] = useState(false);
-	const { username, loading } = useAuth();
+	const [searchParams] = useSearchParams();
+	// `?recover=1` opens the recovery form straight away — the unlock gate's
+	// "Forgot your password?" sends the user here.
+	const [recovering, setRecovering] = useState(searchParams.get('recover') === '1');
+	const { username, loading, keystoreLocked } = useAuth();
 	const navigate = useNavigate();
 	// Native: expose the keyboard height so the card can add scroll room for
 	// fields the keyboard would otherwise cover (notably the recover form).
 	useKeyboardInset();
 
+	// Bounce to the chat only when the session is BOTH signed in and unlocked.
+	// While the keystore is locked this page is the escape hatch (sign in as
+	// someone else, or recover a forgotten password) — redirecting then would
+	// trap the user in the unlock gate with no way to switch accounts.
 	useEffect(() => {
-		if (!loading && username) {
+		if (!loading && username && !keystoreLocked) {
 			navigate('/chat');
 		}
-	}, [username, loading, navigate]);
+	}, [username, loading, keystoreLocked, navigate]);
 
 	if (loading) {
 		return (

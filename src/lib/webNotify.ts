@@ -124,7 +124,11 @@ export function notifyActivity(): void {
 		if (!('Notification' in window) || Notification.permission !== 'granted') return;
 		const n = new Notification(getDecoyLabel(), {
 			tag: 'flatfold-activity',
-			icon: '/apple-touch-icon.png',
+			// The FlatFold mark, from the same PWA icon set the manifest uses (a
+			// dedicated monochrome badge for platforms that show one). Without these
+			// the browser falls back to its own logo.
+			icon: '/icon-192.png',
+			badge: '/badge-96.png',
 			// No body, no sender — content-free by design.
 		});
 		n.onclick = () => {

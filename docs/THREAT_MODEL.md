@@ -314,6 +314,28 @@ right tool. The `/transparency` page says this to users directly.
       still holds their recovery code but has lost their authenticator. Layering
       2FA onto recovery as defense-in-depth is a possible future hardening, not a
       closed hole today.
+21. **Opt-in biometric unlock stores MK in a Secure-Enclave-gated Keychain item
+    (D7 §5, native).** Enabling Face ID / Touch ID unlock writes the keystore
+    master key to the iOS Keychain via a custom native plugin
+    (`ios/App/App/FlatFoldBiometricPlugin.swift`) under an access-control object
+    created with `.biometryCurrentSet` and `kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly`,
+    read only through an `LAContext` authenticated with
+    `.deviceOwnerAuthenticationWithBiometrics`. Consequences, by design:
+    - The OS — not app JS — enforces the gate. MK is released ONLY on a live
+      biometric match; **not** by device-unlock alone, and **not** by the device
+      passcode (no passcode fallback on the item). This is why FlatFold ships a
+      custom plugin instead of an off-the-shelf verify-then-retrieve one, which
+      would leave MK retrievable from the Keychain without a live match — a
+      password-independent at-rest path that would contradict Invariant 3.
+    - `.biometryCurrentSet` invalidates the item if the enrolled biometrics change
+      (a face/finger added or removed), so a coerced enrollment change destroys
+      the stored key rather than exposing it. The user re-enables from Settings.
+    - The password and recovery code remain the ultimate secrets; biometric is an
+      on-device convenience wrapper that **never leaves the device** and is
+      deleted on disable, on `.biometryCurrentSet` invalidation, or when the
+      stored MK no longer opens the record. **Residual:** it inherits the device's
+      biometric strength (e.g. Face ID's ~1e-6 false-accept, a compelled unlock),
+      which is why it's opt-in and password-backed.
 
 ---
 

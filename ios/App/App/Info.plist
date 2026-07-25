@@ -60,6 +60,8 @@
 	<string>FlatFold uses the microphone only while you are recording a voice message to send in a conversation.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>FlatFold uses the camera only when you scan a contact's safety-number QR code to verify them, or take a photo to send in a conversation.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>FlatFold uses Face ID only to unlock your encrypted messages on this device, if you turn on biometric unlock. Your face data never leaves the device.</string>
 	<!-- Background delivery: the server sends a content-free "wake up and sync"
 	     push (aps content-available); remote-notification lets it run in the
 	     background so a notification can be shown while the app isn't foreground. -->

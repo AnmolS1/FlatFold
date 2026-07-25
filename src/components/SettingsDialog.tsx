@@ -5,6 +5,7 @@ import { apiDeleteAccount, apiLogoutAll, apiMe } from '../lib/api';
 import { useAuth } from '../hooks/useAuth';
 import { panicWipe } from '../lib/panicWipe';
 import { TwoFactorSection } from './settings/TwoFactorSection';
+import { BiometricSection } from './settings/BiometricSection';
 import {
 	DEFAULT_DECOY_LABEL,
 	getDecoyLabel,
@@ -427,6 +428,9 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 
 				{/* Two-factor authentication (D7 §4) */}
 				{twoFactorEnabled !== null && <TwoFactorSection username={username} initialEnabled={twoFactorEnabled} />}
+
+				{/* Biometric unlock (D7 §5, native — self-hides on web) */}
+				<BiometricSection username={username} />
 
 				{/* Notifications + decoy label */}
 				<section>

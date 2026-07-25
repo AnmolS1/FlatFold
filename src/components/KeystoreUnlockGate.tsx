@@ -1,7 +1,9 @@
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useState, useEffect, type FormEvent, type ReactNode } from 'react';
+import { Fingerprint } from 'lucide-react';
 import { LogoMark } from './common/Brand';
 import { useAuth } from '../hooks/useAuth';
 import { requestPanicWipe } from '../lib/panicWipe';
+import { isBiometricEnrolled } from '../keystore';
 
 interface KeystoreUnlockGateProps {
 	children: ReactNode;
@@ -12,12 +14,34 @@ interface KeystoreUnlockGateProps {
 // sessionStorage-scoped key. See AuthContext.tsx for why unlocking the
 // local keystore is a step separate from the server session.
 export const KeystoreUnlockGate = ({ children }: KeystoreUnlockGateProps) => {
-	const { username, keystoreLocked, unlockKeystore } = useAuth();
+	const { username, keystoreLocked, unlockKeystore, unlockWithBiometric } = useAuth();
 	const [password, setPassword] = useState('');
 	const [error, setError] = useState<string | null>(null);
 	const [unlocking, setUnlocking] = useState(false);
+	const [bioEnrolled, setBioEnrolled] = useState(false);
+
+	// If biometric unlock is enrolled, offer it — and auto-try once so the Face ID
+	// sheet comes up straight away (password stays as the fallback).
+	useEffect(() => {
+		if (!keystoreLocked || !username) return;
+		let cancelled = false;
+		void (async () => {
+			if (!(await isBiometricEnrolled(username)) || cancelled) return;
+			setBioEnrolled(true);
+			await unlockWithBiometric(); // resolves 'cancelled' silently → stay on password
+		})();
+		return () => {
+			cancelled = true;
+		};
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [keystoreLocked, username]);
 
 	if (!keystoreLocked) return <>{children}</>;
+
+	const tryBiometric = async () => {
+		setError(null);
+		await unlockWithBiometric();
+	};
 
 	const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
 		e.preventDefault();
@@ -44,6 +68,14 @@ export const KeystoreUnlockGate = ({ children }: KeystoreUnlockGateProps) => {
 					{username}&rsquo;s encrypted data on this device needs your password again — a separate, local-only
 					step from signing in.
 				</p>
+				{bioEnrolled && (
+					<button
+						onClick={() => void tryBiometric()}
+						className="w-full mb-3 flex items-center justify-center gap-2 border border-crease-line-bold text-graphite rounded-lg px-4 py-2 hover:border-crease transition-colors"
+					>
+						<Fingerprint className="w-5 h-5" /> Unlock with Face ID
+					</button>
+				)}
 				<form onSubmit={handleSubmit} className="space-y-3">
 					<input
 						type="password"

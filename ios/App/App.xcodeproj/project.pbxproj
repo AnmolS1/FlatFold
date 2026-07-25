@@ -16,6 +16,7 @@
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
 		78D6BFAC1677973284258BEE /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6FFE2F4D873352777D54E7A7 /* Foundation.framework */; };
+		8302A2A19907738D1F8A7A47 /* FlatFoldBiometricPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4738881198B3CB49ED3D1D4 /* FlatFoldBiometricPlugin.swift */; };
 		C45E121A56BAC0BC20BAB95F /* FlatFoldFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94A17C7A37620B868DDD3CD5 /* FlatFoldFlowUITests.swift */; };
 		FF0000000000000000000002 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = FF0000000000000000000001 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
@@ -44,6 +45,7 @@
 		6FFE2F4D873352777D54E7A7 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		94A17C7A37620B868DDD3CD5 /* FlatFoldFlowUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FlatFoldFlowUITests.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
+		D4738881198B3CB49ED3D1D4 /* FlatFoldBiometricPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FlatFoldBiometricPlugin.swift; sourceTree = "<group>"; };
 		FF0000000000000000000001 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -116,6 +118,7 @@
 				504EC3131FED79650016851F /* Info.plist */,
 				2FAD9762203C412B000D30F8 /* config.xml */,
 				50B271D01FEDC1A000F3C39B /* public */,
+				D4738881198B3CB49ED3D1D4 /* FlatFoldBiometricPlugin.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -246,6 +249,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
+				8302A2A19907738D1F8A7A47 /* FlatFoldBiometricPlugin.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

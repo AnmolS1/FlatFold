@@ -52,6 +52,7 @@ import {
 	type StoredIdentityRecord,
 } from './identityRecord';
 import { buildRecoveryEnrollment, generateRecoveryCode, openRecoveryBlob, type RecoveryEnrollment } from './recovery';
+import { biometricDeleteSecret, biometricGetSecret, biometricHasSecret, biometricSetSecret } from '../lib/biometric';
 import type { DisplayMessage } from '../types';
 import {
 	deleteKeystoreDatabase,
@@ -366,6 +367,69 @@ export async function rollbackChangePassword(username: string): Promise<void> {
 	const record = await getRecord<StoredIdentityRecord>(IDENTITY_STORE, username);
 	if (!record || !(record as IdentityRecordV2).altWrap) return;
 	await putRecord<StoredIdentityRecord>(IDENTITY_STORE, username, abortRewrap(record as IdentityRecordV2));
+}
+
+// ---- biometric unlock (D7 §5, native) ----
+// Store the master key in a Secure-Enclave-gated Keychain item (the custom
+// FlatFoldBiometric plugin) so a future unlock can retrieve MK with Face ID
+// instead of the password. MK is stored DIRECTLY — the OS gate IS the protection,
+// so there's nothing to wrap, and because a password change never changes MK, the
+// gated secret keeps working across one. The password + recovery code remain the
+// ultimate secrets; this is on-device convenience and never leaves the device.
+
+function biometricKey(username: string): string {
+	return `mk:${username}`;
+}
+
+// Requires the keystore to be unlocked (MK cached). Stores the cached MK gated by
+// biometrics.
+export async function enrollBiometric(username: string): Promise<void> {
+	const mk = requireCachedKey(username);
+	await biometricSetSecret(biometricKey(username), bytesToBase64(mk));
+}
+
+export async function isBiometricEnrolled(username: string): Promise<boolean> {
+	return biometricHasSecret(biometricKey(username));
+}
+
+export async function disableBiometric(username: string): Promise<void> {
+	await biometricDeleteSecret(biometricKey(username));
+}
+
+export type BiometricUnlockResult =
+	| { status: 'unlocked'; identity: IdentityKeyPair }
+	| { status: 'cancelled' }
+	| { status: 'no-local-identity' };
+
+// Retrieve MK from the gated Keychain (triggers the OS Face ID sheet), cache it,
+// and return the identity. 'cancelled' if the user cancels/fails or no secret is
+// stored — the caller falls back to the password gate.
+export async function unlockWithBiometric(username: string): Promise<BiometricUnlockResult> {
+	const record = await getRecord<StoredIdentityRecord>(IDENTITY_STORE, username);
+	if (!record) return { status: 'no-local-identity' };
+	const mkB64 = await biometricGetSecret(biometricKey(username), 'Unlock FlatFold');
+	if (!mkB64) return { status: 'cancelled' };
+	const masterKey = base64ToBytes(mkB64);
+	let doc: StoredIdentityDoc;
+	try {
+		doc = decryptBlob<StoredIdentityDoc>(masterKey, record.blob);
+	} catch {
+		// The stored MK no longer opens the record — drop the stale secret and
+		// fall back to the password.
+		await biometricDeleteSecret(biometricKey(username));
+		return { status: 'cancelled' };
+	}
+	cacheKey(username, masterKey);
+	return {
+		status: 'unlocked',
+		identity: {
+			signing: {
+				publicKey: base64ToBytes(doc.identity.signingPublicKey),
+				secretKey: base64ToBytes(doc.identity.signingSecretKey),
+			},
+			dh: { publicKey: base64ToBytes(doc.identity.dhPublicKey), secretKey: base64ToBytes(doc.identity.dhSecretKey) },
+		},
+	};
 }
 
 // ---- recovery code (D7 §3) ----

@@ -125,6 +125,19 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 		setKeystoreLocked(true);
 	};
 
+	// Unlock via biometrics (D7 §5). Retrieves MK from the Secure-Enclave-gated
+	// Keychain (Face ID sheet) and clears the lock. 'cancelled' on cancel/failure/
+	// not-enrolled — the caller keeps the password gate.
+	const unlockWithBiometric = async (): Promise<'unlocked' | 'cancelled'> => {
+		if (!username) throw new Error('Cannot unlock keystore with no authenticated user.');
+		const result = await keystore.unlockWithBiometric(username);
+		if (result.status === 'unlocked') {
+			setKeystoreLocked(false);
+			return 'unlocked';
+		}
+		return 'cancelled';
+	};
+
 	const unlockKeystore = async (password: string): Promise<'unlocked' | 'wrong-password'> => {
 		if (!username) throw new Error('Cannot unlock keystore with no authenticated user.');
 		const result = await keystore.unlock(username, password);
@@ -216,6 +229,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 		login,
 		logout,
 		unlockKeystore,
+		unlockWithBiometric,
 		changePassword,
 		enrollRecovery,
 		recoverAccount,

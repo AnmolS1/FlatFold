@@ -12,6 +12,7 @@ import {
 	addOneTimePreKeys,
 	checkRateLimit,
 	consumeOneTimePreKey,
+	countOneTimePreKeys,
 	getUser,
 	setUserKeys,
 	type IdentityPubkeyJson,
@@ -31,6 +32,11 @@ const MAX_ONE_TIME_PREKEYS = 200; // L5: cap a single publish batch
 // docs/SECURITY_AUDIT.md as the recommended follow-up.
 const OTP_CLAIM_WINDOW_SECONDS = 3600;
 const OTP_CLAIM_LIMIT_PER_WINDOW = 1;
+// Ceiling on a user's STORED pool, so repeated top-ups can't grow the table
+// without bound (a client bug or a malicious client could otherwise keep
+// inserting). Comfortably above the client's target so normal replenishment
+// never bumps it.
+const MAX_STORED_ONE_TIME_PREKEYS = 100;
 
 function json(body: unknown, init: ResponseInit = {}): Response {
 	return new Response(JSON.stringify(body), {
@@ -75,6 +81,42 @@ export async function handlePublishKeys(request: Request, env: Env, username: st
 	// which updates both the recipient DO and the D1 bundle copy.
 
 	return json({ ok: true });
+}
+
+// How many one-time prekeys the caller has left. The client polls this at
+// startup and tops the pool up when it runs low — without that, the initial
+// batch is consumed one-per-first-contact and never replaced, so an ordinary
+// account degrades to no-OTP X3DH permanently (FULL_AUDIT §2).
+export async function handleGetPreKeyCount(env: Env, username: string): Promise<Response> {
+	return json({ remaining: await countOneTimePreKeys(env.DB, username) });
+}
+
+// Top up ONLY the one-time prekey pool. Deliberately separate from
+// /api/keys/publish: that endpoint also rewrites the identity and signed
+// prekey, and re-publishing those on every replenishment would look like a key
+// change to every contact. This adds prekeys and touches nothing else.
+export async function handleAddOneTimePreKeys(request: Request, env: Env, username: string): Promise<Response> {
+	const body = await request.json().catch(() => null);
+	const oneTimePreKeys = (body as { oneTimePreKeys?: unknown } | null)?.oneTimePreKeys;
+
+	if (!Array.isArray(oneTimePreKeys) || !oneTimePreKeys.every((k) => typeof k === 'string')) {
+		return json({ error: 'oneTimePreKeys must be an array of strings.' }, { status: 400 });
+	}
+	if (oneTimePreKeys.length > MAX_ONE_TIME_PREKEYS) {
+		return json({ error: `oneTimePreKeys must be at most ${MAX_ONE_TIME_PREKEYS}.` }, { status: 400 });
+	}
+
+	// Clamp against the stored ceiling rather than rejecting: a client that
+	// over-asks still gets topped up to the cap, and the extra local secrets it
+	// keeps are harmless (they simply never get claimed).
+	const existing = await countOneTimePreKeys(env.DB, username);
+	const room = Math.max(0, MAX_STORED_ONE_TIME_PREKEYS - existing);
+	const accepted = oneTimePreKeys.slice(0, room);
+
+	if (accepted.length > 0) {
+		await addOneTimePreKeys(env.DB, username, accepted, Math.floor(Date.now() / 1000));
+	}
+	return json({ remaining: existing + accepted.length, accepted: accepted.length });
 }
 
 // Anonymous (sealed-sender) bundle lookup used by the OHTTP gateway. There is

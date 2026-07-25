@@ -30,6 +30,7 @@ import {
 import { apiRegisterSealToken } from '../lib/api';
 import { isNativePlatform, wsOrigin } from '../lib/platform';
 import { clearUnread, surfaceInboundActivity } from '../lib/webNotify';
+import { replenishPreKeysIfLow } from '../lib/prekeyReplenish';
 import { cachedNativeToken } from '../lib/nativeToken';
 import { apiSealedSend } from '../lib/sealedFetch';
 import { generateSealToken } from '../lib/sealToken';
@@ -926,6 +927,16 @@ export const Chat = () => {
 			document.removeEventListener('visibilitychange', clearOnVisible);
 		};
 	}, []);
+
+	// Top the one-time prekey pool back up if it has run low. X3DH consumes one
+	// per first contact and the initial batch was never refilled, so an ordinary
+	// account eventually ran dry and every later contact fell back to no-OTP X3DH
+	// (FULL_AUDIT §2). Runs here rather than in App.tsx because it needs the
+	// keystore UNLOCKED to store the new secrets. Best-effort and self-deduping.
+	useEffect(() => {
+		if (!username) return;
+		void replenishPreKeysIfLow(username);
+	}, [username]);
 
 	// Native: expose the keyboard height as a CSS variable so the shell height
 	// (and `.env-safe-bottom`) can shrink in sync with the keyboard animation.

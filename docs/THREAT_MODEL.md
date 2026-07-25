@@ -218,6 +218,28 @@ right tool. The `/transparency` page says this to users directly.
     fetch, an OTP is consumed on every first contact, the server learns who is
     about to be contacted, and the reasoning above becomes false. Pinned by
     `test-ui/bundleLookupPrivacy.test.ts`, which fails on that reordering.
+    **Update 2026-07-25 — exhaustion is now temporary, not permanent.** The
+    reasoning above still stands (no last-resort prekey; the sealed path remains
+    first and consumes nothing), but the pool used to be generated *once* at
+    identity creation and never refilled, so a drained pool stayed drained for the
+    life of the account. The client now tops it back up: `GET /api/keys/prekeys`
+    reports the remaining count and `POST /api/keys/prekeys` refills to 20 when it
+    falls to 8 or below (`src/lib/prekeyReplenish.ts`). The refill endpoint is
+    deliberately separate from `/api/keys/publish` so it never rewrites the
+    identity or signed prekey, which contacts would read as a key change; the
+    server caps a stored pool at 100. Ordering is the safety property: the new
+    secrets are persisted to the encrypted local doc *before* the public halves
+    are published, so a crash can never leave a published prekey whose secret was
+    lost (which would wedge first contact for whoever claimed it, since the server
+    deletes each prekey on use). Pinned by `test/prekey-replenish.test.ts`,
+    `test-ui/prekeyReplenish.test.ts`, and
+    `test-ui/prekeyReplenishOrchestration.test.ts`, the last of which was verified
+    failing against an inverted-order implementation. Both new endpoints are
+    strictly *self*-scoped — they read and write only the authenticated caller's
+    own pool, so neither adds a cheaper oracle about another user than the bundle
+    endpoint already is. So an attacker can still
+    force the *authenticated-fallback* path down to no-OTP X3DH within a refill
+    window, which is the accepted part; what is closed is the permanent version.
 15. **Username enumeration is intentional and unavoidable given contact-by-
     username.** Signup answers 409 for a taken name (`worker/index.ts`), and the
     *authenticated* bundle endpoint distinguishes 404 (no such user) from 409

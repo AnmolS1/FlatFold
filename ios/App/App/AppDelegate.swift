@@ -6,27 +6,54 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
 
+    // App-switcher privacy: iOS snapshots the screen when the app deactivates, and
+    // that snapshot shows in the multitasking switcher. Cover the UI with a branded
+    // overlay (the themed Splash image) before the snapshot is taken, so an open
+    // conversation never leaks into the switcher; removed when the app reactivates.
+    private var privacyOverlay: UIView?
+
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         // Override point for customization after application launch.
         return true
     }
 
     func applicationWillResignActive(_ application: UIApplication) {
-        // Sent when the application is about to move from active to inactive state. This can occur for certain types of temporary interruptions (such as an incoming phone call or SMS message) or when the user quits the application and it begins the transition to the background state.
-        // Use this method to pause ongoing tasks, disable timers, and invalidate graphics rendering callbacks. Games should use this method to pause the game.
+        showPrivacyOverlay()
     }
 
     func applicationDidEnterBackground(_ application: UIApplication) {
-        // Use this method to release shared resources, save user data, invalidate timers, and store enough application state information to restore your application to its current state in case it is terminated later.
-        // If your application supports background execution, this method is called instead of applicationWillTerminate: when the user quits.
+        // Belt-and-suspenders: make sure the overlay is up before backgrounding.
+        showPrivacyOverlay()
     }
 
     func applicationWillEnterForeground(_ application: UIApplication) {
-        // Called as part of the transition from the background to the active state; here you can undo many of the changes made on entering the background.
+        // Called as part of the transition from the background to the active state.
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
-        // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
+        hidePrivacyOverlay()
+    }
+
+    private func showPrivacyOverlay() {
+        guard privacyOverlay == nil, let window = self.window else { return }
+        let overlay = UIView(frame: window.bounds)
+        overlay.backgroundColor = .systemBackground // adapts light/dark; the image covers it
+        overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        if let splash = UIImage(named: "Splash") {
+            let imageView = UIImageView(image: splash)
+            imageView.contentMode = .scaleAspectFill
+            imageView.frame = overlay.bounds
+            imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            imageView.clipsToBounds = true
+            overlay.addSubview(imageView)
+        }
+        window.addSubview(overlay)
+        privacyOverlay = overlay
+    }
+
+    private func hidePrivacyOverlay() {
+        privacyOverlay?.removeFromSuperview()
+        privacyOverlay = nil
     }
 
     func applicationWillTerminate(_ application: UIApplication) {

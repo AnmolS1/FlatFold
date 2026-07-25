@@ -42,7 +42,9 @@ export function PasskeySection({ username }: { username: string }) {
 			if (!enrollment) {
 				// Cancelled, or the authenticator doesn't do PRF. Say so plainly
 				// rather than leaving a toggle that silently did nothing.
-				setError('This browser or device could not create a passkey that supports unlocking. Your password still works.');
+				setError(
+					'This browser or device could not create a passkey that supports unlocking (it needs WebAuthn PRF). Your password still works.'
+				);
 				return;
 			}
 			await enrollPasskeyUnlock(username, enrollment);

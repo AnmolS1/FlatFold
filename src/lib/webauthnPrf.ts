@@ -47,6 +47,26 @@ export async function hasPlatformAuthenticator(): Promise<boolean> {
 	}
 }
 
+// WebAuthn's own `timeout` is only a hint, and browsers routinely ignore it for
+// platform authenticators — a ceremony that never gets user activation can leave
+// its promise pending forever, which reads to the user as a frozen button. Bound
+// every call so failure is always visible and recoverable.
+class WebAuthnTimeoutError extends Error {}
+
+async function withTimeout<T>(promise: Promise<T>, ms = 90_000): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		return await Promise.race([
+			promise,
+			new Promise<never>((_, reject) => {
+				timer = setTimeout(() => reject(new WebAuthnTimeoutError('The passkey prompt did not complete.')), ms);
+			}),
+		]);
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
 function randomBytes(n: number): Uint8Array {
 	const b = new Uint8Array(n);
 	crypto.getRandomValues(b);
@@ -97,38 +117,57 @@ export async function createPasskeyWrappingKey(username: string): Promise<Passke
 	if (!isPasskeyUnlockSupported()) return null;
 	const prfSalt = randomBytes(32);
 
-	const created = (await navigator.credentials.create({
-		publicKey: {
-			challenge: randomBytes(32) as BufferSource,
-			rp: { name: 'FlatFold', id: window.location.hostname },
-			user: {
-				id: new TextEncoder().encode(username) as BufferSource,
-				name: username,
-				displayName: username,
+	const created = (await withTimeout(
+		navigator.credentials.create({
+			publicKey: {
+				challenge: randomBytes(32) as BufferSource,
+				rp: { name: 'FlatFold', id: window.location.hostname },
+				user: {
+					id: new TextEncoder().encode(username) as BufferSource,
+					name: username,
+					displayName: username,
+				},
+				pubKeyCredParams: [
+					{ type: 'public-key', alg: -7 }, // ES256
+					{ type: 'public-key', alg: -257 }, // RS256
+				],
+				authenticatorSelection: {
+					authenticatorAttachment: 'platform',
+					// 'preferred', not 'required': we store the credential id
+					// ourselves, so a discoverable credential buys nothing and
+					// 'required' needlessly fails on some authenticators.
+					residentKey: 'preferred',
+					userVerification: 'required', // the biometric gesture is the point
+				},
+				timeout: 60_000,
+				// Ask for the PRF output DURING creation. This is the difference
+				// between one Touch ID prompt and two: a second ceremony
+				// immediately after create() has no user activation left, so the
+				// browser may never show its prompt and the promise hangs.
+				extensions: { prf: { eval: { first: prfSalt as BufferSource } } } as AuthenticationExtensionsClientInputs,
 			},
-			pubKeyCredParams: [
-				{ type: 'public-key', alg: -7 }, // ES256
-				{ type: 'public-key', alg: -257 }, // RS256
-			],
-			authenticatorSelection: {
-				authenticatorAttachment: 'platform',
-				residentKey: 'required',
-				userVerification: 'required', // the biometric gesture is the point
-			},
-			timeout: 60_000,
-			extensions: { prf: {} } as AuthenticationExtensionsClientInputs,
-		},
-	})) as PublicKeyCredential | null;
+		})
+	)) as PublicKeyCredential | null;
 	if (!created) return null;
 
-	// The authenticator must actually support PRF; if not, undo and bail so we
-	// never leave a useless credential behind claiming to be an unlock method.
-	const ext = created.getClientExtensionResults() as { prf?: { enabled?: boolean } };
-	if (!ext.prf?.enabled) return null;
-
+	const ext = created.getClientExtensionResults() as {
+		prf?: { enabled?: boolean; results?: { first?: ArrayBuffer } };
+	};
 	const credentialId = new Uint8Array(created.rawId);
-	const prfOutput = await assertPrfOutput(credentialId, prfSalt);
-	if (!prfOutput) return null;
+
+	// Happy path: the authenticator returned the PRF output straight away, so
+	// enrollment is a single gesture.
+	let prfOutput = ext.prf?.results?.first ?? null;
+
+	if (!prfOutput) {
+		// Some authenticators report `enabled` but withhold results until a real
+		// assertion. That needs a SECOND ceremony, which may lack user activation
+		// — so bound it and fail loudly instead of hanging. If PRF isn't supported
+		// at all, bail now rather than leaving a credential that can never unlock.
+		if (!ext.prf?.enabled) return null;
+		prfOutput = await assertPrfOutput(credentialId, prfSalt);
+		if (!prfOutput) return null;
+	}
 
 	return {
 		credentialId: toBase64(credentialId),
@@ -139,18 +178,20 @@ export async function createPasskeyWrappingKey(username: string): Promise<Passke
 
 /** Runs the assertion (prompting the biometric) and returns the raw PRF output. */
 async function assertPrfOutput(credentialId: Uint8Array, prfSalt: Uint8Array): Promise<ArrayBuffer | null> {
-	const assertion = (await navigator.credentials.get({
-		publicKey: {
-			challenge: randomBytes(32) as BufferSource,
-			rpId: window.location.hostname,
-			allowCredentials: [{ type: 'public-key', id: credentialId as BufferSource }],
-			userVerification: 'required',
-			timeout: 60_000,
-			extensions: {
-				prf: { eval: { first: prfSalt as BufferSource } },
-			} as AuthenticationExtensionsClientInputs,
-		},
-	})) as PublicKeyCredential | null;
+	const assertion = (await withTimeout(
+		navigator.credentials.get({
+			publicKey: {
+				challenge: randomBytes(32) as BufferSource,
+				rpId: window.location.hostname,
+				allowCredentials: [{ type: 'public-key', id: credentialId as BufferSource }],
+				userVerification: 'required',
+				timeout: 60_000,
+				extensions: {
+					prf: { eval: { first: prfSalt as BufferSource } },
+				} as AuthenticationExtensionsClientInputs,
+			},
+		})
+	)) as PublicKeyCredential | null;
 	if (!assertion) return null;
 	const results = (assertion.getClientExtensionResults() as { prf?: { results?: { first?: ArrayBuffer } } }).prf?.results;
 	return results?.first ?? null;

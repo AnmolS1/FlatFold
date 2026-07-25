@@ -171,7 +171,16 @@ const ContactListComponent = ({
 						return (
 							<button
 								key={row.key}
-								onClick={() => (row.isGroup ? onSelectGroup(row.group!) : onSelectContact(row.key))}
+								onClick={() => {
+									// If the compose bar is open, a tap on the list just dismisses it
+									// (and the keyboard) — it must NOT also open the chat you tapped.
+									if (newChatOpen) {
+										setCompose(false);
+										return;
+									}
+									if (row.isGroup) onSelectGroup(row.group!);
+									else onSelectContact(row.key);
+								}}
 								className={`w-full text-left flex items-center gap-3 px-4 min-h-[60px] py-2 border-b border-crease-line transition-colors relative ${
 									active ? 'bg-crease/10 border-l-2 border-l-crane pl-[14px]' : 'hover:bg-inset'
 								}`}

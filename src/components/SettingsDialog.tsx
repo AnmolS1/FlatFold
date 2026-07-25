@@ -195,7 +195,7 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 			<div
 				ref={panelRef}
 				tabIndex={-1}
-				className="bg-graph-card border border-crease-line rounded-2xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto focus:outline-none"
+				className="bg-graph-card border border-crease-line rounded-2xl max-w-md w-full p-6 max-h-[70vh] overflow-y-auto focus:outline-none"
 				onClick={(e) => e.stopPropagation()}
 			>
 				<div className="flex items-center justify-between mb-5">

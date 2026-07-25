@@ -125,34 +125,36 @@ export function TwoFactorSection({ username, initialEnabled }: { username: strin
 				</>
 			) : (
 				<div className="space-y-3 border border-crease-line-bold rounded-lg p-3">
+					{/* iOS routes otpauth:// to the system default (Passwords) with no
+					    app-picker, and a webview can't enumerate installed authenticators —
+					    so lead with the copyable key, which works with ANY app: open it,
+					    add an account, paste. The QR + Passwords link are secondary. */}
 					<p className="text-xs text-graphite-60">
-						Add this to your authenticator app, then enter a code to confirm.
+						In your authenticator app — Google Authenticator, Authy, 1Password, and so on — add an account, choose
+						&ldquo;Enter a setup key,&rdquo; and paste this:
 					</p>
-					{/* On the same phone, the QR can't be scanned — this hands the code
-					    straight to an installed authenticator app. */}
-					<button
-						onClick={() => window.open(draft.uri, '_system')}
-						className="w-full flex items-center justify-center gap-2 bg-crease text-white rounded-lg py-2 text-sm hover:opacity-90 transition-opacity"
-					>
-						<ExternalLink className="w-4 h-4" /> Open in your authenticator app
-					</button>
-					<details className="text-xs text-graphite-40">
-						<summary className="cursor-pointer">On another device? Scan a QR instead</summary>
-						<div className="flex justify-center mt-2">
-							<div className="rounded-lg overflow-hidden bg-white p-2">
-								<QrCode text={draft.uri} label="Two-factor setup QR" />
-							</div>
-						</div>
-					</details>
 					<div>
 						<div className="flex items-center justify-between mb-1">
-							<p className="text-xs text-graphite-40">Or enter this key manually:</p>
+							<p className="text-xs text-graphite-40">Setup key</p>
 							<button onClick={() => void copy('key', draft.secret)} className="text-xs flex items-center gap-1 text-crease hover:text-crane transition-colors">
 								{copied === 'key' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
 								{copied === 'key' ? 'Copied' : 'Copy'}
 							</button>
 						</div>
-						<p className="selectable-text font-mono text-xs text-graphite break-all bg-inset border border-crease-line rounded p-2">{draft.secret}</p>
+						<p className="selectable-text font-mono text-sm text-graphite break-all bg-inset border border-crease-line-bold rounded p-2 tracking-wide">{draft.secret}</p>
+					</div>
+					<div className="space-y-2 text-xs">
+						<button onClick={() => window.open(draft.uri, '_system')} className="flex items-center gap-1 text-crease hover:text-crane transition-colors">
+							<ExternalLink className="w-3.5 h-3.5" /> Add to Apple Passwords instead
+						</button>
+						<details className="text-graphite-40">
+							<summary className="cursor-pointer">Scan a QR from another device</summary>
+							<div className="flex justify-center mt-2">
+								<div className="rounded-lg overflow-hidden bg-white p-2">
+									<QrCode text={draft.uri} label="Two-factor setup QR" />
+								</div>
+							</div>
+						</details>
 					</div>
 
 					<div>

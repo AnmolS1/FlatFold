@@ -23,6 +23,14 @@ For _fastlane_ installation instructions, see [Installing _fastlane_](https://do
 
 Generate/sync App Store signing certs + profiles into flatfold-certs (encrypted)
 
+### ios verify
+
+```sh
+[bundle exec] fastlane ios verify
+```
+
+Staging check: validate ASC auth + signing material, report the TestFlight build number. No build, no upload.
+
 ### ios beta
 
 ```sh

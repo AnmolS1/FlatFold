@@ -1,6 +1,8 @@
-import { useEffect, memo, type ReactNode } from 'react';
+import { useEffect, useRef, useState, memo, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react';
 import { CheckCircle, XCircle, Info, X } from 'lucide-react';
 import { isNativePlatform } from '../../lib/platform';
+
+const SWIPE_DISMISS_PX = 40; // upward drag past this dismisses the banner
 
 export type ToastVariant = 'success' | 'error' | 'info';
 
@@ -57,17 +59,53 @@ const ToastComponent = ({ id, message, variant, duration = 5000, onClose }: Toas
 		};
 	}, [id, duration, onClose]);
 
-	// Native reads as a self-dismissing iOS banner — no close affordance, tap to
-	// dismiss early. Web keeps the explicit close button.
+	// Native reads as a self-dismissing iOS banner — no close affordance; tap to
+	// dismiss, or SWIPE UP to flick it away. Web keeps the explicit close button.
 	const native = isNativePlatform();
+
+	// Swipe-up-to-dismiss: follow the finger upward, flick away past the threshold,
+	// otherwise spring back. `moved` suppresses the tap-close at a swipe's end.
+	const [dragY, setDragY] = useState(0);
+	const start = useRef<number | null>(null);
+	const moved = useRef(false);
+
+	const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+		start.current = e.clientY;
+		moved.current = false;
+		e.currentTarget.setPointerCapture(e.pointerId);
+	};
+	const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+		if (start.current === null) return;
+		const dy = e.clientY - start.current;
+		if (Math.abs(dy) > 3) moved.current = true;
+		setDragY(Math.min(0, dy)); // upward only
+	};
+	const onPointerUp = () => {
+		if (start.current === null) return;
+		start.current = null;
+		if (dragY < -SWIPE_DISMISS_PX) onClose(id);
+		else setDragY(0);
+	};
+	const onClick = () => {
+		if (moved.current) return; // end of a swipe, not a tap
+		if (native) onClose(id);
+	};
 
 	return (
 		<div
 			className={`${config.bgColor} ${config.borderColor} border rounded-xl shadow-lg px-4 py-3 flex items-center gap-3 w-full max-w-md pointer-events-auto animate-slide-down ${
-				native ? 'cursor-pointer active:opacity-80 transition-opacity' : ''
+				native ? 'cursor-pointer active:opacity-90' : ''
 			}`}
 			role="alert"
-			onClick={native ? () => onClose(id) : undefined}
+			style={{
+				transform: dragY ? `translateY(${dragY}px)` : undefined,
+				opacity: dragY ? Math.max(0.2, 1 + dragY / 120) : undefined,
+				touchAction: 'none',
+			}}
+			onPointerDown={onPointerDown}
+			onPointerMove={onPointerMove}
+			onPointerUp={onPointerUp}
+			onClick={onClick}
 		>
 			<div className={config.iconColor}>{config.icon}</div>
 			<p className={`${config.textColor} text-sm flex-1`}>{message}</p>

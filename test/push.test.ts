@@ -50,19 +50,20 @@ describe('web push — content-free by construction', () => {
 });
 
 describe('APNs push — content-free by construction', () => {
-	it('the APNs request body is EXACTLY the content-available signal — nothing else', async () => {
-		// Native iOS can't use Web Push (no Service Worker in WKWebView), so the
-		// wake-up rides APNs instead. It must be just as content-free: a silent
-		// background push carrying no message text and no sender.
+	it('the APNs payload is a content-free ALERT — a fixed generic title, nothing else', async () => {
+		// Native iOS can't use Web Push (no Service Worker in WKWebView). A silent
+		// content-available push doesn't reliably surface a banner (it doesn't wake
+		// Capacitor's handler), so this is an alert push — but still content-free:
+		// the only visible text is a FIXED generic title, with no message and no
+		// sender.
 		const request = await buildApnsRequest(env, FAKE_DEVICE_TOKEN, 'production');
 
 		expect(request.method).toBe('POST');
-		const body = await request.clone().text();
-		const parsed = JSON.parse(body);
-		// The ONLY top-level key is `aps`, whose ONLY key is `content-available`.
+		const parsed = JSON.parse(await request.clone().text());
 		expect(Object.keys(parsed)).toEqual(['aps']);
-		expect(Object.keys(parsed.aps)).toEqual(['content-available']);
-		expect(parsed.aps['content-available']).toBe(1);
+		expect(parsed.aps.alert).toEqual({ title: 'New activity' }); // fixed, not derived from any message
+		expect(parsed.aps.sound).toBe('default');
+		expect('body' in parsed.aps).toBe(false); // no per-message body ever
 	});
 
 	it('carries NO username / sender / ciphertext anywhere on the wire', async () => {
@@ -86,11 +87,10 @@ describe('APNs push — content-free by construction', () => {
 		expect(wire.toLowerCase()).not.toContain('message');
 	});
 
-	it('sends the correct APNs headers (background, low-priority, no-store)', async () => {
+	it('sends an ALERT push (displayed directly) with the right headers', async () => {
 		const request = await buildApnsRequest(env, FAKE_DEVICE_TOKEN, 'production');
-		expect(request.headers.get('apns-push-type')).toBe('background');
-		expect(request.headers.get('apns-priority')).toBe('5');
-		expect(request.headers.get('apns-expiration')).toBe('0');
+		expect(request.headers.get('apns-push-type')).toBe('alert');
+		expect(request.headers.get('apns-priority')).toBe('10');
 		// apns-topic is the bundle id (non-secret var).
 		expect(request.headers.get('apns-topic')).toBe(env.APNS_BUNDLE_ID);
 	});

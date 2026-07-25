@@ -63,17 +63,26 @@ async function registerForApnsToken(): Promise<string> {
 	}
 }
 
+// The last failure detail, surfaced in Settings so an 'error' shows the real
+// reason (registration / permission / network) rather than a generic message.
+let lastPushError: string | null = null;
+export function getLastPushError(): string | null {
+	return lastPushError;
+}
+
 export async function subscribeToApnsNative(): Promise<SubscribeResult> {
+	lastPushError = null;
 	try {
 		const perm = await PushNotifications.requestPermissions();
 		if (perm.receive !== 'granted') return 'denied';
 		const deviceToken = await registerForApnsToken();
 		// environment omitted → server defaults to 'production' and falls back to
-		// sandbox if the token is a dev-build token (worker/push.ts).
+		// sandbox if the token is a dev-build (sandbox) token (worker/push.ts).
 		await apiSubscribeApns(deviceToken);
 		setEnabledFlag(true);
 		return 'subscribed';
-	} catch {
+	} catch (e) {
+		lastPushError = e instanceof Error ? e.message : String(e);
 		return 'error';
 	}
 }

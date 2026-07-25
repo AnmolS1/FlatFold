@@ -26,4 +26,9 @@ interface __BaseEnv_Env {
 	// `.dev.vars` locally. The non-secret APNS_KEY_ID / APNS_TEAM_ID /
 	// APNS_BUNDLE_ID live in wrangler.jsonc `vars`.
 	APNS_KEY: string;
+	// Optional SANDBOX APNs provider key + its key id, for delivering to sandbox
+	// device tokens (a debug/dev build produces these). When absent, the sandbox
+	// path falls back to the prod key. `wrangler secret put APNS_KEY_SANDBOX`.
+	APNS_KEY_SANDBOX?: string;
+	APNS_KEY_ID_SANDBOX?: string;
 }

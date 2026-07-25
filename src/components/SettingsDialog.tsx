@@ -61,7 +61,8 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 				} else if (result === 'denied') {
 					setPushMessage('Notification permission was denied.');
 				} else {
-					setPushMessage('Could not enable notifications.');
+					const { getLastPushError } = await import('../lib/nativePush');
+					setPushMessage(getLastPushError() ?? 'Could not enable notifications.');
 				}
 			}
 		} finally {

@@ -141,11 +141,17 @@ function pemToDerBytes(pem: string): Uint8Array {
 // already returns the raw r||s (JOSE) signature APNs wants — no DER unwrap,
 // mirroring signVapidJwt above. v1 signs per send; the token may be reused for
 // ~40 min, a later optimization.
-async function signApnsProviderToken(env: Env): Promise<string> {
-	const key = await crypto.subtle.importKey('pkcs8', pemToDerBytes(env.APNS_KEY), { name: 'ECDSA', namedCurve: 'P-256' }, false, [
-		'sign',
-	]);
-	const header = { alg: 'ES256', kid: env.APNS_KEY_ID };
+async function signApnsProviderToken(env: Env, environment: ApnsEnvironment): Promise<string> {
+	// These APNs keys are provisioned per-environment (prod: APNS_KEY_ID; sandbox:
+	// APNS_KEY_ID_SANDBOX). A DEBUG/dev build produces a sandbox device token, and
+	// signing with the prod key against the sandbox host returns
+	// BadEnvironmentKeyInToken — so use the sandbox key there when it's configured
+	// (release/TestFlight builds use the prod key + host and never hit this).
+	const useSandbox = environment === 'sandbox' && !!env.APNS_KEY_SANDBOX && !!env.APNS_KEY_ID_SANDBOX;
+	const pem = useSandbox ? env.APNS_KEY_SANDBOX! : env.APNS_KEY;
+	const kid = useSandbox ? env.APNS_KEY_ID_SANDBOX! : env.APNS_KEY_ID;
+	const key = await crypto.subtle.importKey('pkcs8', pemToDerBytes(pem), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
+	const header = { alg: 'ES256', kid };
 	const claims = { iss: env.APNS_TEAM_ID, iat: Math.floor(Date.now() / 1000) };
 	const signingInput = `${jsonToB64url(header)}.${jsonToB64url(claims)}`;
 	const signature = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, key, new TextEncoder().encode(signingInput));
@@ -156,9 +162,13 @@ async function signApnsProviderToken(env: Env): Promise<string> {
 // so a test can assert the body carries ONLY the silent-push signal and no
 // message content or sender. The device token is the recipient's device, not
 // content — it necessarily rides in the URL path per Apple's protocol.
+// The fixed, generic title shown on a native push. Matches the web default decoy
+// label; deliberately says nothing about FlatFold, the sender, or the message.
+const DECOY_PUSH_TITLE = 'New activity';
+
 export async function buildApnsRequest(env: Env, deviceToken: string, environment: ApnsEnvironment): Promise<Request> {
 	const host = APNS_HOSTS[environment] ?? APNS_HOSTS.production;
-	const jwt = await signApnsProviderToken(env);
+	const jwt = await signApnsProviderToken(env, environment);
 	return new Request(`https://${host}/3/device/${deviceToken}`, {
 		method: 'POST',
 		// APNs never redirects, but keep the SSRF-safe default of never following
@@ -167,13 +177,19 @@ export async function buildApnsRequest(env: Env, deviceToken: string, environmen
 		headers: {
 			authorization: `bearer ${jwt}`,
 			'apns-topic': env.APNS_BUNDLE_ID,
-			'apns-push-type': 'background',
-			'apns-priority': '5',
-			'apns-expiration': '0',
+			// An ALERT push (not a silent content-available one): iOS displays it
+			// directly, so it doesn't depend on the OS choosing to wake a suspended
+			// app — the reliable way to surface a native banner. A silent push does
+			// NOT trigger Capacitor's pushNotificationReceived in the background, so
+			// the app can't schedule anything to show.
+			'apns-push-type': 'alert',
+			'apns-priority': '10',
 		},
-		// The ONLY payload: a silent "content-available" background push. No
-		// message text, no sender, nothing else — this is the invariant.
-		body: JSON.stringify({ aps: { 'content-available': 1 } }),
+		// CONTENT-FREE still holds: the ONLY visible text is a fixed, generic decoy
+		// title — no message text, no sender, nothing identifying. (The per-user
+		// custom decoy label lives client-side; wiring it server-side for native is
+		// a follow-up — see THREAT_MODEL #22.)
+		body: JSON.stringify({ aps: { alert: { title: DECOY_PUSH_TITLE }, sound: 'default' } }),
 	});
 }
 

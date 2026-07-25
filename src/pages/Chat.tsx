@@ -138,6 +138,10 @@ export const Chat = () => {
 	const viewportHeight = useVisualViewportHeight();
 
 	const wsRef = useRef<WebSocket | null>(null);
+	// True while the app is backgrounded (native): we close the socket so the
+	// server sees us offline and pushes, and we suppress auto-reconnect until the
+	// app returns to the foreground.
+	const backgroundedRef = useRef(false);
 	// Serializes every session-touching operation — inbound decrypt AND
 	// outbound encrypt — onto one chain. Both paths do
 	// loadSession→mutate→saveSession against IndexedDB, and saveSession
@@ -830,6 +834,10 @@ export const Chat = () => {
 		ws.onclose = () => {
 			setConnected(false);
 			if (intentionalClose) return;
+			// Closed because we backgrounded — don't reconnect; the appStateChange
+			// listener reconnects on resume. (Reconnecting now would re-open a socket
+			// iOS is about to sever, keeping the server from seeing us offline.)
+			if (backgroundedRef.current) return;
 			// Reconnect with exponential backoff. On iOS the app is suspended while
 			// backgrounded, so this timer won't fire until the foreground — the
 			// appStateChange listener below also nudges a reconnect on resume.
@@ -855,9 +863,19 @@ export const Chat = () => {
 		void (async () => {
 			const { App } = await import('@capacitor/app');
 			const handle = await App.addListener('appStateChange', ({ isActive }) => {
-				if (isActive && wsRef.current?.readyState !== WebSocket.OPEN) {
-					reconnectAttempts.current = 0;
-					setConnectNonce((n) => n + 1);
+				if (isActive) {
+					backgroundedRef.current = false;
+					if (wsRef.current?.readyState !== WebSocket.OPEN) {
+						reconnectAttempts.current = 0;
+						setConnectNonce((n) => n + 1);
+					}
+				} else {
+					// Backgrounded: close the socket cleanly NOW so the server (DO) sees
+					// us offline and routes new messages to the wake-up push, instead of
+					// live-delivering into a socket iOS is about to sever abruptly (which
+					// the DO can take minutes to notice → no push fires).
+					backgroundedRef.current = true;
+					wsRef.current?.close(1000, 'backgrounded');
 				}
 			});
 			remove = () => void handle.remove();

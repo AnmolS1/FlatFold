@@ -1,7 +1,20 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { apiChangePassword, apiLogin, apiLogout, apiMe, apiPublishKeys, apiSignup } from '../lib/api';
+import {
+	apiChangePassword,
+	apiEnrollRecovery,
+	apiLogin,
+	apiLogout,
+	apiMe,
+	apiPublishKeys,
+	apiRecoveryParams,
+	apiRecoveryReset,
+	apiSignup,
+} from '../lib/api';
 import * as keystore from '../keystore';
+import { deriveRecoveryAuth } from '../keystore/recovery';
 import { bytesToBase64 } from '../keystore/codec';
+import type { EncryptedBlob } from '../keystore/crypto';
+import type { NewIdentityMaterial } from '../keystore';
 import type { AuthContextType } from '../types';
 import { AuthContext } from '../hooks/useAuth';
 
@@ -9,8 +22,7 @@ interface AuthProviderProps {
 	children: ReactNode;
 }
 
-async function publishFreshIdentity(username: string, password: string): Promise<void> {
-	const material = await keystore.createIdentity(username, password);
+async function publishIdentityMaterial(material: NewIdentityMaterial): Promise<void> {
 	await apiPublishKeys({
 		identityPubkey: {
 			signingPublicKey: bytesToBase64(material.identity.signing.publicKey),
@@ -22,6 +34,10 @@ async function publishFreshIdentity(username: string, password: string): Promise
 		},
 		oneTimePreKeys: material.oneTimePreKeys.map((opk) => bytesToBase64(opk.keyPair.publicKey)),
 	});
+}
+
+async function publishFreshIdentity(username: string, password: string): Promise<void> {
+	await publishIdentityMaterial(await keystore.createIdentity(username, password));
 }
 
 // Unlocks this user's local encrypted keystore — or, on a device with no
@@ -142,6 +158,57 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 		return 'ok';
 	};
 
+	// Turn on (or replace) a recovery code (D7 §3). The keystore builds the code +
+	// opaque blob from the unlocked identity; the server stores it after a password
+	// re-auth. The code is returned to show ONCE and is never retained.
+	const enrollRecovery = async (password: string): Promise<string> => {
+		if (!username) throw new Error('Cannot set up recovery with no authenticated user.');
+		const { code, enrollment } = await keystore.enrollRecovery(username);
+		await apiEnrollRecovery(password, {
+			saltRec: enrollment.saltRec,
+			saltAuth: enrollment.saltAuth,
+			blob: enrollment.blob,
+			auth: enrollment.auth,
+		});
+		return code;
+	};
+
+	// Recover an account on this device from its recovery code (D7 §3). Fetches the
+	// public salts, derives the authenticator, resets the password server-side (which
+	// releases the opaque blob), then rebuilds the identity + contacts locally under
+	// the new password and republishes. The identity keys are unchanged, so contacts
+	// see no safety-number change.
+	const recoverAccount = async (
+		usernameInput: string,
+		code: string,
+		newPassword: string
+	): Promise<'ok' | 'no-recovery' | 'wrong-code'> => {
+		const params = await apiRecoveryParams(usernameInput);
+		if (!params) return 'no-recovery';
+
+		let recAuth: string;
+		try {
+			recAuth = await deriveRecoveryAuth(code, params.saltAuth);
+		} catch {
+			return 'wrong-code'; // invalid mnemonic / bad checksum
+		}
+
+		const result = await apiRecoveryReset(usernameInput, recAuth, newPassword);
+		if (result === 'wrong-code') return 'wrong-code';
+
+		const material = await keystore.restoreFromRecovery(
+			usernameInput,
+			code,
+			params.saltRec,
+			result.blob as EncryptedBlob,
+			newPassword
+		);
+		await publishIdentityMaterial(material);
+		setUsername(usernameInput);
+		setKeystoreLocked(false);
+		return 'ok';
+	};
+
 	const value: AuthContextType = {
 		username,
 		loading,
@@ -151,6 +218,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 		logout,
 		unlockKeystore,
 		changePassword,
+		enrollRecovery,
+		recoverAccount,
 	};
 
 	return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

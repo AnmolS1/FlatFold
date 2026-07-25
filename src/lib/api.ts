@@ -103,6 +103,53 @@ export async function apiChangePassword(current: string, next: string): Promise<
 	await captureNativeToken(body);
 }
 
+// ---- account recovery (D7 §3) ----
+
+// Enroll (or replace) a recovery code. Password-reauthed server-side. The blob +
+// authenticator are opaque here — built by the keystore (keystore.enrollRecovery).
+export interface RecoveryUpload {
+	saltRec: string;
+	saltAuth: string;
+	blob: unknown; // EncryptedBlob JSON — opaque to the transport
+	auth: string;
+}
+export async function apiEnrollRecovery(password: string, upload: RecoveryUpload): Promise<void> {
+	const response = await apiFetch('/api/auth/recovery/enroll', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ password, ...upload }),
+	});
+	await parseJsonOrThrow(response);
+}
+
+// The public recovery salts for a username. Null when the account has no recovery
+// enrolled (server 404) — the caller shows the honest "no way back" copy.
+export async function apiRecoveryParams(username: string): Promise<{ saltRec: string; saltAuth: string } | null> {
+	const response = await apiFetch(`/api/auth/recovery/params?username=${encodeURIComponent(username)}`);
+	if (response.status === 404) return null;
+	return (await parseJsonOrThrow(response)) as { saltRec: string; saltAuth: string };
+}
+
+// Recover: authenticate with the recovery authenticator, set a new password, and
+// receive the opaque recovery blob (to rebuild the identity locally). Captures the
+// fresh session token for native. Returns 'wrong-code' on a bad authenticator
+// (server 401); throws on other failures (429 rate-limit, network).
+export async function apiRecoveryReset(
+	username: string,
+	recAuth: string,
+	newPassword: string
+): Promise<{ blob: unknown } | 'wrong-code'> {
+	const response = await apiFetch('/api/auth/recovery/reset', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ username, recAuth, newPassword }),
+	});
+	if (response.status === 401) return 'wrong-code';
+	const body = (await parseJsonOrThrow(response)) as { blob: unknown; token?: string };
+	await captureNativeToken(body);
+	return { blob: body.blob };
+}
+
 // Irreversible: deletes the server-side account (D1 rows + queued ciphertext)
 // after password re-auth. The caller must ALSO wipe the local keystore.
 export async function apiDeleteAccount(password: string): Promise<void> {

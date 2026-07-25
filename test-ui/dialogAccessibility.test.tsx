@@ -27,6 +27,8 @@ const stubAuth: AuthContextType = {
 	logout: vi.fn(),
 	unlockKeystore: vi.fn(),
 	changePassword: vi.fn(),
+	enrollRecovery: vi.fn(),
+	recoverAccount: vi.fn(),
 };
 
 vi.mock('../src/lib/api', () => ({

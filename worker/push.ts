@@ -215,15 +215,34 @@ export async function sendWakeupToUser(env: Env, username: string): Promise<void
 			await env.DB.prepare('DELETE FROM apns_subscriptions WHERE device_token = ?').bind(device_token).run();
 			continue;
 		}
-		const apnsEnv: ApnsEnvironment = environment === 'sandbox' ? 'sandbox' : 'production';
-		try {
-			const response = await fetch(await buildApnsRequest(env, device_token, apnsEnv));
-			if (response.status === 410) {
-				await env.DB.prepare('DELETE FROM apns_subscriptions WHERE device_token = ?').bind(device_token).run();
+		const stored: ApnsEnvironment = environment === 'sandbox' ? 'sandbox' : 'production';
+		// Try the stored environment, then the OTHER one. A debug build installed via
+		// Xcode/devicectl gets a SANDBOX token even though the entitlement says
+		// production, so a production send 400s (BadDeviceToken) and used to fail
+		// silently. Fall back instead, and remember which environment actually
+		// worked so later sends hit it first. 410 (Unregistered) means the token is
+		// dead → prune. A token that's bad in both environments just isn't delivered.
+		const candidates: ApnsEnvironment[] = stored === 'sandbox' ? ['sandbox', 'production'] : ['production', 'sandbox'];
+		for (const apnsEnv of candidates) {
+			try {
+				const response = await fetch(await buildApnsRequest(env, device_token, apnsEnv));
+				if (response.status === 200) {
+					if (apnsEnv !== stored) {
+						await env.DB.prepare('UPDATE apns_subscriptions SET environment = ? WHERE device_token = ?')
+							.bind(apnsEnv, device_token)
+							.run();
+					}
+					break;
+				}
+				if (response.status === 410) {
+					await env.DB.prepare('DELETE FROM apns_subscriptions WHERE device_token = ?').bind(device_token).run();
+					break;
+				}
+				// Otherwise (e.g. 400 wrong-environment) fall through to the next candidate.
+			} catch {
+				// APNs unreachable (or local dev) — ignore; the client re-syncs on reconnect.
+				break;
 			}
-		} catch {
-			// APNs unreachable (or local dev) — ignore; the client re-syncs on
-			// reconnect regardless.
 		}
 	}
 }

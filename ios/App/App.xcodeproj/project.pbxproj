@@ -60,6 +60,7 @@
 		94A17C7A37620B868DDD3CD5 /* FlatFoldFlowUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FlatFoldFlowUITests.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 		A5936FE4AF6A0E6B12B289CA /* AppIcon-Vellum@2x.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; name = "AppIcon-Vellum@2x.png"; path = "AltIcons/AppIcon-Vellum@2x.png"; sourceTree = "<group>"; };
+		A89901378AD9AEDA07CCA03E /* App.debug.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = App.debug.entitlements; sourceTree = "<group>"; };
 		D4738881198B3CB49ED3D1D4 /* FlatFoldBiometricPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FlatFoldBiometricPlugin.swift; sourceTree = "<group>"; };
 		E179FE4512E8218E14D4BA96 /* AppIcon-Midnight@2x.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; name = "AppIcon-Midnight@2x.png"; path = "AltIcons/AppIcon-Midnight@2x.png"; sourceTree = "<group>"; };
 		FF0000000000000000000001 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -138,6 +139,7 @@
 				09349178F6F52136FFB785A5 /* MainViewController.swift */,
 				C129D914F0C754C4E37FE05B /* AltIcons */,
 				72964A5BE3AC0C57EF337A1D /* FlatFoldAppIconPlugin.swift */,
+				A89901378AD9AEDA07CCA03E /* App.debug.entitlements */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -452,7 +454,7 @@
 			baseConfigurationReference = 958DCC722DB07C7200EA8C5F /* debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
+				CODE_SIGN_ENTITLEMENTS = App/App.debug.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = App/Info.plist;

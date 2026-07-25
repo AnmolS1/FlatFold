@@ -40,7 +40,7 @@ import {
 	type SignedPreKey,
 } from '../crypto';
 import { base64ToBytes, bytesToBase64 } from './codec';
-import { decryptBlob, encryptBlob, generateMasterKey, type EncryptedBlob } from './crypto';
+import { decryptBlob, encryptBlob, generateMasterKey, unwrapKey, wrapKey, type EncryptedBlob } from './crypto';
 import {
 	sealIdentityRecord,
 	openIdentityRecord,
@@ -65,6 +65,7 @@ import {
 	listKeys,
 	MEDIA_CACHE_STORE,
 	MESSAGE_STORE,
+	PASSKEY_STORE,
 	PROCESSED_STORE,
 	putRecord,
 	SESSION_STORE,
@@ -394,6 +395,81 @@ export async function isBiometricEnrolled(username: string): Promise<boolean> {
 
 export async function disableBiometric(username: string): Promise<void> {
 	await biometricDeleteSecret(biometricKey(username));
+}
+
+// Rebuild the in-memory identity keypair from the decrypted doc. Shared by every
+// unlock path (password, native biometric, passkey) so they can't drift.
+function identityFromDoc(doc: StoredIdentityDoc): IdentityKeyPair {
+	return {
+		signing: {
+			publicKey: base64ToBytes(doc.identity.signingPublicKey),
+			secretKey: base64ToBytes(doc.identity.signingSecretKey),
+		},
+		dh: { publicKey: base64ToBytes(doc.identity.dhPublicKey), secretKey: base64ToBytes(doc.identity.dhSecretKey) },
+	};
+}
+
+// ---- WebAuthn-PRF unlock (web counterpart of the biometric path above) ----
+// MK is wrapped under a key derived from a passkey's PRF output. The wrap is at
+// rest in IndexedDB but cannot be opened without that authenticator producing
+// the same PRF secret, which it only does after a user-verification gesture. So
+// this stores no usable secret at rest — the same property the native Keychain
+// path has, reached differently. The password remains the ultimate secret.
+interface PasskeyUnlockRecord {
+	credentialId: string;
+	prfSalt: string;
+	wrap: EncryptedBlob; // MK under the PRF-derived wrapping key
+}
+
+// Requires the keystore unlocked (MK cached). `wrappingKey` comes from
+// lib/webauthnPrf (kept out of here so the WebAuthn surface stays testable and
+// this module keeps no DOM dependency).
+export async function enrollPasskeyUnlock(
+	username: string,
+	enrollment: { credentialId: string; prfSalt: string; wrappingKey: Uint8Array }
+): Promise<void> {
+	const mk = requireCachedKey(username);
+	await putRecord<PasskeyUnlockRecord>(PASSKEY_STORE, username, {
+		credentialId: enrollment.credentialId,
+		prfSalt: enrollment.prfSalt,
+		wrap: wrapKey(enrollment.wrappingKey, mk),
+	});
+}
+
+export async function isPasskeyUnlockEnrolled(username: string): Promise<boolean> {
+	return (await getRecord<PasskeyUnlockRecord>(PASSKEY_STORE, username)) !== undefined;
+}
+
+export async function disablePasskeyUnlock(username: string): Promise<void> {
+	await deleteRecord(PASSKEY_STORE, username);
+}
+
+// What the caller needs to run the WebAuthn assertion, without exposing the wrap.
+export async function getPasskeyUnlockParams(username: string): Promise<{ credentialId: string; prfSalt: string } | null> {
+	const rec = await getRecord<PasskeyUnlockRecord>(PASSKEY_STORE, username);
+	return rec ? { credentialId: rec.credentialId, prfSalt: rec.prfSalt } : null;
+}
+
+// Unwrap MK with the PRF-derived key and cache it. 'cancelled' whenever the wrap
+// won't open — a stale enrollment is dropped so the user falls back to the
+// password instead of being offered an unlock that can never work.
+export async function unlockWithPasskey(username: string, wrappingKey: Uint8Array): Promise<BiometricUnlockResult> {
+	const record = await getRecord<StoredIdentityRecord>(IDENTITY_STORE, username);
+	if (!record) return { status: 'no-local-identity' };
+	const enrolled = await getRecord<PasskeyUnlockRecord>(PASSKEY_STORE, username);
+	if (!enrolled) return { status: 'cancelled' };
+
+	let masterKey: Uint8Array;
+	let doc: StoredIdentityDoc;
+	try {
+		masterKey = unwrapKey(wrappingKey, enrolled.wrap);
+		doc = decryptBlob<StoredIdentityDoc>(masterKey, record.blob);
+	} catch {
+		await deleteRecord(PASSKEY_STORE, username);
+		return { status: 'cancelled' };
+	}
+	cacheKey(username, masterKey);
+	return { status: 'unlocked', identity: identityFromDoc(doc) };
 }
 
 export type BiometricUnlockResult =

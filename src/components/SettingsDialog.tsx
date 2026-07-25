@@ -6,6 +6,7 @@ import { useAuth } from '../hooks/useAuth';
 import { panicWipe } from '../lib/panicWipe';
 import { TwoFactorSection } from './settings/TwoFactorSection';
 import { BiometricSection } from './settings/BiometricSection';
+import { PasskeySection } from './settings/PasskeySection';
 import { ThemeSection } from './settings/ThemeSection';
 import { AppIconSection } from './settings/AppIconSection';
 import { AboutSection } from './settings/AboutSection';
@@ -441,6 +442,7 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 
 				{/* Biometric unlock (D7 §5, native — self-hides on web) */}
 				<BiometricSection username={username} />
+				<PasskeySection username={username} />
 
 				{/* Notifications + decoy label */}
 				<section>

@@ -23,7 +23,10 @@ import type { AuthContextType } from '../src/types';
 vi.mock('../src/components/auth/LoginForm', () => ({ LoginForm: () => <div>login-form</div> }));
 vi.mock('../src/components/auth/SignupForm', () => ({ SignupForm: () => <div>signup-form</div> }));
 vi.mock('../src/components/auth/RecoverForm', () => ({ RecoverForm: () => <div>recover-form</div> }));
-vi.mock('../src/keystore', () => ({ isBiometricEnrolled: vi.fn().mockResolvedValue(false) }));
+vi.mock('../src/keystore', () => ({
+	isBiometricEnrolled: vi.fn().mockResolvedValue(false),
+	isPasskeyUnlockEnrolled: vi.fn().mockResolvedValue(false),
+}));
 vi.mock('../src/lib/panicWipe', () => ({ requestPanicWipe: vi.fn() }));
 
 import { Login } from '../src/pages/Login';
@@ -38,6 +41,7 @@ const baseAuth: AuthContextType = {
 	logout: vi.fn(),
 	unlockKeystore: vi.fn(),
 	unlockWithBiometric: vi.fn(),
+	unlockWithPasskey: vi.fn(),
 	changePassword: vi.fn(),
 	enrollRecovery: vi.fn(),
 	recoverAccount: vi.fn(),

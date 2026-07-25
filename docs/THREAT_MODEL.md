@@ -358,6 +358,28 @@ right tool. The `/transparency` page says this to users directly.
       stored MK no longer opens the record. **Residual:** it inherits the device's
       biometric strength (e.g. Face ID's ~1e-6 false-accept, a compelled unlock),
       which is why it's opt-in and password-backed.
+    **Web equivalent — passkey unlock via the WebAuthn PRF extension**
+    (`src/lib/webauthnPrf.ts`, `PASSKEY_STORE`): the browser has no Keychain, so
+    the same convenience is reached differently. An enrolled passkey, on each
+    successful assertion, deterministically derives a secret (PRF) from a stored
+    salt; that secret never leaves the authenticator and is only produced after a
+    user-verification gesture (Touch ID / Face ID / Windows Hello / PIN). It is
+    HKDF'd into a wrapping key, and MK is wrapped under it. **What is at rest is
+    only the wrapped MK**, which is useless without that authenticator — so this
+    is emphatically *not* a soft gate that asks "did the user authenticate?" and
+    then hands over a key readable at rest (the design rejected for iOS). No
+    server is involved: the assertion is never transmitted and no new trust is
+    placed anywhere, so a forged assertion buys nothing because it still would
+    not yield the right PRF output. Deliberately **not** auto-triggered on load
+    (browsers gate WebAuthn on a user gesture, and an unprompted Touch ID dialog
+    on every reload is hostile), and hidden entirely when the browser or
+    authenticator lacks PRF, so an unlock method that cannot work is never
+    advertised. **Residuals:** it inherits the platform authenticator's strength
+    and the same compelled-unlock exposure as the native path; the wrap is
+    per-device and per-origin, and is dropped if it ever fails to open, falling
+    back to the password. The password and recovery code remain the ultimate
+    secrets. Pinned by `test-ui/passkeyUnlock.test.ts`, which asserts a wrong PRF
+    key cannot open the wrap and that a stale enrollment is discarded.
 22. **Native push notifications are content-free.** The APNs payload carries no
     message text and no sender — its only visible content is a **fixed, generic
     title** (`"New activity"`, worker/push.ts `DECOY_PUSH_TITLE`), which says

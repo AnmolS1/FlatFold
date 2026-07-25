@@ -23,6 +23,11 @@ export interface AuthContextType {
 	// Unlock the local keystore with Face ID / Touch ID (D7 §5, native). 'cancelled'
 	// on cancel/failure/not-enrolled — the caller keeps the password path.
 	unlockWithBiometric: () => Promise<'unlocked' | 'cancelled'>;
+	// Unlock the local keystore with a passkey (web). A WebAuthn PRF assertion,
+	// gated behind Touch ID / Windows Hello, re-derives the key MK is wrapped
+	// under. 'cancelled' on cancel/failure/not-enrolled — password stays the
+	// fallback and the ultimate secret.
+	unlockWithPasskey: () => Promise<'unlocked' | 'cancelled'>;
 	// Change the account password (D7 §1). Re-wraps the local keystore master key
 	// under the new password and rotates the server verifier + session epoch.
 	// Resolves 'wrong-password' if the current password is wrong; throws on a

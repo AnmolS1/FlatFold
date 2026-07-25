@@ -29,6 +29,7 @@ const stubAuth: AuthContextType = {
 	logout: vi.fn(),
 	unlockKeystore: vi.fn(),
 	unlockWithBiometric: vi.fn(),
+	unlockWithPasskey: vi.fn(),
 	changePassword: vi.fn(),
 	enrollRecovery: vi.fn(),
 	recoverAccount: vi.fn(),

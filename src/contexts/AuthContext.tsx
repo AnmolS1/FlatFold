@@ -138,6 +138,25 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 		return 'cancelled';
 	};
 
+	// Web counterpart of the biometric unlock: a passkey's PRF output re-derives
+	// the key that MK is wrapped under. The WebAuthn assertion (and its Touch ID /
+	// Windows Hello prompt) happens in lib/webauthnPrf; the keystore only ever
+	// sees the derived wrapping key, never the credential.
+	const unlockWithPasskey = async (): Promise<'unlocked' | 'cancelled'> => {
+		if (!username) throw new Error('Cannot unlock keystore with no authenticated user.');
+		const params = await keystore.getPasskeyUnlockParams(username);
+		if (!params) return 'cancelled';
+		const { getPasskeyWrappingKey } = await import('../lib/webauthnPrf');
+		const wrappingKey = await getPasskeyWrappingKey(params.credentialId, params.prfSalt);
+		if (!wrappingKey) return 'cancelled'; // user cancelled, or PRF unavailable
+		const result = await keystore.unlockWithPasskey(username, wrappingKey);
+		if (result.status === 'unlocked') {
+			setKeystoreLocked(false);
+			return 'unlocked';
+		}
+		return 'cancelled';
+	};
+
 	const unlockKeystore = async (password: string): Promise<'unlocked' | 'wrong-password'> => {
 		if (!username) throw new Error('Cannot unlock keystore with no authenticated user.');
 		const result = await keystore.unlock(username, password);
@@ -230,6 +249,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 		logout,
 		unlockKeystore,
 		unlockWithBiometric,
+		unlockWithPasskey,
 		changePassword,
 		enrollRecovery,
 		recoverAccount,

@@ -7,8 +7,9 @@ const DB_NAME = 'flatfold-keystore';
 // Bumped on each new object store — onupgradeneeded only fires on a version
 // increase. v2 added MESSAGE_STORE; v3 added PROCESSED_STORE (idempotent
 // receive, M3 Phase 2); v4 added MEDIA_CACHE_STORE (M4 attachments); v5 added
-// the group stores (M5); v6 added SUMMARY_STORE (chat-list previews/unread).
-const DB_VERSION = 6;
+// the group stores (M5); v6 added SUMMARY_STORE (chat-list previews/unread);
+// v7 added PASSKEY_STORE (WebAuthn-PRF unlock on the web).
+const DB_VERSION = 7;
 
 export const IDENTITY_STORE = 'identities';
 export const SESSION_STORE = 'sessions';
@@ -36,6 +37,11 @@ export const GROUP_RECEIVER_STORE = 'groupReceiverKeys';
 // message history (never authoritative over it), encrypted at rest like
 // everything else.
 export const SUMMARY_STORE = 'conversationSummaries';
+// WebAuthn-PRF unlock (web): MK wrapped under a key derived from a passkey's PRF
+// output, plus the credential id and PRF salt needed to reproduce it. Useless
+// without that authenticator, so it is safe at rest — the same posture as the
+// native biometric path, which keeps MK in a biometry-gated Keychain item.
+export const PASSKEY_STORE = 'passkeyUnlock';
 
 function openDb(): Promise<IDBDatabase> {
 	return new Promise((resolve, reject) => {
@@ -51,6 +57,7 @@ function openDb(): Promise<IDBDatabase> {
 			if (!db.objectStoreNames.contains(GROUP_SENDER_STORE)) db.createObjectStore(GROUP_SENDER_STORE);
 			if (!db.objectStoreNames.contains(GROUP_RECEIVER_STORE)) db.createObjectStore(GROUP_RECEIVER_STORE);
 			if (!db.objectStoreNames.contains(SUMMARY_STORE)) db.createObjectStore(SUMMARY_STORE);
+			if (!db.objectStoreNames.contains(PASSKEY_STORE)) db.createObjectStore(PASSKEY_STORE);
 		};
 		request.onsuccess = () => resolve(request.result);
 		request.onerror = () => reject(request.error);

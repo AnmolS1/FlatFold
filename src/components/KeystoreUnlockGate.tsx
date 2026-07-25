@@ -4,7 +4,8 @@ import { Fingerprint } from 'lucide-react';
 import { LogoMark } from './common/Brand';
 import { useAuth } from '../hooks/useAuth';
 import { requestPanicWipe } from '../lib/panicWipe';
-import { isBiometricEnrolled } from '../keystore';
+import { isBiometricEnrolled, isPasskeyUnlockEnrolled } from '../keystore';
+import { isNativePlatform } from '../lib/platform';
 
 interface KeystoreUnlockGateProps {
 	children: ReactNode;
@@ -15,11 +16,12 @@ interface KeystoreUnlockGateProps {
 // sessionStorage-scoped key. See AuthContext.tsx for why unlocking the
 // local keystore is a step separate from the server session.
 export const KeystoreUnlockGate = ({ children }: KeystoreUnlockGateProps) => {
-	const { username, keystoreLocked, unlockKeystore, unlockWithBiometric, logout } = useAuth();
+	const { username, keystoreLocked, unlockKeystore, unlockWithBiometric, unlockWithPasskey, logout } = useAuth();
 	const [password, setPassword] = useState('');
 	const [error, setError] = useState<string | null>(null);
 	const [unlocking, setUnlocking] = useState(false);
 	const [bioEnrolled, setBioEnrolled] = useState(false);
+	const [passkeyEnrolled, setPasskeyEnrolled] = useState(false);
 	const navigate = useNavigate();
 
 	// Escape hatches. Without these the gate is a trap: the server session is still
@@ -48,11 +50,37 @@ export const KeystoreUnlockGate = ({ children }: KeystoreUnlockGateProps) => {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [keystoreLocked, username]);
 
+	// Web: offer the passkey unlock when this device has one enrolled. Unlike the
+	// native Face ID path we do NOT auto-trigger it — browsers gate WebAuthn on a
+	// user gesture, and an unprompted Touch ID dialog on every reload is hostile.
+	useEffect(() => {
+		if (!keystoreLocked || !username || isNativePlatform()) return;
+		let cancelled = false;
+		void isPasskeyUnlockEnrolled(username).then((enrolled) => {
+			if (!cancelled) setPasskeyEnrolled(enrolled);
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [keystoreLocked, username]);
+
 	if (!keystoreLocked) return <>{children}</>;
 
 	const tryBiometric = async () => {
 		setError(null);
 		await unlockWithBiometric();
+	};
+
+	const tryPasskey = async () => {
+		setError(null);
+		setUnlocking(true);
+		try {
+			if ((await unlockWithPasskey()) === 'cancelled') {
+				setError('Passkey unlock was cancelled. Enter your password instead.');
+			}
+		} finally {
+			setUnlocking(false);
+		}
 	};
 
 	const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
@@ -86,6 +114,15 @@ export const KeystoreUnlockGate = ({ children }: KeystoreUnlockGateProps) => {
 						className="w-full mb-3 flex items-center justify-center gap-2 border border-crease-line-bold text-graphite rounded-lg px-4 py-2 hover:border-crease transition-colors"
 					>
 						<Fingerprint className="w-5 h-5" /> Unlock with Face ID
+					</button>
+				)}
+				{passkeyEnrolled && (
+					<button
+						onClick={() => void tryPasskey()}
+						disabled={unlocking}
+						className="w-full mb-3 flex items-center justify-center gap-2 border border-crease-line-bold text-graphite rounded-lg px-4 py-2 hover:border-crease transition-colors disabled:opacity-50"
+					>
+						<Fingerprint className="w-5 h-5" /> Unlock with passkey
 					</button>
 				)}
 				<form onSubmit={handleSubmit} className="space-y-3">

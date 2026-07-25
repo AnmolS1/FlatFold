@@ -117,7 +117,15 @@ export async function apiEnrollRecovery(password: string, upload: RecoveryUpload
 	const response = await apiFetch('/api/auth/recovery/enroll', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ password, ...upload }),
+		// The blob is an EncryptedBlob OBJECT; the server column is TEXT and its
+		// guard expects a string — serialize it here (parsed back on recovery).
+		body: JSON.stringify({
+			password,
+			saltRec: upload.saltRec,
+			saltAuth: upload.saltAuth,
+			blob: JSON.stringify(upload.blob),
+			auth: upload.auth,
+		}),
 	});
 	await parseJsonOrThrow(response);
 }

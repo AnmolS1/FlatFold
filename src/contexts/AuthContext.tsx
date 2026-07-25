@@ -196,13 +196,10 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 		const result = await apiRecoveryReset(usernameInput, recAuth, newPassword);
 		if (result === 'wrong-code') return 'wrong-code';
 
-		const material = await keystore.restoreFromRecovery(
-			usernameInput,
-			code,
-			params.saltRec,
-			result.blob as EncryptedBlob,
-			newPassword
-		);
+		// The server stored the blob as TEXT (a JSON string) — parse it back to an
+		// EncryptedBlob, don't cast the string.
+		const blob = JSON.parse(result.blob as string) as EncryptedBlob;
+		const material = await keystore.restoreFromRecovery(usernameInput, code, params.saltRec, blob, newPassword);
 		await publishIdentityMaterial(material);
 		setUsername(usernameInput);
 		setKeystoreLocked(false);

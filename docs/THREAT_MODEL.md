@@ -350,6 +350,15 @@ right tool. The `/transparency` page says this to users directly.
     for Web Push). Surfacing the custom decoy on native reliably needs either
     server-side storage of the label or a Notification Service Extension reading
     it from an app-group store — a deliberate follow-up, not done here.
+    **Web equivalent (`src/lib/webNotify.ts`):** the web app shows the same
+    content-free surface when a message arrives while its tab is not focused — a
+    tab dot (title marker + favicon badge) and, only if the user already granted
+    notification permission, a browser notification whose title is the decoy label
+    and which carries no body, sender, or text. It is generated locally from the
+    already-received message (no third party, unlike Web Push), and never fires
+    while the tab is focused or on native. Same content-free posture as the push;
+    a tab dot and an anonymous "New activity" reveal only that *something*
+    arrived, never who or what.
 23. **App-switcher snapshot is obscured** (native): iOS snapshots the UI on
     deactivation for the multitasking switcher; the app covers it with a branded
     overlay before the snapshot (AppDelegate `applicationWillResignActive` /

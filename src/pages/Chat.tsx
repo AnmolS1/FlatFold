@@ -29,6 +29,7 @@ import {
 } from '../lib/messaging';
 import { apiRegisterSealToken } from '../lib/api';
 import { isNativePlatform, wsOrigin } from '../lib/platform';
+import { clearUnread, surfaceInboundActivity } from '../lib/webNotify';
 import { cachedNativeToken } from '../lib/nativeToken';
 import { apiSealedSend } from '../lib/sealedFetch';
 import { generateSealToken } from '../lib/sealToken';
@@ -111,6 +112,9 @@ export const Chat = () => {
 	// unintended close (backoff) and whenever the app returns to the foreground.
 	const [connectNonce, setConnectNonce] = useState(0);
 	const reconnectAttempts = useRef(0);
+	// True once we've had at least one healthy connection. Lets the status show
+	// "reconnecting…" after a drop vs. the initial "connecting…" on first load.
+	const hasConnectedRef = useRef(false);
 	// Bumps when the block list changes, to re-filter the conversation list.
 	const [blockVersion, setBlockVersion] = useState(0);
 
@@ -658,6 +662,7 @@ export const Chat = () => {
 						...prev,
 						[sender]: [...(prev[sender] ?? []), result.displayMessage],
 					}));
+					surfaceInboundActivity();
 					// Pick up a newly auto-added contact or a raised key-change flag.
 					await refreshContacts();
 					if (result.keyChanged) {
@@ -706,6 +711,7 @@ export const Chat = () => {
 				case 'ok': {
 					const convoKey = groupConversationKey(frame.groupId);
 					setMessagesByContact((prev) => ({ ...prev, [convoKey]: [...(prev[convoKey] ?? []), result.displayMessage] }));
+					surfaceInboundActivity();
 					await refreshGroups();
 					sendAck(frame);
 					return;
@@ -790,6 +796,7 @@ export const Chat = () => {
 
 		ws.onopen = () => {
 			reconnectAttempts.current = 0; // healthy connection resets the backoff
+			hasConnectedRef.current = true;
 			setConnecting(false);
 			setConnected(true);
 			setError(null);
@@ -819,16 +826,10 @@ export const Chat = () => {
 
 		ws.onerror = () => {
 			if (intentionalClose) return;
-			// Native auto-reconnects (below) and the header shows "connecting…", so
-			// don't spam a toast on every flaky attempt — a quiet banner is enough.
-			// Web has no reconnect, so it keeps the actionable "refresh" toast.
-			if (isNativePlatform()) {
-				setError('Connection lost. Reconnecting…');
-			} else {
-				const message = 'Connection error. Please try refreshing the page.';
-				setError(message);
-				showToast(message, 'error');
-			}
+			// Both platforms auto-reconnect (web via the onclose backoff + the
+			// visibilitychange/online listener below; native via appStateChange), so a
+			// quiet "reconnecting" banner beats telling the user to refresh.
+			setError('Connection lost. Reconnecting…');
 		};
 
 		ws.onclose = () => {
@@ -852,7 +853,7 @@ export const Chat = () => {
 			ws.close();
 			wsRef.current = null;
 		};
-	}, [username, connectNonce, showToast, handleIncomingMessage, handleIncomingGroupMessage, handleDeliveredFrame, enqueueSessionOp]);
+	}, [username, connectNonce, handleIncomingMessage, handleIncomingGroupMessage, handleDeliveredFrame, enqueueSessionOp]);
 
 	// Reconnect the socket when the app returns to the foreground (native). iOS
 	// closes the WebSocket when it suspends a backgrounded app; without this the
@@ -881,6 +882,49 @@ export const Chat = () => {
 			remove = () => void handle.remove();
 		})();
 		return () => remove?.();
+	}, []);
+
+	// Web: reconnect promptly when the tab returns to the foreground or the network
+	// comes back. Hidden tabs throttle (or freeze) the onclose backoff timer, so a
+	// socket that dropped while backgrounded would otherwise sit dead until that
+	// timer eventually fires — the user lands back on a stale "reconnecting…" view.
+	// This nudges an immediate reconnect. (Native does the equivalent through the
+	// appStateChange listener above.)
+	useEffect(() => {
+		if (isNativePlatform()) return;
+		const reconnectIfDropped = () => {
+			const rs = wsRef.current?.readyState;
+			if (rs === WebSocket.OPEN || rs === WebSocket.CONNECTING) return;
+			reconnectAttempts.current = 0;
+			setConnectNonce((n) => n + 1);
+		};
+		const onVisible = () => {
+			if (document.visibilityState === 'visible') reconnectIfDropped();
+		};
+		document.addEventListener('visibilitychange', onVisible);
+		window.addEventListener('online', reconnectIfDropped);
+		return () => {
+			document.removeEventListener('visibilitychange', onVisible);
+			window.removeEventListener('online', reconnectIfDropped);
+		};
+	}, []);
+
+	// Web: clear the "new message" tab dot + favicon badge once the user is looking
+	// at the tab again. Clear on window focus unconditionally, and on the tab
+	// becoming visible — NOT gated on document.hasFocus(), which can still read
+	// false for a tick after visibilitychange fires (leaving the dot stuck).
+	useEffect(() => {
+		if (isNativePlatform()) return;
+		const clearOnFocus = () => clearUnread();
+		const clearOnVisible = () => {
+			if (document.visibilityState === 'visible') clearUnread();
+		};
+		window.addEventListener('focus', clearOnFocus);
+		document.addEventListener('visibilitychange', clearOnVisible);
+		return () => {
+			window.removeEventListener('focus', clearOnFocus);
+			document.removeEventListener('visibilitychange', clearOnVisible);
+		};
 	}, []);
 
 	// Native: expose the keyboard height as a CSS variable so the shell height
@@ -1317,8 +1361,8 @@ export const Chat = () => {
 										className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${connected ? 'bg-sax' : 'bg-crane'}`}
 										aria-hidden="true"
 									/>
-									<span className="truncate">
-										{connected ? 'connected' : 'connecting…'} · {username}
+									<span className={`truncate ${connected ? '' : 'text-crane font-semibold'}`}>
+										{connected ? 'connected' : hasConnectedRef.current ? 'reconnecting…' : 'connecting…'} · {username}
 									</span>
 								</p>
 							</div>

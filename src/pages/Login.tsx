@@ -7,6 +7,7 @@ import { LogoMark } from '../components/common/Brand';
 import { LogoHomeLink } from '../components/common/LogoHomeLink';
 import { ThemeToggle } from '../components/common/ThemeToggle';
 import { useAuth } from '../hooks/useAuth';
+import { useKeyboardInset } from '../hooks/useKeyboardInset';
 
 type Tab = 'login' | 'signup';
 
@@ -15,6 +16,9 @@ export const Login = () => {
 	const [recovering, setRecovering] = useState(false);
 	const { username, loading } = useAuth();
 	const navigate = useNavigate();
+	// Native: expose the keyboard height so the card can add scroll room for
+	// fields the keyboard would otherwise cover (notably the recover form).
+	useKeyboardInset();
 
 	useEffect(() => {
 		if (!loading && username) {
@@ -31,11 +35,15 @@ export const Login = () => {
 	}
 
 	return (
-		<div className="min-h-screen flex items-center justify-center p-4">
+		// min-h-dvh + overflow-y-auto + `m-auto` on the child: the card centers when
+		// it fits and scrolls FULLY when it doesn't (unlike `justify-center`, which
+		// clips the overflow top). The keyboard-height bottom padding gives the
+		// covered fields somewhere to scroll to when the native keyboard is up.
+		<div className="min-h-dvh overflow-y-auto flex flex-col p-4">
 			<div className="absolute top-4 right-4">
 				<ThemeToggle />
 			</div>
-			<div className="max-w-md w-full">
+			<div className="max-w-md w-full m-auto" style={{ paddingBottom: 'var(--keyboard-height, 0px)' }}>
 				{/* Logo/Header */}
 				<div className="text-center mb-8">
 					<div className="flex justify-center mb-4">

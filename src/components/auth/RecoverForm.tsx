@@ -20,6 +20,14 @@ export const RecoverForm = ({ onBack }: { onBack: () => void }) => {
 	const { showToast } = useToast();
 	const navigate = useNavigate();
 
+	// Native keyboard covers the lower fields; once it's up, pull the focused
+	// field into view. The page (Login) provides the scroll room via
+	// --keyboard-height. Small delay so the keyboard has started to raise.
+	const scrollIntoView = (e: React.FocusEvent<HTMLElement>) => {
+		const el = e.currentTarget;
+		setTimeout(() => el.scrollIntoView({ block: 'center', behavior: 'smooth' }), 100);
+	};
+
 	const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
 		e.preventDefault();
 		setError(null);
@@ -99,6 +107,7 @@ export const RecoverForm = ({ onBack }: { onBack: () => void }) => {
 						id="rec-code"
 						value={code}
 						onChange={(e) => setCode(e.target.value)}
+						onFocus={scrollIntoView}
 						placeholder="twelve words, in order"
 						rows={3}
 						autoCapitalize="none"
@@ -122,6 +131,7 @@ export const RecoverForm = ({ onBack }: { onBack: () => void }) => {
 						autoComplete="new-password"
 						value={newPassword}
 						onChange={(e) => setNewPassword(e.target.value)}
+						onFocus={scrollIntoView}
 						placeholder="••••••••"
 						className="w-full pl-10 pr-4 py-2 border border-crease-line-bold rounded-lg bg-inset text-graphite placeholder-graphite-40 focus:outline-none focus:ring-2 focus:ring-crease"
 						disabled={loading}
@@ -141,6 +151,7 @@ export const RecoverForm = ({ onBack }: { onBack: () => void }) => {
 						autoComplete="new-password"
 						value={confirm}
 						onChange={(e) => setConfirm(e.target.value)}
+						onFocus={scrollIntoView}
 						placeholder="••••••••"
 						className="w-full pl-10 pr-4 py-2 border border-crease-line-bold rounded-lg bg-inset text-graphite placeholder-graphite-40 focus:outline-none focus:ring-2 focus:ring-crease"
 						disabled={loading}

@@ -7,6 +7,7 @@ import { panicWipe } from '../lib/panicWipe';
 import { TwoFactorSection } from './settings/TwoFactorSection';
 import { BiometricSection } from './settings/BiometricSection';
 import { ThemeSection } from './settings/ThemeSection';
+import { AppIconSection } from './settings/AppIconSection';
 import { AboutSection } from './settings/AboutSection';
 import {
 	DEFAULT_DECOY_LABEL,
@@ -286,6 +287,9 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 
 				{/* Appearance — theme picker (D3) */}
 				<ThemeSection />
+
+				{/* App icon picker (native only — self-hides on web) */}
+				<AppIconSection />
 
 				{/* Change password (D7 §1) */}
 				<section className="mb-6">

@@ -69,5 +69,37 @@
 	<array>
 		<string>remote-notification</string>
 	</array>
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconName</key>
+			<string>AppIcon</string>
+		</dict>
+		<key>CFBundleAlternateIcons</key>
+		<dict>
+			<key>Vellum</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>AppIcon-Vellum</string></array>
+				<key>UIPrerenderedIcon</key>
+				<false/>
+			</dict>
+			<key>Graphite</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>AppIcon-Graphite</string></array>
+				<key>UIPrerenderedIcon</key>
+				<false/>
+			</dict>
+			<key>Midnight</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>AppIcon-Midnight</string></array>
+				<key>UIPrerenderedIcon</key>
+				<false/>
+			</dict>
+		</dict>
+	</dict>
 </dict>
 </plist>

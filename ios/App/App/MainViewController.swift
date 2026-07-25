@@ -9,5 +9,6 @@ import Capacitor
 class MainViewController: CAPBridgeViewController {
     override open func capacitorDidLoad() {
         bridge?.registerPluginInstance(FlatFoldBiometricPlugin())
+        bridge?.registerPluginInstance(FlatFoldAppIconPlugin())
     }
 }

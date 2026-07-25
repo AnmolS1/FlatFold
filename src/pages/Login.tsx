@@ -40,7 +40,9 @@ export const Login = () => {
 		// clips the overflow top). The keyboard-height bottom padding gives the
 		// covered fields somewhere to scroll to when the native keyboard is up.
 		<div className="min-h-dvh overflow-y-auto flex flex-col p-4">
-			<div className="absolute top-4 right-4">
+			{/* Clear the status bar / Dynamic Island via the safe-area inset (0 on web
+			    → falls back to the top margin). */}
+			<div className="fixed right-4 z-10" style={{ top: 'max(1rem, calc(env(safe-area-inset-top) + 0.25rem))' }}>
 				<ThemeToggle />
 			</div>
 			<div className="max-w-md w-full m-auto" style={{ paddingBottom: 'var(--keyboard-height, 0px)' }}>

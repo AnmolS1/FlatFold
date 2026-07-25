@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { LoginForm } from '../components/auth/LoginForm';
 import { SignupForm } from '../components/auth/SignupForm';
+import { RecoverForm } from '../components/auth/RecoverForm';
 import { LogoMark } from '../components/common/Brand';
 import { LogoHomeLink } from '../components/common/LogoHomeLink';
 import { ThemeToggle } from '../components/common/ThemeToggle';
@@ -11,6 +12,7 @@ type Tab = 'login' | 'signup';
 
 export const Login = () => {
 	const [activeTab, setActiveTab] = useState<Tab>('login');
+	const [recovering, setRecovering] = useState(false);
 	const { username, loading } = useAuth();
 	const navigate = useNavigate();
 
@@ -44,32 +46,47 @@ export const Login = () => {
 
 				{/* Auth Card */}
 				<div className="bg-graph-card border border-crease-line rounded-2xl shadow-[var(--shadow-card)] p-8">
-					{/* Tabs */}
-					<div className="flex gap-2 mb-6 bg-inset border border-crease-line p-1 rounded-lg">
-						<button
-							onClick={() => setActiveTab('login')}
-							className={`flex-1 py-2 px-4 rounded-md font-medium transition-colors ${
-								activeTab === 'login'
-									? 'bg-graph-card text-crease shadow-sm'
-									: 'text-graphite-60 hover:text-graphite'
-							}`}
-						>
-							Login
-						</button>
-						<button
-							onClick={() => setActiveTab('signup')}
-							className={`flex-1 py-2 px-4 rounded-md font-medium transition-colors ${
-								activeTab === 'signup'
-									? 'bg-graph-card text-crease shadow-sm'
-									: 'text-graphite-60 hover:text-graphite'
-							}`}
-						>
-							Sign Up
-						</button>
-					</div>
+					{recovering ? (
+						<RecoverForm onBack={() => setRecovering(false)} />
+					) : (
+						<>
+							{/* Tabs */}
+							<div className="flex gap-2 mb-6 bg-inset border border-crease-line p-1 rounded-lg">
+								<button
+									onClick={() => setActiveTab('login')}
+									className={`flex-1 py-2 px-4 rounded-md font-medium transition-colors ${
+										activeTab === 'login'
+											? 'bg-graph-card text-crease shadow-sm'
+											: 'text-graphite-60 hover:text-graphite'
+									}`}
+								>
+									Login
+								</button>
+								<button
+									onClick={() => setActiveTab('signup')}
+									className={`flex-1 py-2 px-4 rounded-md font-medium transition-colors ${
+										activeTab === 'signup'
+											? 'bg-graph-card text-crease shadow-sm'
+											: 'text-graphite-60 hover:text-graphite'
+									}`}
+								>
+									Sign Up
+								</button>
+							</div>
 
-					{/* Forms */}
-					{activeTab === 'login' ? <LoginForm /> : <SignupForm />}
+							{/* Forms */}
+							{activeTab === 'login' ? <LoginForm /> : <SignupForm />}
+
+							{activeTab === 'login' && (
+								<button
+									onClick={() => setRecovering(true)}
+									className="mt-4 w-full text-center text-sm text-crease hover:text-crane transition-colors"
+								>
+									Forgot your password?
+								</button>
+							)}
+						</>
+					)}
 				</div>
 
 				{/* Footer */}

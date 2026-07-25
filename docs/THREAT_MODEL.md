@@ -264,6 +264,33 @@ right tool. The `/transparency` page says this to users directly.
     is E2E-encrypted regardless of transport, so this affects only the bearer
     token, login password, and metadata against an active mis-issued-CA
     adversary — a threat outside §3's current adversary set.
+19. **Opt-in account recovery stores an opaque, code-encrypted blob server-side
+    (D7 §3).** When — and only when — a user turns on a recovery code, four
+    nullable `users` columns are populated (`recovery_verifier`, `recovery_blob`,
+    `recovery_salt_rec`, `recovery_salt_auth`; migration 0008, enumerated on
+    `/transparency`). This is a deliberate, disclosed weakening of "no key backup"
+    (invariant #3), scoped so it does **not** break "the server holds no
+    decryption key":
+    - `recovery_blob` is the user's **identity keys + contacts**, AEAD-encrypted
+      client-side under `K_rec = Argon2id(recoveryCode, salt_rec)`. The server
+      never sees the code or `K_rec`, so the blob is ciphertext it cannot decrypt.
+      It carries a *snapshot* taken at enrollment (the code is never retained, so
+      the blob can't be re-keyed later) and **never any message history** — that
+      only ever lived in the device's IndexedDB and is unrecoverable on a fresh
+      install, by design.
+    - `recovery_verifier` is `hashPassword(recAuth)` where
+      `recAuth = Argon2id(recoveryCode, salt_auth)` — a **separate** salt, so the
+      value the server checks to authenticate a recovery request is provably not
+      the key that unwraps the blob. The reset endpoint is rate-limited per
+      username and bumps `token_epoch`; enrollment is password-reauthed so a
+      hijacked session alone can't plant a recovery backdoor.
+    - **Residual:** the blob's confidentiality rests entirely on the entropy of
+      the recovery code against an offline attack on a seized blob (128-bit BIP39,
+      stretched by Argon2id). A user who records a weak/guessable code, or whose
+      written-down code is captured, loses that margin. This is the same
+      password-strength dependence as the at-rest keystore key, now also exposed
+      to a server-side-blob-theft attacker for opted-in users — the disclosed cost
+      of making forgotten-password recovery possible at all.
 
 ---
 
@@ -301,12 +328,16 @@ Format per invariant: **quote → enforcing code → test/evidence → residual*
 - **Enforcing code:** `src/keystore/` — identity keys and ratchet state live
   in IndexedDB, encrypted at rest with an Argon2id-derived key
   (`src/keystore/crypto.ts` `deriveKeystoreKey`, separately salted from the
-  auth hash). Only *public* keys are published (`worker/keys.ts`). No escrow,
-  no cloud key backup.
+  auth hash). Only *public* keys are published (`worker/keys.ts`). No escrow;
+  no key backup **except** the opt-in, code-encrypted recovery blob (#19 in §4)
+  — ciphertext the server can't read, present only if the user enables recovery.
 - **Evidence:** the publish path sends only public key material; Playwright
   verifies the keystore-unlock gate is a separate step from server login.
 - **Residual:** the in-memory keystore key is reachable by an active in-origin
   XSS via the keystore's own API (#2 in §4) — no longer in `sessionStorage` (M7).
+  Opt-in recovery backs up the identity keys as an opaque code-encrypted blob
+  (#19 in §4) — a disclosed, scoped exception to "no key backup," never readable
+  by the server.
 
 ### Invariant 4 — "Forward secrecy and post-compromise security."
 

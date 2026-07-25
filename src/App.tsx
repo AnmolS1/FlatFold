@@ -24,9 +24,13 @@ function App() {
 	useEffect(() => {
 		if (!isNativePlatform()) return;
 		document.documentElement.classList.add('capacitor-native');
-		// Register the content-free push → decoy local-notification handler once, so
-		// an APNs wake-up surfaces a non-identifying banner (Step 5).
-		void import('./lib/nativePush').then((m) => m.initNativePushDisplay());
+		// Register the content-free push → decoy local-notification handler, and
+		// reconcile the APNs token with the current server (re-registers after a
+		// backend switch) if the user has push enabled (Step 5).
+		void import('./lib/nativePush').then((m) => {
+			void m.initNativePushDisplay();
+			void m.reconcileApnsSubscription();
+		});
 	}, []);
 
 	return (

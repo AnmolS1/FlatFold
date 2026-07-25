@@ -64,6 +64,7 @@ export function BiometricSection({ username }: { username: string }) {
 					<p className="text-xs text-graphite-40">
 						Your key stays in the Secure Enclave — {label} releases it on this device only, and it never leaves. Your
 						password still works, and remains the ultimate key.
+						{!enrolled && ` iOS will ask to allow ${label} the first time you unlock.`}
 					</p>
 				</div>
 				<span className={`text-xs font-mono px-2 py-1 rounded ${enrolled ? 'bg-sax/20 text-sax' : 'bg-inset text-graphite-40'}`}>

@@ -51,6 +51,7 @@ import {
 	type IdentityRecordV2,
 	type StoredIdentityRecord,
 } from './identityRecord';
+import { buildRecoveryEnrollment, generateRecoveryCode, openRecoveryBlob, type RecoveryEnrollment } from './recovery';
 import type { DisplayMessage } from '../types';
 import {
 	deleteKeystoreDatabase,
@@ -365,6 +366,80 @@ export async function rollbackChangePassword(username: string): Promise<void> {
 	const record = await getRecord<StoredIdentityRecord>(IDENTITY_STORE, username);
 	if (!record || !(record as IdentityRecordV2).altWrap) return;
 	await putRecord<StoredIdentityRecord>(IDENTITY_STORE, username, abortRewrap(record as IdentityRecordV2));
+}
+
+// ---- recovery code (D7 §3) ----
+// Opt-in. Because we NEVER retain the recovery code after enrollment (shown once,
+// the user writes it down), the recovery blob is a SNAPSHOT taken at enroll time,
+// not a live mirror — we can't re-derive its key later. We back up the identity
+// KEYPAIR (so a restored account keeps the same keys → no safety-number change
+// for contacts) plus the CONTACTS as of enrollment. Message history is never in
+// the blob — it only ever lived in this device's IndexedDB. On restore the
+// ephemeral prekeys are regenerated fresh (signed by the restored identity).
+
+interface RecoveryPayload {
+	identity: StoredIdentityDoc['identity'];
+	contacts: Record<string, StoredContact>;
+}
+
+// Build the (opt-in) recovery enrollment for the CURRENTLY UNLOCKED user. Returns
+// the code to show ONCE plus the payload to upload (opaque blob + authenticator).
+export async function enrollRecovery(username: string): Promise<{ code: string; enrollment: RecoveryEnrollment }> {
+	const { doc } = await loadDoc(username);
+	const payload: RecoveryPayload = { identity: doc.identity, contacts: doc.contacts };
+	const secret = new TextEncoder().encode(JSON.stringify(payload));
+	const code = generateRecoveryCode();
+	const enrollment = await buildRecoveryEnrollment(code, secret);
+	return { code, enrollment };
+}
+
+// Rebuild a working local identity from a recovery code + the server-held blob
+// (new device / reinstall). Restores the SAME identity keypair and contacts,
+// regenerates fresh signed-prekey + one-time prekeys, and seals everything under
+// a NEW password. Returns the public material to (re)publish — the identity
+// pubkey is unchanged, so contacts see no safety-number change. Throws
+// InvalidRecoveryCodeError on a wrong code (nothing is written).
+export async function restoreFromRecovery(
+	username: string,
+	code: string,
+	saltRec: string,
+	blob: EncryptedBlob,
+	newPassword: string
+): Promise<NewIdentityMaterial> {
+	const secret = await openRecoveryBlob(code, saltRec, blob); // throws InvalidRecoveryCodeError
+	const payload = JSON.parse(new TextDecoder().decode(secret)) as RecoveryPayload;
+
+	const identity: IdentityKeyPair = {
+		signing: {
+			publicKey: base64ToBytes(payload.identity.signingPublicKey),
+			secretKey: base64ToBytes(payload.identity.signingSecretKey),
+		},
+		dh: { publicKey: base64ToBytes(payload.identity.dhPublicKey), secretKey: base64ToBytes(payload.identity.dhSecretKey) },
+	};
+	// Fresh ephemeral material, tied to the restored identity — the old snapshot's
+	// prekeys may be stale/consumed on the server.
+	const signedPreKey = generateSignedPreKey(identity);
+	const oneTimePreKeys = generateOneTimePreKeys(20);
+
+	const doc: StoredIdentityDoc = {
+		identity: payload.identity,
+		signedPreKey: {
+			publicKey: bytesToBase64(signedPreKey.keyPair.publicKey),
+			secretKey: bytesToBase64(signedPreKey.keyPair.secretKey),
+			signature: bytesToBase64(signedPreKey.signature),
+		},
+		oneTimePreKeys: Object.fromEntries(
+			oneTimePreKeys.map((opk) => [bytesToBase64(opk.keyPair.publicKey), bytesToBase64(opk.keyPair.secretKey)])
+		),
+		contacts: payload.contacts ?? {},
+	};
+
+	const masterKey = generateMasterKey();
+	const record = await sealIdentityRecord(doc, newPassword, masterKey);
+	await putRecord<StoredIdentityRecord>(IDENTITY_STORE, username, record);
+	cacheKey(username, masterKey);
+
+	return { identity, signedPreKey, oneTimePreKeys };
 }
 
 async function loadDoc(username: string): Promise<{ key: Uint8Array; doc: StoredIdentityDoc }> {

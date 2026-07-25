@@ -14,13 +14,19 @@
 import {
 	bumpTokenEpoch,
 	checkRateLimit,
+	clearTotp,
 	createUser,
 	getRecoveryParams,
 	getUser,
+	setBackupCodeHashes,
 	setRecovery,
+	setTotp,
+	setTotpLastStep,
 	setUserSealToken,
 	updatePassword,
+	type UserRow,
 } from './db';
+import { decryptTotpSecret, encryptTotpSecret, hashBackupCode, verifyTotp } from './totp';
 
 // Auth rate limits. Keyed by the TARGET username, not an IP — FlatFold
 // deliberately does not log IPs (invariant #5), so per-actor throttling isn't
@@ -168,6 +174,21 @@ async function handleLogin(request: Request, env: Env): Promise<Response> {
 		return json({ error: 'Invalid username or password.' }, { status: 401 });
 	}
 
+	// Second factor (D7 §4): password alone isn't enough once 2FA is on. Ask for a
+	// code, then verify it (TOTP or a single-use backup code) before issuing a token.
+	if (user.totp_secret) {
+		const code = (body as { code?: unknown } | null)?.code;
+		if (typeof code !== 'string' || code.length === 0) {
+			return json({ twoFactorRequired: true }, { status: 401 });
+		}
+		if (!(await checkRateLimit(env.DB, `2fa:${username}`, window, LOGIN_LIMIT))) {
+			return json({ error: 'Too many attempts. Please try again later.' }, { status: 429 });
+		}
+		if (!(await verifyTwoFactor(env, user, code))) {
+			return json({ error: 'Invalid code.', twoFactorRequired: true }, { status: 401 });
+		}
+	}
+
 	const token = await signSessionToken(username, env.SESSION_SECRET, user.token_epoch);
 	return authResponse({ username }, token, isNativeClient(request));
 }
@@ -241,6 +262,90 @@ async function handleChangePassword(request: Request, env: Env, username: string
 	// would hand back a token that's already stale against the row we just bumped.
 	const token = await signSessionToken(username, env.SESSION_SECRET, user.token_epoch + 1);
 	return authResponse({ ok: true }, token, isNativeClient(request));
+}
+
+// ---- TOTP two-factor (D7 §4) ----
+
+// Verify a login's second factor: a TOTP code (advancing the replay counter) OR a
+// single-use backup code (consumed). Returns whether it passed. A decrypt failure
+// on the stored secret (e.g. SESSION_SECRET was rotated) falls through to backup
+// codes rather than throwing.
+async function verifyTwoFactor(env: Env, user: UserRow, code: string): Promise<boolean> {
+	if (user.totp_secret) {
+		try {
+			const secret = await decryptTotpSecret(env.SESSION_SECRET, user.totp_secret);
+			const step = await verifyTotp(secret, code, Date.now(), user.totp_last_step ?? Number.NEGATIVE_INFINITY);
+			if (step !== null) {
+				await setTotpLastStep(env.DB, user.username, step);
+				return true;
+			}
+		} catch {
+			// fall through to backup codes
+		}
+	}
+	const hashes: string[] = user.backup_code_hashes ? (JSON.parse(user.backup_code_hashes) as string[]) : [];
+	const h = await hashBackupCode(user.username, code);
+	if (hashes.includes(h)) {
+		await setBackupCodeHashes(env.DB, user.username, hashes.filter((x) => x !== h)); // single-use
+		return true;
+	}
+	return false;
+}
+
+// Enable (or replace) TOTP. Password-reauthed — a hijacked session alone must not
+// be able to plant a second factor the real owner doesn't hold (a lockout/DoS).
+// The client proves the secret was scanned by including a current code, which we
+// verify before storing the (encrypted) secret + hashed backup codes.
+async function handleTwoFactorEnable(request: Request, env: Env, username: string): Promise<Response> {
+	const body = (await request.json().catch(() => null)) as {
+		password?: unknown;
+		secret?: unknown;
+		code?: unknown;
+		backupCodes?: unknown;
+	} | null;
+	const { password, secret, code, backupCodes } = body ?? {};
+	if (typeof password !== 'string' || typeof secret !== 'string' || typeof code !== 'string') {
+		return json({ error: 'Malformed request.' }, { status: 400 });
+	}
+	if (!Array.isArray(backupCodes) || backupCodes.length === 0 || !backupCodes.every((c) => typeof c === 'string')) {
+		return json({ error: 'Missing backup codes.' }, { status: 400 });
+	}
+	const user = await getUser(env.DB, username);
+	if (!user || !(await verifyPassword(password, user.password_verifier))) {
+		return json({ error: 'Incorrect password.' }, { status: 401 });
+	}
+	// Confirm the user actually enrolled the secret in their authenticator.
+	if ((await verifyTotp(secret, code, Date.now())) === null) {
+		return json({ error: 'That code didn’t match. Try the current one.' }, { status: 401 });
+	}
+	const encSecret = await encryptTotpSecret(env.SESSION_SECRET, secret);
+	const backupHashes = await Promise.all((backupCodes as string[]).map((c) => hashBackupCode(username, c)));
+	await setTotp(env.DB, username, { encSecret, backupHashes });
+	return json({ ok: true });
+}
+
+// Disable TOTP. Requires the password AND a valid second factor (TOTP or a backup
+// code) — so neither a hijacked session nor a known password alone can strip 2FA.
+async function handleTwoFactorDisable(request: Request, env: Env, username: string): Promise<Response> {
+	const body = (await request.json().catch(() => null)) as { password?: unknown; code?: unknown } | null;
+	const { password, code } = body ?? {};
+	if (typeof password !== 'string' || typeof code !== 'string') {
+		return json({ error: 'Password and a current code are required.' }, { status: 400 });
+	}
+	const user = await getUser(env.DB, username);
+	if (!user || !(await verifyPassword(password, user.password_verifier))) {
+		return json({ error: 'Incorrect password.' }, { status: 401 });
+	}
+	if (!user.totp_secret) return json({ ok: true }); // already off
+	const window = rateLimitWindow(LOGIN_WINDOW_SECONDS);
+	if (!(await checkRateLimit(env.DB, `2fa:${username}`, window, LOGIN_LIMIT))) {
+		return json({ error: 'Too many attempts. Please try again later.' }, { status: 429 });
+	}
+	if (!(await verifyTwoFactor(env, user, code))) {
+		return json({ error: 'That code isn’t right.' }, { status: 401 });
+	}
+	await clearTotp(env.DB, username);
+	return json({ ok: true });
 }
 
 // ---- account recovery (D7 §3) ----
@@ -391,6 +496,16 @@ async function route(request: Request, env: Env): Promise<Response> {
 		}
 		if (pathname === '/api/auth/recovery/reset' && method === 'POST') {
 			return handleRecoveryReset(request, env);
+		}
+		if (pathname === '/api/auth/2fa/enable' && method === 'POST') {
+			const username = await readAuthenticatedUsername(request, env);
+			if (!username) return json({ error: 'Not authenticated.' }, { status: 401 });
+			return handleTwoFactorEnable(request, env, username);
+		}
+		if (pathname === '/api/auth/2fa/disable' && method === 'POST') {
+			const username = await readAuthenticatedUsername(request, env);
+			if (!username) return json({ error: 'Not authenticated.' }, { status: 401 });
+			return handleTwoFactorDisable(request, env, username);
 		}
 
 		// Sealed-sender OHTTP gateway (reached via a third-party relay that blinds

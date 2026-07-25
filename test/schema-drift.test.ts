@@ -16,6 +16,7 @@ import migration0005 from '../migrations/0005_seal_token.sql?raw';
 import migration0006 from '../migrations/0006_token_epoch.sql?raw';
 import migration0007 from '../migrations/0007_apns.sql?raw';
 import migration0008 from '../migrations/0008_recovery.sql?raw';
+import migration0009 from '../migrations/0009_totp.sql?raw';
 
 const ALL_MIGRATIONS = [
 	migration0001,
@@ -26,6 +27,7 @@ const ALL_MIGRATIONS = [
 	migration0006,
 	migration0007,
 	migration0008,
+	migration0009,
 ].join('\n');
 
 // Extract { table -> [columns] } from CREATE TABLE statements. Deliberately

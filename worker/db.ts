@@ -22,6 +22,12 @@ export interface UserRow {
 	recovery_blob: string | null;
 	recovery_salt_rec: string | null;
 	recovery_salt_auth: string | null;
+	// Opt-in TOTP two-factor (migration 0009). All NULL until enrolled.
+	// totp_secret is encrypted at rest; backup_code_hashes is a JSON array of
+	// salted hashes; totp_last_step is the replay high-water mark. See worker/totp.
+	totp_secret: string | null;
+	backup_code_hashes: string | null;
+	totp_last_step: number | null;
 }
 
 // L3: bump the user's session epoch, invalidating every token issued before now.
@@ -67,6 +73,37 @@ export async function getRecoveryParams(
 		.first<{ recovery_salt_rec: string | null; recovery_salt_auth: string | null }>();
 	if (!row || row.recovery_salt_rec === null || row.recovery_salt_auth === null) return null;
 	return { saltRec: row.recovery_salt_rec, saltAuth: row.recovery_salt_auth };
+}
+
+// Enable (or replace) TOTP two-factor: the encrypted secret + JSON backup hashes,
+// resetting the replay counter. (D7 §4)
+export async function setTotp(
+	db: D1Database,
+	username: string,
+	params: { encSecret: string; backupHashes: string[] }
+): Promise<void> {
+	await db
+		.prepare('UPDATE users SET totp_secret = ?, backup_code_hashes = ?, totp_last_step = NULL WHERE username = ?')
+		.bind(params.encSecret, JSON.stringify(params.backupHashes), username)
+		.run();
+}
+
+// Disable TOTP — clears the secret, backup codes, and replay counter together.
+export async function clearTotp(db: D1Database, username: string): Promise<void> {
+	await db
+		.prepare('UPDATE users SET totp_secret = NULL, backup_code_hashes = NULL, totp_last_step = NULL WHERE username = ?')
+		.bind(username)
+		.run();
+}
+
+// Advance the replay high-water mark after a TOTP code is accepted.
+export async function setTotpLastStep(db: D1Database, username: string, step: number): Promise<void> {
+	await db.prepare('UPDATE users SET totp_last_step = ? WHERE username = ?').bind(step, username).run();
+}
+
+// Persist the remaining backup-code hashes after one is consumed.
+export async function setBackupCodeHashes(db: D1Database, username: string, hashes: string[]): Promise<void> {
+	await db.prepare('UPDATE users SET backup_code_hashes = ? WHERE username = ?').bind(JSON.stringify(hashes), username).run();
 }
 
 export async function getUser(db: D1Database, username: string): Promise<UserRow | null> {

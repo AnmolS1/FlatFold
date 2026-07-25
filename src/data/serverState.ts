@@ -41,6 +41,9 @@ export const SERVER_STATE: PersistedStore[] = [
 			{ name: 'recovery_blob', description: 'Only if you turned on a recovery code. Your identity keys and contacts, encrypted under a key derived from your recovery code. Opaque to the server — it holds no key to read it. It is here so you can get back in on a new device. Your past messages are NOT in it; those only ever lived on your device.' },
 			{ name: 'recovery_salt_rec', description: 'Only if you turned on a recovery code. A public salt for re-deriving the key that decrypts your recovery blob. Not a secret.' },
 			{ name: 'recovery_salt_auth', description: 'Only if you turned on a recovery code. A public salt for re-deriving the recovery authenticator. Not a secret.' },
+			{ name: 'totp_secret', description: 'Only if you turned on two-factor. Your authenticator’s shared secret, encrypted at rest so a database read alone can’t use it. Needed to check the 6-digit codes when you sign in.' },
+			{ name: 'backup_code_hashes', description: 'Only if you turned on two-factor. Salted hashes of your one-time backup codes — never the codes themselves. Each is erased the moment it’s used.' },
+			{ name: 'totp_last_step', description: 'Only if you turned on two-factor. A counter of the last accepted code’s time slot, so the same code can’t be replayed. Just a number.' },
 		],
 	},
 	{

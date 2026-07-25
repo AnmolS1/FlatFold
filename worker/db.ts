@@ -14,6 +14,14 @@ export interface UserRow {
 	// Session epoch (migration 0006). Folded into the session token; bumped to
 	// revoke all sessions ("Sign out everywhere"). See worker/auth.ts.
 	token_epoch: number;
+	// Opt-in account recovery (migration 0008). All NULL until the user enrolls a
+	// recovery code. recovery_blob is the identity keys + contacts encrypted under
+	// a code-derived key (opaque to the server); recovery_verifier authenticates a
+	// recovery request; the salts are public. See worker/index.ts recovery routes.
+	recovery_verifier: string | null;
+	recovery_blob: string | null;
+	recovery_salt_rec: string | null;
+	recovery_salt_auth: string | null;
 }
 
 // L3: bump the user's session epoch, invalidating every token issued before now.
@@ -30,6 +38,35 @@ export async function updatePassword(db: D1Database, username: string, newVerifi
 		.prepare('UPDATE users SET password_verifier = ?, token_epoch = token_epoch + 1 WHERE username = ?')
 		.bind(newVerifier, username)
 		.run();
+}
+
+// Enroll (or replace) a user's recovery material (D7 §3). All four values are
+// set together; a re-enroll overwrites the prior code.
+export async function setRecovery(
+	db: D1Database,
+	username: string,
+	params: { verifier: string; blob: string; saltRec: string; saltAuth: string }
+): Promise<void> {
+	await db
+		.prepare(
+			'UPDATE users SET recovery_verifier = ?, recovery_blob = ?, recovery_salt_rec = ?, recovery_salt_auth = ? WHERE username = ?'
+		)
+		.bind(params.verifier, params.blob, params.saltRec, params.saltAuth, username)
+		.run();
+}
+
+// The PUBLIC recovery salts for a username, so a new device can re-derive the
+// recovery keys. Null when the user hasn't enrolled recovery (or doesn't exist).
+export async function getRecoveryParams(
+	db: D1Database,
+	username: string
+): Promise<{ saltRec: string; saltAuth: string } | null> {
+	const row = await db
+		.prepare('SELECT recovery_salt_rec, recovery_salt_auth FROM users WHERE username = ?')
+		.bind(username)
+		.first<{ recovery_salt_rec: string | null; recovery_salt_auth: string | null }>();
+	if (!row || row.recovery_salt_rec === null || row.recovery_salt_auth === null) return null;
+	return { saltRec: row.recovery_salt_rec, saltAuth: row.recovery_salt_auth };
 }
 
 export async function getUser(db: D1Database, username: string): Promise<UserRow | null> {

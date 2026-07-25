@@ -11,7 +11,16 @@
 //   GET  /api/keys/bundle/:username
 //   GET  /ws            (WebSocket upgrade -> the caller's mailbox DO)
 
-import { bumpTokenEpoch, checkRateLimit, createUser, getUser, setUserSealToken, updatePassword } from './db';
+import {
+	bumpTokenEpoch,
+	checkRateLimit,
+	createUser,
+	getRecoveryParams,
+	getUser,
+	setRecovery,
+	setUserSealToken,
+	updatePassword,
+} from './db';
 
 // Auth rate limits. Keyed by the TARGET username, not an IP — FlatFold
 // deliberately does not log IPs (invariant #5), so per-actor throttling isn't
@@ -234,6 +243,87 @@ async function handleChangePassword(request: Request, env: Env, username: string
 	return authResponse({ ok: true }, token, isNativeClient(request));
 }
 
+// ---- account recovery (D7 §3) ----
+
+// Enroll (or replace) a recovery code. Password-reauthed (like logout-all /
+// delete): a hijacked SESSION alone must not be able to plant a recovery backdoor
+// or clobber the real owner's recovery. The uploaded blob is opaque ciphertext;
+// `auth` is the recovery authenticator (hashed here, never stored in the clear).
+async function handleRecoveryEnroll(request: Request, env: Env, username: string): Promise<Response> {
+	const body = (await request.json().catch(() => null)) as {
+		password?: unknown;
+		saltRec?: unknown;
+		saltAuth?: unknown;
+		blob?: unknown;
+		auth?: unknown;
+	} | null;
+	const { password, saltRec, saltAuth, blob, auth } = body ?? {};
+	if (typeof password !== 'string' || password.length === 0) {
+		return json({ error: 'Password required.' }, { status: 400 });
+	}
+	if ([saltRec, saltAuth, blob, auth].some((v) => typeof v !== 'string' || (v as string).length === 0)) {
+		return json({ error: 'Malformed recovery enrollment.' }, { status: 400 });
+	}
+	const user = await getUser(env.DB, username);
+	if (!user || !(await verifyPassword(password, user.password_verifier))) {
+		return json({ error: 'Incorrect password.' }, { status: 401 });
+	}
+	await setRecovery(env.DB, username, {
+		verifier: await hashPassword(auth as string),
+		blob: blob as string,
+		saltRec: saltRec as string,
+		saltAuth: saltAuth as string,
+	});
+	return json({ ok: true });
+}
+
+// The PUBLIC recovery salts for a username (needed to re-derive the recovery keys
+// on a new device). 404 when the user hasn't enrolled recovery. Salts aren't
+// secret; username existence is already discoverable via signup.
+async function handleRecoveryParams(request: Request, env: Env): Promise<Response> {
+	const username = new URL(request.url).searchParams.get('username');
+	if (!isValidUsername(username)) return json({ error: 'Invalid username.' }, { status: 400 });
+	const params = await getRecoveryParams(env.DB, username);
+	if (!params) return json({ error: 'No recovery code is set for this account.' }, { status: 404 });
+	return json(params);
+}
+
+// Recover: authenticate with the recovery authenticator (derived from the code),
+// set a NEW password, and return the opaque recovery blob so the client can
+// rebuild its identity locally. One atomic step — the blob is released ONLY on a
+// successful auth + reset. Rate-limited per username (offline-guess throttle);
+// bumps the epoch (any lingering sessions die). New login is issued.
+async function handleRecoveryReset(request: Request, env: Env): Promise<Response> {
+	const body = (await request.json().catch(() => null)) as {
+		username?: unknown;
+		recAuth?: unknown;
+		newPassword?: unknown;
+	} | null;
+	const { username, recAuth, newPassword } = body ?? {};
+	if (!isValidUsername(username) || typeof recAuth !== 'string' || recAuth.length === 0) {
+		return json({ error: 'Invalid recovery request.' }, { status: 400 });
+	}
+	if (!isValidPassword(newPassword)) {
+		return json({ error: 'New password must be at least 8 characters.' }, { status: 400 });
+	}
+
+	const window = rateLimitWindow(LOGIN_WINDOW_SECONDS);
+	if (!(await checkRateLimit(env.DB, `recovery:${username}`, window, LOGIN_LIMIT))) {
+		return json({ error: 'Too many attempts. Please try again later.' }, { status: 429 });
+	}
+
+	const user = await getUser(env.DB, username);
+	// Generic failure whether the account is missing, has no recovery, or the
+	// authenticator is wrong — no oracle for which.
+	if (!user || !user.recovery_verifier || !user.recovery_blob || !(await verifyPassword(recAuth, user.recovery_verifier))) {
+		return json({ error: 'That recovery code isn’t right.' }, { status: 401 });
+	}
+
+	await updatePassword(env.DB, username, await hashPassword(newPassword)); // verifier + epoch bump, atomic
+	const token = await signSessionToken(username, env.SESSION_SECRET, user.token_epoch + 1);
+	return authResponse({ blob: user.recovery_blob }, token, isNativeClient(request));
+}
+
 async function handleWebSocketUpgrade(request: Request, env: Env): Promise<Response> {
 	const username = await readAuthenticatedUsername(request, env);
 	if (!username) return json({ error: 'Not authenticated.' }, { status: 401 });
@@ -288,6 +378,19 @@ async function route(request: Request, env: Env): Promise<Response> {
 			const username = await readAuthenticatedUsername(request, env);
 			if (!username) return json({ error: 'Not authenticated.' }, { status: 401 });
 			return handleChangePassword(request, env, username);
+		}
+		if (pathname === '/api/auth/recovery/enroll' && method === 'POST') {
+			const username = await readAuthenticatedUsername(request, env);
+			if (!username) return json({ error: 'Not authenticated.' }, { status: 401 });
+			return handleRecoveryEnroll(request, env, username);
+		}
+		// Recovery params + reset are DELIBERATELY unauthenticated — a forgotten
+		// password means no session. Auth is the recovery authenticator itself.
+		if (pathname === '/api/auth/recovery/params' && method === 'GET') {
+			return handleRecoveryParams(request, env);
+		}
+		if (pathname === '/api/auth/recovery/reset' && method === 'POST') {
+			return handleRecoveryReset(request, env);
 		}
 
 		// Sealed-sender OHTTP gateway (reached via a third-party relay that blinds

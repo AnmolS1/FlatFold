@@ -37,6 +37,10 @@ export const SERVER_STATE: PersistedStore[] = [
 			{ name: 'created_at', description: 'When you signed up, rounded to the minute.' },
 			{ name: 'seal_token', description: 'A public "delivery token" people use to send you a message without showing who they are. Not a secret. It rides along with your public bundle, and it exists to cut spam, not to control access.' },
 			{ name: 'token_epoch', description: 'A plain counter behind "Sign out everywhere." Bumping it invalidates all your current logins at once. It is just a number and says nothing about you or your devices.' },
+			{ name: 'recovery_verifier', description: 'Only if you turned on a recovery code. An Argon2id hash of a separate authenticator derived from that code — so a recovery request can be checked against you before anything is handed back. Never the code itself, and it cannot decrypt anything.' },
+			{ name: 'recovery_blob', description: 'Only if you turned on a recovery code. Your identity keys and contacts, encrypted under a key derived from your recovery code. Opaque to the server — it holds no key to read it. It is here so you can get back in on a new device. Your past messages are NOT in it; those only ever lived on your device.' },
+			{ name: 'recovery_salt_rec', description: 'Only if you turned on a recovery code. A public salt for re-deriving the key that decrypts your recovery blob. Not a secret.' },
+			{ name: 'recovery_salt_auth', description: 'Only if you turned on a recovery code. A public salt for re-deriving the recovery authenticator. Not a secret.' },
 		],
 	},
 	{

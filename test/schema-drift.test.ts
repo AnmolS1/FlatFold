@@ -15,10 +15,18 @@ import migration0004 from '../migrations/0004_push.sql?raw';
 import migration0005 from '../migrations/0005_seal_token.sql?raw';
 import migration0006 from '../migrations/0006_token_epoch.sql?raw';
 import migration0007 from '../migrations/0007_apns.sql?raw';
+import migration0008 from '../migrations/0008_recovery.sql?raw';
 
-const ALL_MIGRATIONS = [migration0001, migration0002, migration0003, migration0004, migration0005, migration0006, migration0007].join(
-	'\n'
-);
+const ALL_MIGRATIONS = [
+	migration0001,
+	migration0002,
+	migration0003,
+	migration0004,
+	migration0005,
+	migration0006,
+	migration0007,
+	migration0008,
+].join('\n');
 
 // Extract { table -> [columns] } from CREATE TABLE statements. Deliberately
 // simple (matches how the migrations are written), not a full SQL parser.

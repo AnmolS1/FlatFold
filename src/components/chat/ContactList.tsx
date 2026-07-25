@@ -230,7 +230,11 @@ const ContactListComponent = ({
 					</div>
 					<form
 						onSubmit={handleSubmit}
-						className="flex-shrink-0 flex items-center gap-2 border-t border-crease-line bg-graph-card px-3 py-2.5 env-safe-bottom env-safe-x"
+						className="flex-shrink-0 flex items-center gap-2 border-t border-crease-line bg-graph-card px-3 pt-2.5 env-safe-x"
+						// Keep a small gap above the keyboard when it's up (env-safe-bottom
+						// alone collapses to 0 there), and the full home-indicator inset when
+						// it's down.
+						style={{ paddingBottom: 'max(0.75rem, calc(env(safe-area-inset-bottom) - var(--keyboard-height, 0px)))' }}
 					>
 						<button
 							type="button"

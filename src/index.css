@@ -277,6 +277,21 @@ html.capacitor-native [contenteditable]:not([contenteditable='false']) {
 	animation: slide-in 0.3s ease-out;
 }
 
+/* Top-banner motion for toasts: drops in from above the top edge. */
+@keyframes slide-down {
+	from {
+		transform: translateY(-120%);
+		opacity: 0;
+	}
+	to {
+		transform: translateY(0);
+		opacity: 1;
+	}
+}
+.animate-slide-down {
+	animation: slide-down 0.3s cubic-bezier(0.16, 0.8, 0.3, 1);
+}
+
 @keyframes fade-out {
 	to {
 		opacity: 0;

@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { User, Lock } from 'lucide-react';
+import { User, Lock, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../../hooks/useToast';
 import type { FormErrors } from '../../types';
@@ -10,6 +10,9 @@ export const LoginForm = () => {
 	const [password, setPassword] = useState('');
 	const [errors, setErrors] = useState<FormErrors>({});
 	const [loading, setLoading] = useState(false);
+	// Revealed after a password-only attempt on a 2FA account (D7 §4).
+	const [needsCode, setNeedsCode] = useState(false);
+	const [code, setCode] = useState('');
 	const { login } = useAuth();
 	const { showToast } = useToast();
 	const navigate = useNavigate();
@@ -44,7 +47,12 @@ export const LoginForm = () => {
 		setLoading(true);
 
 		try {
-			await login(username, password);
+			const result = await login(username, password, needsCode ? code : undefined);
+			if (result === 'two-factor-required') {
+				setNeedsCode(true);
+				if (code) showToast('That code didn’t work. Try the current one.', 'error');
+				return;
+			}
 			showToast('Successfully logged in!', 'success');
 			navigate('/chat');
 		} catch (error) {
@@ -101,16 +109,44 @@ export const LoginForm = () => {
 				{errors.password && <p className="mt-1 text-sm text-crane">{errors.password}</p>}
 			</div>
 
+			{needsCode && (
+				<div>
+					<label htmlFor="totp" className="block text-sm font-medium text-graphite mb-2">
+						Two-factor code
+					</label>
+					<div className="relative">
+						<ShieldCheck className="absolute left-3 top-1/2 -translate-y-1/2 text-graphite-40 w-5 h-5" />
+						<input
+							id="totp"
+							type="text"
+							inputMode="numeric"
+							autoComplete="one-time-code"
+							autoFocus
+							value={code}
+							onChange={(e) => setCode(e.target.value)}
+							className="w-full pl-10 pr-4 py-2 border border-crease-line-bold rounded-lg bg-inset text-graphite placeholder-graphite-40 font-mono focus:outline-none focus:ring-2 focus:ring-crease"
+							placeholder="123456"
+							disabled={loading}
+						/>
+					</div>
+					<p className="mt-1 text-xs text-graphite-40">
+						The 6-digit code from your authenticator app, or one of your backup codes.
+					</p>
+				</div>
+			)}
+
 			<button
 				type="submit"
-				disabled={loading}
+				disabled={loading || (needsCode && !code)}
 				className="w-full bg-crane text-white py-2 px-4 rounded-lg hover:bg-crane-dark focus:outline-none focus:ring-2 focus:ring-crane focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
 			>
 				{loading ? (
 					<span className="flex items-center justify-center gap-2">
 						<div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-						Logging in...
+						{needsCode ? 'Verifying…' : 'Logging in...'}
 					</span>
+				) : needsCode ? (
+					'Verify'
 				) : (
 					'Login'
 				)}

@@ -15,7 +15,9 @@ export interface AuthContextType {
 	// the keystore is a separate step from the server session.
 	keystoreLocked: boolean;
 	signup: (username: string, password: string) => Promise<void>;
-	login: (username: string, password: string) => Promise<void>;
+	// Resolves 'two-factor-required' when the account has 2FA on and no code was
+	// given — the caller then re-invokes with the authenticator/backup code.
+	login: (username: string, password: string, code?: string) => Promise<'ok' | 'two-factor-required'>;
 	logout: () => Promise<void>;
 	unlockKeystore: (password: string) => Promise<'unlocked' | 'wrong-password'>;
 	// Change the account password (D7 §1). Re-wraps the local keystore master key

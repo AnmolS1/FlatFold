@@ -106,11 +106,13 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 		setKeystoreLocked(false);
 	};
 
-	const login = async (usernameInput: string, password: string): Promise<void> => {
-		const result = await apiLogin(usernameInput, password);
+	const login = async (usernameInput: string, password: string, code?: string): Promise<'ok' | 'two-factor-required'> => {
+		const result = await apiLogin(usernameInput, password, code);
+		if (result === 'two-factor-required') return 'two-factor-required';
 		await establishLocalIdentity(result.username, password);
 		setUsername(result.username);
 		setKeystoreLocked(false);
+		return 'ok';
 	};
 
 	const logout = async (): Promise<void> => {

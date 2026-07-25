@@ -204,7 +204,11 @@ async function handleMe(request: Request, env: Env): Promise<Response> {
 	const user = await getUser(env.DB, payload.sub);
 	if (!user || user.token_epoch !== payload.epoch) return json({ error: 'Not authenticated.' }, { status: 401 });
 	const refreshed = await signSessionToken(payload.sub, env.SESSION_SECRET, user.token_epoch, payload.iat);
-	return authResponse({ username: payload.sub, sessionCreatedAt: payload.iat }, refreshed, readBearerToken(request) !== null);
+	return authResponse(
+		{ username: payload.sub, sessionCreatedAt: payload.iat, twoFactorEnabled: user.totp_secret !== null },
+		refreshed,
+		readBearerToken(request) !== null
+	);
 }
 
 function handleLogout(): Response {

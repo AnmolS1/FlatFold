@@ -4,6 +4,7 @@ import { X, Monitor, Bell, BellOff, LogOut, Trash2, AlertTriangle, KeyRound, Lif
 import { apiDeleteAccount, apiLogoutAll, apiMe } from '../lib/api';
 import { useAuth } from '../hooks/useAuth';
 import { panicWipe } from '../lib/panicWipe';
+import { TwoFactorSection } from './settings/TwoFactorSection';
 import {
 	DEFAULT_DECOY_LABEL,
 	getDecoyLabel,
@@ -26,6 +27,7 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 	const panelRef = useModalDialog<HTMLDivElement>(onClose);
 	const { changePassword, enrollRecovery } = useAuth();
 	const [sessionStart, setSessionStart] = useState<number | null>(null);
+	const [twoFactorEnabled, setTwoFactorEnabled] = useState<boolean | null>(null);
 	const [pushSupported] = useState(() => isPushSupported());
 	const [subscribed, setSubscribed] = useState(false);
 	const [busy, setBusy] = useState(false);
@@ -33,7 +35,10 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 	const [pushMessage, setPushMessage] = useState<string | null>(null);
 
 	useEffect(() => {
-		apiMe().then((me) => setSessionStart(me?.sessionCreatedAt ?? null));
+		apiMe().then((me) => {
+			setSessionStart(me?.sessionCreatedAt ?? null);
+			setTwoFactorEnabled(me?.twoFactorEnabled ?? false);
+		});
 		if (pushSupported) isSubscribedToPush().then(setSubscribed);
 	}, [pushSupported]);
 
@@ -419,6 +424,9 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 						</div>
 					)}
 				</section>
+
+				{/* Two-factor authentication (D7 §4) */}
+				{twoFactorEnabled !== null && <TwoFactorSection username={username} initialEnabled={twoFactorEnabled} />}
 
 				{/* Notifications + decoy label */}
 				<section>

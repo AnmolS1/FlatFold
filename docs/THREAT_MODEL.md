@@ -291,6 +291,29 @@ right tool. The `/transparency` page says this to users directly.
       password-strength dependence as the at-rest keystore key, now also exposed
       to a server-side-blob-theft attacker for opted-in users — the disclosed cost
       of making forgotten-password recovery possible at all.
+20. **Opt-in TOTP two-factor adds three server-stored fields, all scoped (D7 §4).**
+    When a user enables 2FA, migration 0009 populates `totp_secret`,
+    `backup_code_hashes`, `totp_last_step` (enumerated on `/transparency`).
+    - `totp_secret` is the RFC 6238 shared secret **AES-GCM encrypted at rest**
+      under a key HKDF-derived from `SESSION_SECRET` (worker/totp.ts), so a D1 read
+      alone can't recover it and downgrade the user to single-factor.
+      **Rotation caveat (also in migrations/0009):** because that key comes from
+      `SESSION_SECRET`, rotating the secret makes every stored `totp_secret`
+      undecryptable — 2FA users then rely on their backup codes (hashed
+      independently, so unaffected) or re-enroll. Anyone rotating `SESSION_SECRET`
+      must know this.
+    - `backup_code_hashes` are salted SHA-256 (`SHA-256(username‖code)`), never the
+      codes; each is erased on use (single-use). A fast hash is sound only because
+      each code is ≥64-bit CSPRNG — an invariant pinned by `test-ui/totp.test.ts`.
+    - `totp_last_step` is a replay high-water mark (RFC 6238 §5.2). **Accepted
+      papercut:** a second concurrent login within the same 30-second step is
+      rejected (tested); backup codes bypass this counter.
+    - **Deliberate v1 scope:** the forgot-password recovery path (#19) is NOT
+      additionally gated by 2FA. The recovery code is itself a high-entropy
+      ownership proof, and 2FA-gating recovery would risk locking out a user who
+      still holds their recovery code but has lost their authenticator. Layering
+      2FA onto recovery as defense-in-depth is a possible future hardening, not a
+      closed hole today.
 
 ---
 

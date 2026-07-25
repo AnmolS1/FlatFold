@@ -29,13 +29,15 @@ import {
 } from '../lib/messaging';
 import { apiRegisterSealToken } from '../lib/api';
 import { isNativePlatform, wsOrigin } from '../lib/platform';
+import { clearUnread, surfaceInboundActivity } from '../lib/webNotify';
 import { cachedNativeToken } from '../lib/nativeToken';
 import { apiSealedSend } from '../lib/sealedFetch';
 import { generateSealToken } from '../lib/sealToken';
 import type { ChatPayload } from '../lib/chatPayload';
 import { requestPanicWipe } from '../lib/panicWipe';
 import { encryptAndUploadMedia, type MediaUploadInput } from '../lib/media';
-import { summaryFromMessage, summariesEqual } from '../lib/conversationSummary';
+import { summaryFromMessage, summariesEqual, isUnread } from '../lib/conversationSummary';
+import { isBlocked, blockContact, unblockContact } from '../lib/blocklist';
 import { replyRefFrom } from '../lib/reply';
 import { orderedVisibleMessages } from '../lib/messageOrder';
 import { haptic } from '../lib/haptics';
@@ -52,6 +54,8 @@ import { SafetyNumberDialog } from '../components/chat/SafetyNumberDialog';
 import { MessageActionSheet } from '../components/chat/MessageActionSheet';
 import { LogoMark } from '../components/common/Brand';
 import { ThemeToggle } from '../components/common/ThemeToggle';
+import { TabBar, type NativeTab } from '../components/native/TabBar';
+import { ContactsPane } from '../components/native/ContactsPane';
 
 export const Chat = () => {
 	const { username, logout } = useAuth();
@@ -91,11 +95,57 @@ export const Chat = () => {
 	// view state — nothing in the WS/session-op layer depends on it. At
 	// ≥900px both panes render side-by-side and this bit is ignored.
 	const [mobileView, setMobileView] = useState<'list' | 'conversation'>('list');
+	// Native phone shell (Direction C): a bottom tab bar switches the top-level
+	// surface. Native-only — the web build keeps its ≥900px master/detail
+	// sidebar untouched (this bit is ignored there). The chat detail pushes
+	// full-screen over the Chats tab (mobileView==='conversation'), which hides
+	// the tab bar, so nav never fights the composer/keyboard.
+	const native = isNativePlatform();
+	const [activeTab, setActiveTab] = useState<NativeTab>('chats');
+	// True while the Chats list's "New message" compose bar is open. Hides the
+	// tab bar so the add-username input is the bottom-most element above the
+	// keyboard (see ContactList's onComposeOpenChange).
+	const [composeOpen, setComposeOpen] = useState(false);
+	// WebSocket reconnect: bumping this nonce re-runs the socket effect (a fresh
+	// connection). iOS suspends a backgrounded app and closes the socket; without
+	// this it stayed dead until a force-quit + keystore re-unlock. We reconnect on
+	// unintended close (backoff) and whenever the app returns to the foreground.
+	const [connectNonce, setConnectNonce] = useState(0);
+	const reconnectAttempts = useRef(0);
+	// True once we've had at least one healthy connection. Lets the status show
+	// "reconnecting…" after a drop vs. the initial "connecting…" on first load.
+	const hasConnectedRef = useRef(false);
+	// Bumps when the block list changes, to re-filter the conversation list.
+	const [blockVersion, setBlockVersion] = useState(0);
+
+	const handleBlock = useCallback(
+		(contactUsername: string) => {
+			blockContact(username ?? '', contactUsername);
+			setBlockVersion((v) => v + 1);
+			// Close the conversation if it's the one being blocked (it's now hidden).
+			setActiveContact((prev) => (prev === contactUsername ? null : prev));
+			setMobileView('list');
+			showToast(`Blocked ${contactUsername}.`, 'success');
+		},
+		[username, showToast]
+	);
+
+	const handleUnblock = useCallback(
+		(contactUsername: string) => {
+			unblockContact(username ?? '', contactUsername);
+			setBlockVersion((v) => v + 1);
+		},
+		[username]
+	);
 	// Keyboard-aware shell height (see the hook): keeps the composer above the
 	// on-screen keyboard on iOS. Falls back to the h-dvh class until it resolves.
 	const viewportHeight = useVisualViewportHeight();
 
 	const wsRef = useRef<WebSocket | null>(null);
+	// True while the app is backgrounded (native): we close the socket so the
+	// server sees us offline and pushes, and we suppress auto-reconnect until the
+	// app returns to the foreground.
+	const backgroundedRef = useRef(false);
 	// Serializes every session-touching operation — inbound decrypt AND
 	// outbound encrypt — onto one chain. Both paths do
 	// loadSession→mutate→saveSession against IndexedDB, and saveSession
@@ -595,10 +645,24 @@ export const Chat = () => {
 					// The sender the ratchet authenticated (server-stamped on the normal
 					// path, or trial-decrypt-identified for a sealed message).
 					const sender = result.displayMessage.from;
+					// Blocked: ack WITHOUT `to` (pass only the id) so the server deletes
+					// the queued copy and stops resends, but sends the blocked sender NO
+					// "delivered" receipt (worker/mailbox.ts returns early when `to` is
+					// undefined — the same path sealed messages use). Then HARD-DELETE the
+					// just-persisted plaintext so nothing is retained on-device (the same
+					// local delete as "delete for me"; no crypto/keystore source changed).
+					// The ratchet advance stands: the message was cryptographically
+					// received either way, and un-advancing it would wedge the session.
+					if (isBlocked(currentUsername, sender)) {
+						sendAck({ id: frame.id });
+						await keystore.deleteMessageLocal(currentUsername, sender, result.displayMessage.id);
+						return;
+					}
 					setMessagesByContact((prev) => ({
 						...prev,
 						[sender]: [...(prev[sender] ?? []), result.displayMessage],
 					}));
+					surfaceInboundActivity();
 					// Pick up a newly auto-added contact or a raised key-change flag.
 					await refreshContacts();
 					if (result.keyChanged) {
@@ -647,6 +711,7 @@ export const Chat = () => {
 				case 'ok': {
 					const convoKey = groupConversationKey(frame.groupId);
 					setMessagesByContact((prev) => ({ ...prev, [convoKey]: [...(prev[convoKey] ?? []), result.displayMessage] }));
+					surfaceInboundActivity();
 					await refreshGroups();
 					sendAck(frame);
 					return;
@@ -709,6 +774,8 @@ export const Chat = () => {
 		// connection failure. Guard against surfacing that as a user-facing
 		// error — only genuine unexpected errors/closes should toast.
 		let intentionalClose = false;
+		let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+		setConnecting(true);
 
 		// Web: same-origin, the SameSite=Strict cookie authenticates the upgrade.
 		// Native (capacitor://localhost): cross-origin, no cookie — so target the
@@ -728,6 +795,8 @@ export const Chat = () => {
 		wsRef.current = ws;
 
 		ws.onopen = () => {
+			reconnectAttempts.current = 0; // healthy connection resets the backoff
+			hasConnectedRef.current = true;
 			setConnecting(false);
 			setConnected(true);
 			setError(null);
@@ -757,21 +826,133 @@ export const Chat = () => {
 
 		ws.onerror = () => {
 			if (intentionalClose) return;
-			const message = 'Connection error. Please try refreshing the page.';
-			setError(message);
-			showToast(message, 'error');
+			// Both platforms auto-reconnect (web via the onclose backoff + the
+			// visibilitychange/online listener below; native via appStateChange), so a
+			// quiet "reconnecting" banner beats telling the user to refresh.
+			setError('Connection lost. Reconnecting…');
 		};
 
 		ws.onclose = () => {
 			setConnected(false);
+			if (intentionalClose) return;
+			// Closed because we backgrounded — don't reconnect; the appStateChange
+			// listener reconnects on resume. (Reconnecting now would re-open a socket
+			// iOS is about to sever, keeping the server from seeing us offline.)
+			if (backgroundedRef.current) return;
+			// Reconnect with exponential backoff. On iOS the app is suspended while
+			// backgrounded, so this timer won't fire until the foreground — the
+			// appStateChange listener below also nudges a reconnect on resume.
+			const delay = Math.min(1000 * 2 ** reconnectAttempts.current, 15000);
+			reconnectAttempts.current += 1;
+			reconnectTimer = setTimeout(() => setConnectNonce((n) => n + 1), delay);
 		};
 
 		return () => {
 			intentionalClose = true;
+			clearTimeout(reconnectTimer);
 			ws.close();
 			wsRef.current = null;
 		};
-	}, [username, showToast, handleIncomingMessage, handleIncomingGroupMessage, handleDeliveredFrame, enqueueSessionOp]);
+	}, [username, connectNonce, handleIncomingMessage, handleIncomingGroupMessage, handleDeliveredFrame, enqueueSessionOp]);
+
+	// Reconnect the socket when the app returns to the foreground (native). iOS
+	// closes the WebSocket when it suspends a backgrounded app; without this the
+	// user had to force-quit and re-unlock to get messages flowing again.
+	useEffect(() => {
+		if (!isNativePlatform()) return;
+		let remove: (() => void) | undefined;
+		void (async () => {
+			const { App } = await import('@capacitor/app');
+			const handle = await App.addListener('appStateChange', ({ isActive }) => {
+				if (isActive) {
+					backgroundedRef.current = false;
+					if (wsRef.current?.readyState !== WebSocket.OPEN) {
+						reconnectAttempts.current = 0;
+						setConnectNonce((n) => n + 1);
+					}
+				} else {
+					// Backgrounded: close the socket cleanly NOW so the server (DO) sees
+					// us offline and routes new messages to the wake-up push, instead of
+					// live-delivering into a socket iOS is about to sever abruptly (which
+					// the DO can take minutes to notice → no push fires).
+					backgroundedRef.current = true;
+					wsRef.current?.close(1000, 'backgrounded');
+				}
+			});
+			remove = () => void handle.remove();
+		})();
+		return () => remove?.();
+	}, []);
+
+	// Web: reconnect promptly when the tab returns to the foreground or the network
+	// comes back. Hidden tabs throttle (or freeze) the onclose backoff timer, so a
+	// socket that dropped while backgrounded would otherwise sit dead until that
+	// timer eventually fires — the user lands back on a stale "reconnecting…" view.
+	// This nudges an immediate reconnect. (Native does the equivalent through the
+	// appStateChange listener above.)
+	useEffect(() => {
+		if (isNativePlatform()) return;
+		const reconnectIfDropped = () => {
+			const rs = wsRef.current?.readyState;
+			if (rs === WebSocket.OPEN || rs === WebSocket.CONNECTING) return;
+			reconnectAttempts.current = 0;
+			setConnectNonce((n) => n + 1);
+		};
+		const onVisible = () => {
+			if (document.visibilityState === 'visible') reconnectIfDropped();
+		};
+		document.addEventListener('visibilitychange', onVisible);
+		window.addEventListener('online', reconnectIfDropped);
+		return () => {
+			document.removeEventListener('visibilitychange', onVisible);
+			window.removeEventListener('online', reconnectIfDropped);
+		};
+	}, []);
+
+	// Web: clear the "new message" tab dot + favicon badge once the user is looking
+	// at the tab again. Clear on window focus unconditionally, and on the tab
+	// becoming visible — NOT gated on document.hasFocus(), which can still read
+	// false for a tick after visibilitychange fires (leaving the dot stuck).
+	useEffect(() => {
+		if (isNativePlatform()) return;
+		const clearOnFocus = () => clearUnread();
+		const clearOnVisible = () => {
+			if (document.visibilityState === 'visible') clearUnread();
+		};
+		window.addEventListener('focus', clearOnFocus);
+		document.addEventListener('visibilitychange', clearOnVisible);
+		return () => {
+			window.removeEventListener('focus', clearOnFocus);
+			document.removeEventListener('visibilitychange', clearOnVisible);
+		};
+	}, []);
+
+	// Native: expose the keyboard height as a CSS variable so the shell height
+	// (and `.env-safe-bottom`) can shrink in sync with the keyboard animation.
+	// willShow/WillHide fire at the animation's start, so the CSS transition on
+	// the root runs concurrently with the keyboard — no catch-up jump.
+	useEffect(() => {
+		if (!native) return;
+		const root = document.documentElement;
+		let showRemove: (() => void) | undefined;
+		let hideRemove: (() => void) | undefined;
+		void (async () => {
+			const { Keyboard } = await import('@capacitor/keyboard');
+			const show = await Keyboard.addListener('keyboardWillShow', (info) => {
+				root.style.setProperty('--keyboard-height', `${info.keyboardHeight}px`);
+			});
+			const hide = await Keyboard.addListener('keyboardWillHide', () => {
+				root.style.setProperty('--keyboard-height', '0px');
+			});
+			showRemove = () => void show.remove();
+			hideRemove = () => void hide.remove();
+		})();
+		return () => {
+			showRemove?.();
+			hideRemove?.();
+			root.style.removeProperty('--keyboard-height');
+		};
+	}, [native]);
 
 	// Sealed sender: on connect, make sure my delivery token exists and both
 	// server stores know it (register-token writes the DO validator + the D1
@@ -1148,7 +1329,25 @@ export const Chat = () => {
 	return (
 		<div
 			className="h-dvh flex flex-col overflow-hidden"
-			style={viewportHeight ? { height: `${viewportHeight}px` } : undefined}
+			// Native: height = full viewport minus the keyboard, where
+			// `--keyboard-height` is set from keyboardWillShow/WillHide (below). The
+			// transition makes the composer slide up in lockstep with the keyboard
+			// (no lag), and shrinking the app keeps content above the keyboard so
+			// WKWebView never scroll-reveals the input. Web: pin to visualViewport
+			// height (the keyboard overlays the page there; `dvh` won't shrink).
+			style={
+				native
+					? {
+							height: 'calc(100dvh - var(--keyboard-height, 0px))',
+							// Front-loaded easing (fast start) so the composer catches the
+							// keyboard from the first frame despite the ~1-frame JS delay
+							// before the transition begins.
+							transition: 'height 0.25s cubic-bezier(0.16, 0.8, 0.3, 1)',
+						}
+					: viewportHeight
+						? { height: `${viewportHeight}px` }
+						: undefined
+			}
 		>
 			<header className="bg-graph-card border-b border-crease-line flex-shrink-0 env-safe-top env-safe-x">
 				<div className="px-4 py-3">
@@ -1162,8 +1361,8 @@ export const Chat = () => {
 										className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${connected ? 'bg-sax' : 'bg-crane'}`}
 										aria-hidden="true"
 									/>
-									<span className="truncate">
-										{connected ? 'connected' : 'connecting…'} · {username}
+									<span className={`truncate ${connected ? '' : 'text-crane font-semibold'}`}>
+										{connected ? 'connected' : hasConnectedRef.current ? 'reconnecting…' : 'connecting…'} · {username}
 									</span>
 								</p>
 							</div>
@@ -1178,14 +1377,18 @@ export const Chat = () => {
 								<Search className="w-4 h-4" />
 								<span className="hidden sm:inline">Search</span>
 							</button>
-							<button
-								onClick={() => setSettingsOpen(true)}
-								className="flex items-center justify-center min-w-11 min-h-11 border border-crease-line-bold hover:border-crease text-graphite rounded-lg transition-colors text-sm"
-								title="Settings"
-								aria-label="Settings"
-							>
-								<Settings className="w-4 h-4" />
-							</button>
+							{/* On native, Settings is a bottom-tab, not a header button
+							    (D2 §2: cap header actions). Web keeps the header glyph. */}
+							{!native && (
+								<button
+									onClick={() => setSettingsOpen(true)}
+									className="flex items-center justify-center min-w-11 min-h-11 border border-crease-line-bold hover:border-crease text-graphite rounded-lg transition-colors text-sm"
+									title="Settings"
+									aria-label="Settings"
+								>
+									<Settings className="w-4 h-4" />
+								</button>
+							)}
 							<ThemeToggle />
 							<button
 								onClick={() => requestPanicWipe()}
@@ -1196,14 +1399,18 @@ export const Chat = () => {
 								<ShieldOff className="w-4 h-4" />
 								<span className="hidden sm:inline">Panic</span>
 							</button>
-							<button
-								onClick={handleLogout}
-								className="flex items-center justify-center gap-2 min-w-11 min-h-11 sm:px-3 sm:min-w-0 border border-crease-line-bold hover:border-crease text-graphite rounded-lg transition-colors text-sm"
-								aria-label="Log out"
-							>
-								<LogOut className="w-4 h-4" />
-								<span className="hidden sm:inline">Logout</span>
-							</button>
+							{/* On native, Sign out lives in the Settings tab (with "sign
+							    out everywhere"); no header button. Web keeps it. */}
+							{!native && (
+								<button
+									onClick={handleLogout}
+									className="flex items-center justify-center gap-2 min-w-11 min-h-11 sm:px-3 sm:min-w-0 border border-crease-line-bold hover:border-crease text-graphite rounded-lg transition-colors text-sm"
+									aria-label="Log out"
+								>
+									<LogOut className="w-4 h-4" />
+									<span className="hidden sm:inline">Logout</span>
+								</button>
+							)}
 						</div>
 					</div>
 				</div>
@@ -1221,31 +1428,60 @@ export const Chat = () => {
 				<div
 					className={`${mobileView === 'conversation' ? 'hidden' : 'flex'} min-[900px]:flex w-full min-[900px]:w-80 min-[900px]:flex-shrink-0 min-h-0`}
 				>
-					<ContactList
-						contacts={contacts}
-						groups={groups}
-						summaries={summaries}
-						currentUsername={username ?? ''}
-						activeContact={activeContact}
-						activeGroupId={activeGroup?.id ?? null}
-						onSelectContact={(u) => {
-							setMobileView('conversation');
-							setReplyingTo(null);
-							void handleSelectContact(u);
-						}}
-						onSelectGroup={(g) => {
-							setMobileView('conversation');
-							setReplyingTo(null);
-							void handleSelectGroup(g);
-						}}
-						onAddContact={handleAddContact}
-						onNewGroup={() => setCreateGroupOpen(true)}
-					/>
+					{native && activeTab === 'contacts' ? (
+						<ContactsPane
+							contacts={contacts}
+							currentUsername={username ?? ''}
+							blockVersion={blockVersion}
+							onAddContact={handleAddContact}
+							onOpenChat={(u) => {
+								setActiveTab('chats');
+								setMobileView('conversation');
+								setReplyingTo(null);
+								void handleSelectContact(u);
+							}}
+							onVerify={(u) => {
+								setActiveTab('chats');
+								setMobileView('conversation');
+								setReplyingTo(null);
+								void handleSelectContact(u);
+								setVerifyDialogOpen(true);
+							}}
+							onRemove={(u) => void handleRemoveContact(u)}
+							onBlock={handleBlock}
+							onUnblock={handleUnblock}
+						/>
+					) : (
+						<ContactList
+							contacts={contacts}
+							groups={groups}
+							summaries={summaries}
+							blockVersion={blockVersion}
+							currentUsername={username ?? ''}
+							activeContact={activeContact}
+							activeGroupId={activeGroup?.id ?? null}
+							onSelectContact={(u) => {
+								setComposeOpen(false);
+								setMobileView('conversation');
+								setReplyingTo(null);
+								void handleSelectContact(u);
+							}}
+							onSelectGroup={(g) => {
+								setComposeOpen(false);
+								setMobileView('conversation');
+								setReplyingTo(null);
+								void handleSelectGroup(g);
+							}}
+							onAddContact={handleAddContact}
+							onNewGroup={() => setCreateGroupOpen(true)}
+							onComposeOpenChange={setComposeOpen}
+						/>
+					)}
 				</div>
 
 				{/* Conversation pane — hidden on phones while the list is showing. */}
 				<div
-					className={`${mobileView === 'list' ? 'hidden' : 'flex'} min-[900px]:flex flex-1 flex-col min-h-0`}
+					className={`${mobileView === 'list' ? 'hidden' : 'flex'} min-[900px]:flex flex-1 flex-col min-h-0 min-w-0`}
 				>
 					{activeGroup ? (
 						<>
@@ -1347,24 +1583,28 @@ export const Chat = () => {
 										<ChevronLeft className="w-5 h-5" />
 									</button>
 									<span className="truncate">{activeContactRecord.username}</span>
-									{activeContactRecord.verified && (
-										<span className="flex items-center gap-1 text-sax text-xs flex-shrink-0">
-											<ShieldCheck className="w-3.5 h-3.5" /> verified
-										</span>
-									)}
 								</span>
-								<div className="flex items-center gap-2">
+								<div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
 									<DisappearingTimerMenu seconds={activeContactRecord.disappearingSeconds} onChange={(s) => void handleSetTimer(s)} />
+									{/* Icon-only: the "verified" state already shows next to the name,
+									    so a shield glyph is enough (the "Safety number"/"Verify" label
+									    was redundant and crowded the header). */}
 									<button
 										onClick={() => setVerifyDialogOpen(true)}
-										className="text-xs flex items-center gap-1 px-2 py-1 border border-crease-line-bold hover:border-crease text-graphite rounded transition-colors"
+										aria-label={activeContactRecord.verified ? 'Safety number (verified)' : 'Verify safety number'}
+										title={activeContactRecord.verified ? 'Safety number' : 'Verify'}
+										className={`flex items-center justify-center w-9 h-9 border rounded transition-colors ${
+											activeContactRecord.verified
+												? 'border-sax/50 text-sax hover:border-sax'
+												: 'border-crease-line-bold text-graphite hover:border-crease'
+										}`}
 									>
-										<ShieldCheck className="w-3.5 h-3.5" />
-										{activeContactRecord.verified ? 'Safety number' : 'Verify'}
+										<ShieldCheck className="w-4 h-4" />
 									</button>
 									<ContactMenu
 										contactUsername={activeContactRecord.username}
 										onRemoveContact={() => void handleRemoveContact(activeContactRecord.username)}
+										onBlockContact={() => handleBlock(activeContactRecord.username)}
 									/>
 								</div>
 							</div>
@@ -1423,6 +1663,24 @@ export const Chat = () => {
 					)}
 				</div>
 			</div>
+
+			{/* Native bottom tab bar — only on the list surface, so the chat
+			    detail (composer + keyboard) is never crowded by nav chrome. The
+			    Settings tab opens the existing settings modal for now; it becomes
+			    a full grouped screen (themes + About) in the themes step. */}
+			{native && mobileView === 'list' && !composeOpen && (
+				<TabBar
+					active={activeTab}
+					onChange={(t) => {
+						if (t === 'settings') {
+							setSettingsOpen(true);
+							return;
+						}
+						setActiveTab(t);
+					}}
+					chatsUnread={Object.values(summaries).some((s) => isUnread(s, username ?? ''))}
+				/>
+			)}
 
 			{verifyDialogOpen && activeContactRecord && username && (
 				<SafetyNumberDialog

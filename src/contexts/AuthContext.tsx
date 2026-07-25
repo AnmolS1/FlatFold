@@ -1,7 +1,20 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { apiLogin, apiLogout, apiMe, apiPublishKeys, apiSignup } from '../lib/api';
+import {
+	apiChangePassword,
+	apiEnrollRecovery,
+	apiLogin,
+	apiLogout,
+	apiMe,
+	apiPublishKeys,
+	apiRecoveryParams,
+	apiRecoveryReset,
+	apiSignup,
+} from '../lib/api';
 import * as keystore from '../keystore';
+import { deriveRecoveryAuth } from '../keystore/recovery';
 import { bytesToBase64 } from '../keystore/codec';
+import type { EncryptedBlob } from '../keystore/crypto';
+import type { NewIdentityMaterial } from '../keystore';
 import type { AuthContextType } from '../types';
 import { AuthContext } from '../hooks/useAuth';
 
@@ -9,8 +22,7 @@ interface AuthProviderProps {
 	children: ReactNode;
 }
 
-async function publishFreshIdentity(username: string, password: string): Promise<void> {
-	const material = await keystore.createIdentity(username, password);
+async function publishIdentityMaterial(material: NewIdentityMaterial): Promise<void> {
 	await apiPublishKeys({
 		identityPubkey: {
 			signingPublicKey: bytesToBase64(material.identity.signing.publicKey),
@@ -22,6 +34,10 @@ async function publishFreshIdentity(username: string, password: string): Promise
 		},
 		oneTimePreKeys: material.oneTimePreKeys.map((opk) => bytesToBase64(opk.keyPair.publicKey)),
 	});
+}
+
+async function publishFreshIdentity(username: string, password: string): Promise<void> {
+	await publishIdentityMaterial(await keystore.createIdentity(username, password));
 }
 
 // Unlocks this user's local encrypted keystore — or, on a device with no
@@ -90,11 +106,13 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 		setKeystoreLocked(false);
 	};
 
-	const login = async (usernameInput: string, password: string): Promise<void> => {
-		const result = await apiLogin(usernameInput, password);
+	const login = async (usernameInput: string, password: string, code?: string): Promise<'ok' | 'two-factor-required'> => {
+		const result = await apiLogin(usernameInput, password, code);
+		if (result === 'two-factor-required') return 'two-factor-required';
 		await establishLocalIdentity(result.username, password);
 		setUsername(result.username);
 		setKeystoreLocked(false);
+		return 'ok';
 	};
 
 	const logout = async (): Promise<void> => {
@@ -105,6 +123,19 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 		await apiLogout();
 		setUsername(null);
 		setKeystoreLocked(true);
+	};
+
+	// Unlock via biometrics (D7 §5). Retrieves MK from the Secure-Enclave-gated
+	// Keychain (Face ID sheet) and clears the lock. 'cancelled' on cancel/failure/
+	// not-enrolled — the caller keeps the password gate.
+	const unlockWithBiometric = async (): Promise<'unlocked' | 'cancelled'> => {
+		if (!username) throw new Error('Cannot unlock keystore with no authenticated user.');
+		const result = await keystore.unlockWithBiometric(username);
+		if (result.status === 'unlocked') {
+			setKeystoreLocked(false);
+			return 'unlocked';
+		}
+		return 'cancelled';
 	};
 
 	const unlockKeystore = async (password: string): Promise<'unlocked' | 'wrong-password'> => {
@@ -118,6 +149,78 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 		return 'unlocked';
 	};
 
+	// Change password (D7 §1). Ordering is what makes it crash-safe across two
+	// independent stores (local keystore + server verifier):
+	//   1. stage — durably add a SECOND wrap of the master key under the new
+	//      password to the local record. It now opens with EITHER password.
+	//   2. server — re-auth with the current password; the server rotates the
+	//      verifier + epoch and returns a fresh token for this session.
+	//   3. finalize — promote the new wrap to be the only one; the old dies.
+	// A crash between (1) and (3) is safe: the record still opens with whichever
+	// password the server ended up on, and the next unlock collapses it. On a
+	// server rejection we roll the staged wrap back so the old password is intact.
+	const changePassword = async (current: string, next: string): Promise<'ok' | 'wrong-password'> => {
+		if (!username) throw new Error('Cannot change password with no authenticated user.');
+		const staged = await keystore.stageChangePassword(username, current, next);
+		if (staged === 'wrong-password') return 'wrong-password';
+		try {
+			await apiChangePassword(current, next);
+		} catch (err) {
+			await keystore.rollbackChangePassword(username);
+			throw err;
+		}
+		await keystore.finalizeChangePassword(username);
+		return 'ok';
+	};
+
+	// Turn on (or replace) a recovery code (D7 §3). The keystore builds the code +
+	// opaque blob from the unlocked identity; the server stores it after a password
+	// re-auth. The code is returned to show ONCE and is never retained.
+	const enrollRecovery = async (password: string): Promise<string> => {
+		if (!username) throw new Error('Cannot set up recovery with no authenticated user.');
+		const { code, enrollment } = await keystore.enrollRecovery(username);
+		await apiEnrollRecovery(password, {
+			saltRec: enrollment.saltRec,
+			saltAuth: enrollment.saltAuth,
+			blob: enrollment.blob,
+			auth: enrollment.auth,
+		});
+		return code;
+	};
+
+	// Recover an account on this device from its recovery code (D7 §3). Fetches the
+	// public salts, derives the authenticator, resets the password server-side (which
+	// releases the opaque blob), then rebuilds the identity + contacts locally under
+	// the new password and republishes. The identity keys are unchanged, so contacts
+	// see no safety-number change.
+	const recoverAccount = async (
+		usernameInput: string,
+		code: string,
+		newPassword: string
+	): Promise<'ok' | 'no-recovery' | 'wrong-code'> => {
+		const params = await apiRecoveryParams(usernameInput);
+		if (!params) return 'no-recovery';
+
+		let recAuth: string;
+		try {
+			recAuth = await deriveRecoveryAuth(code, params.saltAuth);
+		} catch {
+			return 'wrong-code'; // invalid mnemonic / bad checksum
+		}
+
+		const result = await apiRecoveryReset(usernameInput, recAuth, newPassword);
+		if (result === 'wrong-code') return 'wrong-code';
+
+		// The server stored the blob as TEXT (a JSON string) — parse it back to an
+		// EncryptedBlob, don't cast the string.
+		const blob = JSON.parse(result.blob as string) as EncryptedBlob;
+		const material = await keystore.restoreFromRecovery(usernameInput, code, params.saltRec, blob, newPassword);
+		await publishIdentityMaterial(material);
+		setUsername(usernameInput);
+		setKeystoreLocked(false);
+		return 'ok';
+	};
+
 	const value: AuthContextType = {
 		username,
 		loading,
@@ -126,6 +229,10 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 		login,
 		logout,
 		unlockKeystore,
+		unlockWithBiometric,
+		changePassword,
+		enrollRecovery,
+		recoverAccount,
 	};
 
 	return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

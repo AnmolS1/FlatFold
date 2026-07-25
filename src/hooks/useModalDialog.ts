@@ -15,6 +15,13 @@ const FOCUSABLE =
 
 export function useModalDialog<T extends HTMLElement>(onClose: () => void) {
 	const panelRef = useRef<T>(null);
+	// Callers pass a fresh `onClose` closure on every render (e.g.
+	// `onClose={() => setOpen(false)}`). Route it through a ref so the focus/trap
+	// effect can stay a run-ONCE effect: re-running it on each new closure would
+	// re-focus the first control and yank focus off whatever input the user is
+	// typing in — which, on iOS, dismisses the keyboard mid-entry.
+	const onCloseRef = useRef(onClose);
+	onCloseRef.current = onClose;
 
 	// Lock body scroll while open, restore on close.
 	useEffect(() => {
@@ -37,7 +44,10 @@ export function useModalDialog<T extends HTMLElement>(onClose: () => void) {
 		};
 	}, []);
 
-	// Move focus in, close on Escape, and cycle Tab within the panel.
+	// Move focus in ONCE on open, then close on Escape and cycle Tab within the
+	// panel. Deliberately a mount-only effect (see onCloseRef above): focus-in
+	// must not repeat when the parent re-renders, or it steals focus from a
+	// focused input and drops the on-screen keyboard.
 	useEffect(() => {
 		const panel = panelRef.current;
 		// Prefer the first focusable control; fall back to the panel itself so
@@ -48,7 +58,7 @@ export function useModalDialog<T extends HTMLElement>(onClose: () => void) {
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (e.key === 'Escape') {
 				e.preventDefault();
-				onClose();
+				onCloseRef.current();
 				return;
 			}
 			if (e.key !== 'Tab' || !panel) return;
@@ -82,7 +92,7 @@ export function useModalDialog<T extends HTMLElement>(onClose: () => void) {
 
 		document.addEventListener('keydown', onKeyDown);
 		return () => document.removeEventListener('keydown', onKeyDown);
-	}, [onClose]);
+	}, []);
 
 	return panelRef;
 }

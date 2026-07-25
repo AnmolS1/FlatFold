@@ -12,6 +12,27 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { BottomSheet } from '../src/components/common/BottomSheet';
 import { SettingsDialog } from '../src/components/SettingsDialog';
+import { useModalDialog } from '../src/hooks/useModalDialog';
+import { AuthContext } from '../src/hooks/useAuth';
+import { ThemeProvider } from '../src/contexts/ThemeContext';
+import { MemoryRouter } from 'react-router-dom';
+import type { AuthContextType } from '../src/types';
+
+// SettingsDialog now reads changePassword from auth context — a minimal stub is
+// enough for the accessibility harness (it never submits the form).
+const stubAuth: AuthContextType = {
+	username: 'alice',
+	loading: false,
+	keystoreLocked: false,
+	signup: vi.fn(),
+	login: vi.fn(),
+	logout: vi.fn(),
+	unlockKeystore: vi.fn(),
+	unlockWithBiometric: vi.fn(),
+	changePassword: vi.fn(),
+	enrollRecovery: vi.fn(),
+	recoverAccount: vi.fn(),
+};
 
 vi.mock('../src/lib/api', () => ({
 	apiMe: vi.fn().mockResolvedValue(null),
@@ -44,7 +65,15 @@ describe.each([
 	},
 	{
 		name: 'SettingsDialog',
-		render: (close: () => void) => <SettingsDialog username="alice" onClose={close} onSignOut={vi.fn()} />,
+		render: (close: () => void) => (
+			<MemoryRouter>
+				<ThemeProvider>
+					<AuthContext.Provider value={stubAuth}>
+						<SettingsDialog username="alice" onClose={close} onSignOut={vi.fn()} />
+					</AuthContext.Provider>
+				</ThemeProvider>
+			</MemoryRouter>
+		),
 	},
 ])('$name accessibility', ({ render: renderDialog }) => {
 	it('exposes dialog semantics with an accessible name', async () => {
@@ -104,5 +133,35 @@ describe.each([
 		await user.keyboard('{Escape}');
 
 		await waitFor(() => expect(document.activeElement).toBe(trigger));
+	});
+});
+
+// Regression (native change-password keyboard drop): callers pass a fresh
+// `onClose` closure every render (`onClose={() => setOpen(false)}`). A parent
+// re-render must NOT make the dialog re-grab focus — on iOS that blurs the
+// focused input and dismisses the keyboard mid-entry. Focus-in is once-on-open.
+describe('modal focus survives a parent re-render', () => {
+	function Dialog({ onClose }: { onClose: () => void }) {
+		const ref = useModalDialog<HTMLDivElement>(onClose);
+		return (
+			<div ref={ref} role="dialog" aria-modal="true" aria-label="test" tabIndex={-1}>
+				<button>first control</button>
+				<input aria-label="field" />
+			</div>
+		);
+	}
+
+	it('does not steal focus from a focused input when onClose identity changes', () => {
+		// A fresh closure each render mimics `onClose={() => setOpen(false)}`.
+		const { rerender } = render(<Dialog onClose={() => {}} />);
+		const field = screen.getByLabelText('field');
+		field.focus(); // user tapped the input (not the first control)
+		expect(document.activeElement).toBe(field);
+
+		rerender(<Dialog onClose={() => {}} />); // parent re-rendered → new onClose
+
+		// Buggy version re-runs focus-in and lands on "first control"; fixed keeps
+		// the user's focus (and therefore the keyboard) on the input.
+		expect(document.activeElement).toBe(field);
 	});
 });

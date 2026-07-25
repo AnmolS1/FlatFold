@@ -13,10 +13,20 @@ import migration0004 from '../migrations/0004_push.sql?raw';
 import migration0005 from '../migrations/0005_seal_token.sql?raw';
 import migration0006 from '../migrations/0006_token_epoch.sql?raw';
 import migration0007 from '../migrations/0007_apns.sql?raw';
+import migration0008 from '../migrations/0008_recovery.sql?raw';
+import migration0009 from '../migrations/0009_totp.sql?raw';
 
-const migrationSql = [migration0001, migration0002, migration0003, migration0004, migration0005, migration0006, migration0007].join(
-	'\n'
-);
+const migrationSql = [
+	migration0001,
+	migration0002,
+	migration0003,
+	migration0004,
+	migration0005,
+	migration0006,
+	migration0007,
+	migration0008,
+	migration0009,
+].join('\n');
 
 // D1Database.exec() treats each NEWLINE as a statement boundary (it does
 // NOT parse multi-line statements or split on `;`) — so a pretty-printed

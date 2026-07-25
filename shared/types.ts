@@ -15,9 +15,27 @@ export interface AuthContextType {
 	// the keystore is a separate step from the server session.
 	keystoreLocked: boolean;
 	signup: (username: string, password: string) => Promise<void>;
-	login: (username: string, password: string) => Promise<void>;
+	// Resolves 'two-factor-required' when the account has 2FA on and no code was
+	// given — the caller then re-invokes with the authenticator/backup code.
+	login: (username: string, password: string, code?: string) => Promise<'ok' | 'two-factor-required'>;
 	logout: () => Promise<void>;
 	unlockKeystore: (password: string) => Promise<'unlocked' | 'wrong-password'>;
+	// Unlock the local keystore with Face ID / Touch ID (D7 §5, native). 'cancelled'
+	// on cancel/failure/not-enrolled — the caller keeps the password path.
+	unlockWithBiometric: () => Promise<'unlocked' | 'cancelled'>;
+	// Change the account password (D7 §1). Re-wraps the local keystore master key
+	// under the new password and rotates the server verifier + session epoch.
+	// Resolves 'wrong-password' if the current password is wrong; throws on a
+	// server/network failure (the staged local re-wrap is rolled back either way).
+	changePassword: (current: string, next: string) => Promise<'ok' | 'wrong-password'>;
+	// Turn on (or replace) a recovery code (D7 §3). Password-reauthed. Returns the
+	// 12-word code to show the user ONCE. Throws on a wrong password / server error.
+	enrollRecovery: (password: string) => Promise<string>;
+	// Recover an account from its recovery code on this device, setting a new
+	// password (D7 §3). 'no-recovery' if the account never enrolled one;
+	// 'wrong-code' if the code is invalid or rejected; 'ok' signs the user in with
+	// their identity + contacts restored. Throws on rate-limit / network failure.
+	recoverAccount: (username: string, code: string, newPassword: string) => Promise<'ok' | 'no-recovery' | 'wrong-code'>;
 }
 
 export interface FormErrors {

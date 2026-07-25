@@ -65,3 +65,28 @@ export function decryptBlob<T>(key: Uint8Array, blob: EncryptedBlob): T {
 	const plaintext = aeadDecrypt(key, base64ToBytes(blob.nonce), base64ToBytes(blob.ciphertext));
 	return JSON.parse(new TextDecoder().decode(plaintext)) as T;
 }
+
+// ── Keystore master key (MK) ────────────────────────────────────────────────
+// A random 32-byte key that encrypts every store. MK is never derived from the
+// password; instead it is AEAD-WRAPPED under keys derived from the password /
+// recovery code / biometric (wrapKey), so a credential change or recovery is a
+// cheap re-wrap of these 32 bytes rather than re-encrypting every store. See
+// docs/redesign/D7_IMPLEMENTATION_PLAN.md §0.
+
+export function generateMasterKey(): Uint8Array {
+	return randomBytes(KEYSTORE_KEY_LENGTH);
+}
+
+// Wraps a raw key (the MK) under `wrappingKey` — AEAD over the raw bytes (not
+// JSON, unlike encryptBlob). Fresh nonce per wrap.
+export function wrapKey(wrappingKey: Uint8Array, keyToWrap: Uint8Array): EncryptedBlob {
+	const nonce = randomBytes(12);
+	const ciphertext = aeadEncrypt(wrappingKey, nonce, keyToWrap);
+	return { nonce: bytesToBase64(nonce), ciphertext: bytesToBase64(ciphertext) };
+}
+
+// Unwraps a wrapped key. Throws on the wrong wrapping key or a tampered blob
+// (AEAD tag mismatch) — the same wrong-password oracle decryptBlob relies on.
+export function unwrapKey(wrappingKey: Uint8Array, blob: EncryptedBlob): Uint8Array {
+	return aeadDecrypt(wrappingKey, base64ToBytes(blob.nonce), base64ToBytes(blob.ciphertext));
+}

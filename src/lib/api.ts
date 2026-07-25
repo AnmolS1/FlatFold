@@ -39,20 +39,55 @@ export async function apiSignup(username: string, password: string): Promise<{ u
 	return { username: body.username };
 }
 
-export async function apiLogin(username: string, password: string): Promise<{ username: string }> {
+// Login, 2FA-aware. When the account has 2FA on, a password-only attempt returns
+// 'two-factor-required' (server 401 {twoFactorRequired}); the caller re-invokes
+// with the authenticator/backup code. Other failures throw.
+export async function apiLogin(
+	username: string,
+	password: string,
+	code?: string
+): Promise<{ username: string } | 'two-factor-required'> {
 	const response = await apiFetch('/api/auth/login', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ username, password }),
+		body: JSON.stringify(code ? { username, password, code } : { username, password }),
 	});
+	if (response.status === 401) {
+		const body = (await response.json().catch(() => null)) as { twoFactorRequired?: boolean; error?: string } | null;
+		if (body?.twoFactorRequired) return 'two-factor-required';
+		throw new Error(body?.error ?? 'Invalid username or password.');
+	}
 	const body = (await parseJsonOrThrow(response)) as { username: string; token?: string };
 	await captureNativeToken(body);
 	return { username: body.username };
 }
 
+// Turn on TOTP two-factor (D7 §4). Password-reauthed; the server verifies the
+// confirming `code` against `secret` before storing it. Backup codes are hashed
+// server-side. The secret + codes are generated client-side (src/lib/totp.ts).
+export async function apiEnable2fa(password: string, secret: string, code: string, backupCodes: string[]): Promise<void> {
+	const response = await apiFetch('/api/auth/2fa/enable', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ password, secret, code, backupCodes }),
+	});
+	await parseJsonOrThrow(response);
+}
+
+// Turn off TOTP two-factor. Requires the password AND a valid second factor.
+export async function apiDisable2fa(password: string, code: string): Promise<void> {
+	const response = await apiFetch('/api/auth/2fa/disable', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ password, code }),
+	});
+	await parseJsonOrThrow(response);
+}
+
 export interface MeResponse {
 	username: string;
 	sessionCreatedAt?: number; // unix seconds — the token's iat
+	twoFactorEnabled?: boolean; // D7 §4 — drives the Settings 2FA section
 }
 
 export async function apiMe(): Promise<MeResponse | null> {
@@ -66,7 +101,7 @@ export async function apiMe(): Promise<MeResponse | null> {
 	}
 	const body = (await parseJsonOrThrow(response)) as MeResponse & { token?: string };
 	await captureNativeToken(body); // native: sliding refresh returns a fresh token
-	return { username: body.username, sessionCreatedAt: body.sessionCreatedAt };
+	return { username: body.username, sessionCreatedAt: body.sessionCreatedAt, twoFactorEnabled: body.twoFactorEnabled };
 }
 
 export async function apiLogout(): Promise<void> {
@@ -86,6 +121,76 @@ export async function apiLogoutAll(password: string): Promise<void> {
 	});
 	await parseJsonOrThrow(response);
 	await clearNativeToken(); // the epoch bump invalidated this token server-side too
+}
+
+// Change password (D7 §1): re-auth with the current password, set the new one,
+// and bump the epoch (other sessions die). The server returns a FRESH token for
+// this session at the new epoch — captured here for native so this device stays
+// signed in (web gets the refreshed cookie). Throws on any non-2xx (wrong current
+// password → the caller rolls back its staged local re-wrap).
+export async function apiChangePassword(current: string, next: string): Promise<void> {
+	const response = await apiFetch('/api/auth/change-password', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ current, new: next }),
+	});
+	const body = await parseJsonOrThrow(response);
+	await captureNativeToken(body);
+}
+
+// ---- account recovery (D7 §3) ----
+
+// Enroll (or replace) a recovery code. Password-reauthed server-side. The blob +
+// authenticator are opaque here — built by the keystore (keystore.enrollRecovery).
+export interface RecoveryUpload {
+	saltRec: string;
+	saltAuth: string;
+	blob: unknown; // EncryptedBlob JSON — opaque to the transport
+	auth: string;
+}
+export async function apiEnrollRecovery(password: string, upload: RecoveryUpload): Promise<void> {
+	const response = await apiFetch('/api/auth/recovery/enroll', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		// The blob is an EncryptedBlob OBJECT; the server column is TEXT and its
+		// guard expects a string — serialize it here (parsed back on recovery).
+		body: JSON.stringify({
+			password,
+			saltRec: upload.saltRec,
+			saltAuth: upload.saltAuth,
+			blob: JSON.stringify(upload.blob),
+			auth: upload.auth,
+		}),
+	});
+	await parseJsonOrThrow(response);
+}
+
+// The public recovery salts for a username. Null when the account has no recovery
+// enrolled (server 404) — the caller shows the honest "no way back" copy.
+export async function apiRecoveryParams(username: string): Promise<{ saltRec: string; saltAuth: string } | null> {
+	const response = await apiFetch(`/api/auth/recovery/params?username=${encodeURIComponent(username)}`);
+	if (response.status === 404) return null;
+	return (await parseJsonOrThrow(response)) as { saltRec: string; saltAuth: string };
+}
+
+// Recover: authenticate with the recovery authenticator, set a new password, and
+// receive the opaque recovery blob (to rebuild the identity locally). Captures the
+// fresh session token for native. Returns 'wrong-code' on a bad authenticator
+// (server 401); throws on other failures (429 rate-limit, network).
+export async function apiRecoveryReset(
+	username: string,
+	recAuth: string,
+	newPassword: string
+): Promise<{ blob: unknown } | 'wrong-code'> {
+	const response = await apiFetch('/api/auth/recovery/reset', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ username, recAuth, newPassword }),
+	});
+	if (response.status === 401) return 'wrong-code';
+	const body = (await parseJsonOrThrow(response)) as { blob: unknown; token?: string };
+	await captureNativeToken(body);
+	return { blob: body.blob };
 }
 
 // Irreversible: deletes the server-side account (D1 rows + queued ciphertext)

@@ -1,10 +1,11 @@
 import { createContext, useContext, type ReactNode } from 'react';
-import { type Theme } from '../types/theme';
+import { type ThemeName, type ThemePreference } from '../types/theme';
 import { useThemeInternal } from '../hooks/useThemeInternal';
 
 interface ThemeContextType {
-	theme: Theme;
-	setTheme: (theme: Theme) => void;
+	preference: ThemePreference;
+	theme: ThemeName;
+	setPreference: (preference: ThemePreference) => void;
 	toggleTheme: () => void;
 }
 

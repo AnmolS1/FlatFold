@@ -11,7 +11,22 @@
 //   GET  /api/keys/bundle/:username
 //   GET  /ws            (WebSocket upgrade -> the caller's mailbox DO)
 
-import { bumpTokenEpoch, checkRateLimit, createUser, getUser, setUserSealToken } from './db';
+import {
+	bumpTokenEpoch,
+	checkRateLimit,
+	clearTotp,
+	createUser,
+	getRecoveryParams,
+	getUser,
+	setBackupCodeHashes,
+	setRecovery,
+	setTotp,
+	setTotpLastStep,
+	setUserSealToken,
+	updatePassword,
+	type UserRow,
+} from './db';
+import { decryptTotpSecret, encryptTotpSecret, hashBackupCode, verifyTotp } from './totp';
 
 // Auth rate limits. Keyed by the TARGET username, not an IP — FlatFold
 // deliberately does not log IPs (invariant #5), so per-actor throttling isn't
@@ -159,6 +174,21 @@ async function handleLogin(request: Request, env: Env): Promise<Response> {
 		return json({ error: 'Invalid username or password.' }, { status: 401 });
 	}
 
+	// Second factor (D7 §4): password alone isn't enough once 2FA is on. Ask for a
+	// code, then verify it (TOTP or a single-use backup code) before issuing a token.
+	if (user.totp_secret) {
+		const code = (body as { code?: unknown } | null)?.code;
+		if (typeof code !== 'string' || code.length === 0) {
+			return json({ twoFactorRequired: true }, { status: 401 });
+		}
+		if (!(await checkRateLimit(env.DB, `2fa:${username}`, window, LOGIN_LIMIT))) {
+			return json({ error: 'Too many attempts. Please try again later.' }, { status: 429 });
+		}
+		if (!(await verifyTwoFactor(env, user, code))) {
+			return json({ error: 'Invalid code.', twoFactorRequired: true }, { status: 401 });
+		}
+	}
+
 	const token = await signSessionToken(username, env.SESSION_SECRET, user.token_epoch);
 	return authResponse({ username }, token, isNativeClient(request));
 }
@@ -174,7 +204,11 @@ async function handleMe(request: Request, env: Env): Promise<Response> {
 	const user = await getUser(env.DB, payload.sub);
 	if (!user || user.token_epoch !== payload.epoch) return json({ error: 'Not authenticated.' }, { status: 401 });
 	const refreshed = await signSessionToken(payload.sub, env.SESSION_SECRET, user.token_epoch, payload.iat);
-	return authResponse({ username: payload.sub, sessionCreatedAt: payload.iat }, refreshed, readBearerToken(request) !== null);
+	return authResponse(
+		{ username: payload.sub, sessionCreatedAt: payload.iat, twoFactorEnabled: user.totp_secret !== null },
+		refreshed,
+		readBearerToken(request) !== null
+	);
 }
 
 function handleLogout(): Response {
@@ -197,6 +231,206 @@ async function handleLogoutAll(request: Request, env: Env, username: string): Pr
 	await bumpTokenEpoch(env.DB, username);
 	// Clear this device too — the bump already invalidated its (old-epoch) token.
 	return json({ ok: true }, { headers: { 'Set-Cookie': buildClearSessionCookie() } });
+}
+
+// Change password (D7 §1): re-auth with the CURRENT password, store the new
+// verifier + bump the epoch atomically (kills every other session), and hand back
+// a fresh token at the NEW epoch so THIS session survives the change. The client
+// has already staged the local keystore re-wrap durably; it finalizes that on our
+// 2xx (rolls it back on our 4xx). Rate-limited so a hijacked session can't
+// brute-force the current password to lock the real owner out.
+async function handleChangePassword(request: Request, env: Env, username: string): Promise<Response> {
+	const body = (await request.json().catch(() => null)) as { current?: unknown; new?: unknown } | null;
+	const current = body?.current;
+	const next = body?.new;
+	if (typeof current !== 'string' || current.length === 0) {
+		return json({ error: 'Current password required.' }, { status: 400 });
+	}
+	if (!isValidPassword(next)) {
+		return json({ error: 'New password must be at least 8 characters.' }, { status: 400 });
+	}
+
+	const window = rateLimitWindow(LOGIN_WINDOW_SECONDS);
+	if (!(await checkRateLimit(env.DB, `changepw:${username}`, window, LOGIN_LIMIT))) {
+		return json({ error: 'Too many attempts. Please try again later.' }, { status: 429 });
+	}
+
+	const user = await getUser(env.DB, username);
+	if (!user || !(await verifyPassword(current, user.password_verifier))) {
+		return json({ error: 'Incorrect password.' }, { status: 401 });
+	}
+
+	const newVerifier = await hashPassword(next);
+	await updatePassword(env.DB, username, newVerifier); // verifier + epoch bump, atomic
+	// Sign at the POST-bump epoch (user.token_epoch + 1) — signing at the old epoch
+	// would hand back a token that's already stale against the row we just bumped.
+	const token = await signSessionToken(username, env.SESSION_SECRET, user.token_epoch + 1);
+	return authResponse({ ok: true }, token, isNativeClient(request));
+}
+
+// ---- TOTP two-factor (D7 §4) ----
+
+// Verify a login's second factor: a TOTP code (advancing the replay counter) OR a
+// single-use backup code (consumed). Returns whether it passed. A decrypt failure
+// on the stored secret (e.g. SESSION_SECRET was rotated) falls through to backup
+// codes rather than throwing.
+async function verifyTwoFactor(env: Env, user: UserRow, code: string): Promise<boolean> {
+	if (user.totp_secret) {
+		try {
+			const secret = await decryptTotpSecret(env.SESSION_SECRET, user.totp_secret);
+			const step = await verifyTotp(secret, code, Date.now(), user.totp_last_step ?? Number.NEGATIVE_INFINITY);
+			if (step !== null) {
+				await setTotpLastStep(env.DB, user.username, step);
+				return true;
+			}
+		} catch {
+			// fall through to backup codes
+		}
+	}
+	const hashes: string[] = user.backup_code_hashes ? (JSON.parse(user.backup_code_hashes) as string[]) : [];
+	const h = await hashBackupCode(user.username, code);
+	if (hashes.includes(h)) {
+		await setBackupCodeHashes(env.DB, user.username, hashes.filter((x) => x !== h)); // single-use
+		return true;
+	}
+	return false;
+}
+
+// Enable (or replace) TOTP. Password-reauthed — a hijacked session alone must not
+// be able to plant a second factor the real owner doesn't hold (a lockout/DoS).
+// The client proves the secret was scanned by including a current code, which we
+// verify before storing the (encrypted) secret + hashed backup codes.
+async function handleTwoFactorEnable(request: Request, env: Env, username: string): Promise<Response> {
+	const body = (await request.json().catch(() => null)) as {
+		password?: unknown;
+		secret?: unknown;
+		code?: unknown;
+		backupCodes?: unknown;
+	} | null;
+	const { password, secret, code, backupCodes } = body ?? {};
+	if (typeof password !== 'string' || typeof secret !== 'string' || typeof code !== 'string') {
+		return json({ error: 'Malformed request.' }, { status: 400 });
+	}
+	if (!Array.isArray(backupCodes) || backupCodes.length === 0 || !backupCodes.every((c) => typeof c === 'string')) {
+		return json({ error: 'Missing backup codes.' }, { status: 400 });
+	}
+	const user = await getUser(env.DB, username);
+	if (!user || !(await verifyPassword(password, user.password_verifier))) {
+		return json({ error: 'Incorrect password.' }, { status: 401 });
+	}
+	// Confirm the user actually enrolled the secret in their authenticator.
+	if ((await verifyTotp(secret, code, Date.now())) === null) {
+		return json({ error: 'That code didn’t match. Try the current one.' }, { status: 401 });
+	}
+	const encSecret = await encryptTotpSecret(env.SESSION_SECRET, secret);
+	const backupHashes = await Promise.all((backupCodes as string[]).map((c) => hashBackupCode(username, c)));
+	await setTotp(env.DB, username, { encSecret, backupHashes });
+	return json({ ok: true });
+}
+
+// Disable TOTP. Requires the password AND a valid second factor (TOTP or a backup
+// code) — so neither a hijacked session nor a known password alone can strip 2FA.
+async function handleTwoFactorDisable(request: Request, env: Env, username: string): Promise<Response> {
+	const body = (await request.json().catch(() => null)) as { password?: unknown; code?: unknown } | null;
+	const { password, code } = body ?? {};
+	if (typeof password !== 'string' || typeof code !== 'string') {
+		return json({ error: 'Password and a current code are required.' }, { status: 400 });
+	}
+	const user = await getUser(env.DB, username);
+	if (!user || !(await verifyPassword(password, user.password_verifier))) {
+		return json({ error: 'Incorrect password.' }, { status: 401 });
+	}
+	if (!user.totp_secret) return json({ ok: true }); // already off
+	const window = rateLimitWindow(LOGIN_WINDOW_SECONDS);
+	if (!(await checkRateLimit(env.DB, `2fa:${username}`, window, LOGIN_LIMIT))) {
+		return json({ error: 'Too many attempts. Please try again later.' }, { status: 429 });
+	}
+	if (!(await verifyTwoFactor(env, user, code))) {
+		return json({ error: 'That code isn’t right.' }, { status: 401 });
+	}
+	await clearTotp(env.DB, username);
+	return json({ ok: true });
+}
+
+// ---- account recovery (D7 §3) ----
+
+// Enroll (or replace) a recovery code. Password-reauthed (like logout-all /
+// delete): a hijacked SESSION alone must not be able to plant a recovery backdoor
+// or clobber the real owner's recovery. The uploaded blob is opaque ciphertext;
+// `auth` is the recovery authenticator (hashed here, never stored in the clear).
+async function handleRecoveryEnroll(request: Request, env: Env, username: string): Promise<Response> {
+	const body = (await request.json().catch(() => null)) as {
+		password?: unknown;
+		saltRec?: unknown;
+		saltAuth?: unknown;
+		blob?: unknown;
+		auth?: unknown;
+	} | null;
+	const { password, saltRec, saltAuth, blob, auth } = body ?? {};
+	if (typeof password !== 'string' || password.length === 0) {
+		return json({ error: 'Password required.' }, { status: 400 });
+	}
+	if ([saltRec, saltAuth, blob, auth].some((v) => typeof v !== 'string' || (v as string).length === 0)) {
+		return json({ error: 'Malformed recovery enrollment.' }, { status: 400 });
+	}
+	const user = await getUser(env.DB, username);
+	if (!user || !(await verifyPassword(password, user.password_verifier))) {
+		return json({ error: 'Incorrect password.' }, { status: 401 });
+	}
+	await setRecovery(env.DB, username, {
+		verifier: await hashPassword(auth as string),
+		blob: blob as string,
+		saltRec: saltRec as string,
+		saltAuth: saltAuth as string,
+	});
+	return json({ ok: true });
+}
+
+// The PUBLIC recovery salts for a username (needed to re-derive the recovery keys
+// on a new device). 404 when the user hasn't enrolled recovery. Salts aren't
+// secret; username existence is already discoverable via signup.
+async function handleRecoveryParams(request: Request, env: Env): Promise<Response> {
+	const username = new URL(request.url).searchParams.get('username');
+	if (!isValidUsername(username)) return json({ error: 'Invalid username.' }, { status: 400 });
+	const params = await getRecoveryParams(env.DB, username);
+	if (!params) return json({ error: 'No recovery code is set for this account.' }, { status: 404 });
+	return json(params);
+}
+
+// Recover: authenticate with the recovery authenticator (derived from the code),
+// set a NEW password, and return the opaque recovery blob so the client can
+// rebuild its identity locally. One atomic step — the blob is released ONLY on a
+// successful auth + reset. Rate-limited per username (offline-guess throttle);
+// bumps the epoch (any lingering sessions die). New login is issued.
+async function handleRecoveryReset(request: Request, env: Env): Promise<Response> {
+	const body = (await request.json().catch(() => null)) as {
+		username?: unknown;
+		recAuth?: unknown;
+		newPassword?: unknown;
+	} | null;
+	const { username, recAuth, newPassword } = body ?? {};
+	if (!isValidUsername(username) || typeof recAuth !== 'string' || recAuth.length === 0) {
+		return json({ error: 'Invalid recovery request.' }, { status: 400 });
+	}
+	if (!isValidPassword(newPassword)) {
+		return json({ error: 'New password must be at least 8 characters.' }, { status: 400 });
+	}
+
+	const window = rateLimitWindow(LOGIN_WINDOW_SECONDS);
+	if (!(await checkRateLimit(env.DB, `recovery:${username}`, window, LOGIN_LIMIT))) {
+		return json({ error: 'Too many attempts. Please try again later.' }, { status: 429 });
+	}
+
+	const user = await getUser(env.DB, username);
+	// Generic failure whether the account is missing, has no recovery, or the
+	// authenticator is wrong — no oracle for which.
+	if (!user || !user.recovery_verifier || !user.recovery_blob || !(await verifyPassword(recAuth, user.recovery_verifier))) {
+		return json({ error: 'That recovery code isn’t right.' }, { status: 401 });
+	}
+
+	await updatePassword(env.DB, username, await hashPassword(newPassword)); // verifier + epoch bump, atomic
+	const token = await signSessionToken(username, env.SESSION_SECRET, user.token_epoch + 1);
+	return authResponse({ blob: user.recovery_blob }, token, isNativeClient(request));
 }
 
 async function handleWebSocketUpgrade(request: Request, env: Env): Promise<Response> {
@@ -248,6 +482,34 @@ async function route(request: Request, env: Env): Promise<Response> {
 			const username = await readAuthenticatedUsername(request, env);
 			if (!username) return json({ error: 'Not authenticated.' }, { status: 401 });
 			return handleLogoutAll(request, env, username);
+		}
+		if (pathname === '/api/auth/change-password' && method === 'POST') {
+			const username = await readAuthenticatedUsername(request, env);
+			if (!username) return json({ error: 'Not authenticated.' }, { status: 401 });
+			return handleChangePassword(request, env, username);
+		}
+		if (pathname === '/api/auth/recovery/enroll' && method === 'POST') {
+			const username = await readAuthenticatedUsername(request, env);
+			if (!username) return json({ error: 'Not authenticated.' }, { status: 401 });
+			return handleRecoveryEnroll(request, env, username);
+		}
+		// Recovery params + reset are DELIBERATELY unauthenticated — a forgotten
+		// password means no session. Auth is the recovery authenticator itself.
+		if (pathname === '/api/auth/recovery/params' && method === 'GET') {
+			return handleRecoveryParams(request, env);
+		}
+		if (pathname === '/api/auth/recovery/reset' && method === 'POST') {
+			return handleRecoveryReset(request, env);
+		}
+		if (pathname === '/api/auth/2fa/enable' && method === 'POST') {
+			const username = await readAuthenticatedUsername(request, env);
+			if (!username) return json({ error: 'Not authenticated.' }, { status: 401 });
+			return handleTwoFactorEnable(request, env, username);
+		}
+		if (pathname === '/api/auth/2fa/disable' && method === 'POST') {
+			const username = await readAuthenticatedUsername(request, env);
+			if (!username) return json({ error: 'Not authenticated.' }, { status: 401 });
+			return handleTwoFactorDisable(request, env, username);
 		}
 
 		// Sealed-sender OHTTP gateway (reached via a third-party relay that blinds

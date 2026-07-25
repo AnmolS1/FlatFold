@@ -6,7 +6,9 @@ interface DisappearingTimerMenuProps {
 	onChange: (seconds: number) => void;
 }
 
-// off / 1h / 1d / 1w, per the spec. Off is 0.
+// off / 1h / 1d / 1w, per the spec. Off is 0. The timer icon is the label, so
+// the collapsed control reads compactly as just the value (e.g. "Off", "1 hour")
+// instead of "Disappearing: off" crowding the chat header.
 const OPTIONS: { label: string; seconds: number }[] = [
 	{ label: 'Off', seconds: 0 },
 	{ label: '1 hour', seconds: 60 * 60 },
@@ -31,7 +33,7 @@ const DisappearingTimerMenuComponent = ({ seconds, onChange }: DisappearingTimer
 			>
 				{OPTIONS.map((o) => (
 					<option key={o.seconds} value={o.seconds} className="text-graphite bg-inset">
-						{o.seconds === 0 ? 'Disappearing: off' : `Disappears: ${o.label}`}
+						{o.label}
 					</option>
 				))}
 			</select>

@@ -264,6 +264,139 @@ right tool. The `/transparency` page says this to users directly.
     is E2E-encrypted regardless of transport, so this affects only the bearer
     token, login password, and metadata against an active mis-issued-CA
     adversary — a threat outside §3's current adversary set.
+19. **Opt-in account recovery stores an opaque, code-encrypted blob server-side
+    (D7 §3).** When — and only when — a user turns on a recovery code, four
+    nullable `users` columns are populated (`recovery_verifier`, `recovery_blob`,
+    `recovery_salt_rec`, `recovery_salt_auth`; migration 0008, enumerated on
+    `/transparency`). This is a deliberate, disclosed weakening of "no key backup"
+    (invariant #3), scoped so it does **not** break "the server holds no
+    decryption key":
+    - `recovery_blob` is the user's **identity keys + contacts**, AEAD-encrypted
+      client-side under `K_rec = Argon2id(recoveryCode, salt_rec)`. The server
+      never sees the code or `K_rec`, so the blob is ciphertext it cannot decrypt.
+      It carries a *snapshot* taken at enrollment (the code is never retained, so
+      the blob can't be re-keyed later) and **never any message history** — that
+      only ever lived in the device's IndexedDB and is unrecoverable on a fresh
+      install, by design.
+    - `recovery_verifier` is `hashPassword(recAuth)` where
+      `recAuth = Argon2id(recoveryCode, salt_auth)` — a **separate** salt, so the
+      value the server checks to authenticate a recovery request is provably not
+      the key that unwraps the blob. The reset endpoint is rate-limited per
+      username and bumps `token_epoch`; enrollment is password-reauthed so a
+      hijacked session alone can't plant a recovery backdoor.
+    - **Residual:** the blob's confidentiality rests entirely on the entropy of
+      the recovery code against an offline attack on a seized blob (128-bit BIP39,
+      stretched by Argon2id). A user who records a weak/guessable code, or whose
+      written-down code is captured, loses that margin. This is the same
+      password-strength dependence as the at-rest keystore key, now also exposed
+      to a server-side-blob-theft attacker for opted-in users — the disclosed cost
+      of making forgotten-password recovery possible at all.
+20. **Opt-in TOTP two-factor adds three server-stored fields, all scoped (D7 §4).**
+    When a user enables 2FA, migration 0009 populates `totp_secret`,
+    `backup_code_hashes`, `totp_last_step` (enumerated on `/transparency`).
+    - `totp_secret` is the RFC 6238 shared secret **AES-GCM encrypted at rest**
+      under a key HKDF-derived from `SESSION_SECRET` (worker/totp.ts), so a D1 read
+      alone can't recover it and downgrade the user to single-factor.
+      **Rotation caveat (also in migrations/0009):** because that key comes from
+      `SESSION_SECRET`, rotating the secret makes every stored `totp_secret`
+      undecryptable — 2FA users then rely on their backup codes (hashed
+      independently, so unaffected) or re-enroll. Anyone rotating `SESSION_SECRET`
+      must know this.
+    - `backup_code_hashes` are salted SHA-256 (`SHA-256(username‖code)`), never the
+      codes; each is erased on use (single-use). A fast hash is sound only because
+      each code is ≥64-bit CSPRNG — an invariant pinned by `test-ui/totp.test.ts`.
+    - `totp_last_step` is a replay high-water mark (RFC 6238 §5.2). **Accepted
+      papercut:** a second concurrent login within the same 30-second step is
+      rejected (tested); backup codes bypass this counter.
+    - **Deliberate v1 scope:** the forgot-password recovery path (#19) is NOT
+      additionally gated by 2FA. The recovery code is itself a high-entropy
+      ownership proof, and 2FA-gating recovery would risk locking out a user who
+      still holds their recovery code but has lost their authenticator. Layering
+      2FA onto recovery as defense-in-depth is a possible future hardening, not a
+      closed hole today.
+21. **Opt-in biometric unlock stores MK in a Secure-Enclave-gated Keychain item
+    (D7 §5, native).** Enabling Face ID / Touch ID unlock writes the keystore
+    master key to the iOS Keychain via a custom native plugin
+    (`ios/App/App/FlatFoldBiometricPlugin.swift`) under an access-control object
+    created with `.biometryCurrentSet` and `kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly`,
+    read only through an `LAContext` authenticated with
+    `.deviceOwnerAuthenticationWithBiometrics`. Consequences, by design:
+    - The OS — not app JS — enforces the gate. MK is released ONLY on a live
+      biometric match; **not** by device-unlock alone, and **not** by the device
+      passcode (no passcode fallback on the item). This is why FlatFold ships a
+      custom plugin instead of an off-the-shelf verify-then-retrieve one, which
+      would leave MK retrievable from the Keychain without a live match — a
+      password-independent at-rest path that would contradict Invariant 3.
+    - `.biometryCurrentSet` invalidates the item if the enrolled biometrics change
+      (a face/finger added or removed), so a coerced enrollment change destroys
+      the stored key rather than exposing it. The user re-enables from Settings.
+    - The password and recovery code remain the ultimate secrets; biometric is an
+      on-device convenience wrapper that **never leaves the device** and is
+      deleted on disable, on `.biometryCurrentSet` invalidation, or when the
+      stored MK no longer opens the record. **Residual:** it inherits the device's
+      biometric strength (e.g. Face ID's ~1e-6 false-accept, a compelled unlock),
+      which is why it's opt-in and password-backed.
+22. **Native push notifications are content-free.** The APNs payload carries no
+    message text and no sender — its only visible content is a **fixed, generic
+    title** (`"New activity"`, worker/push.ts `DECOY_PUSH_TITLE`), which says
+    nothing about FlatFold, the sender, or the message. It's an *alert* push (not
+    a silent content-available one) because a silent push doesn't reliably surface
+    a banner on iOS — Capacitor's handler doesn't fire for it in the background —
+    and the payload has no per-message body. The push fires only when the
+    recipient is offline; the client closes its WebSocket on backgrounding so the
+    server detects that promptly (src/pages/Chat.tsx) rather than firing into a
+    stale socket. **Residual / follow-up:** the title is a *fixed* generic, not
+    the user's per-account custom decoy label (which lives client-side, as it does
+    for Web Push). Surfacing the custom decoy on native reliably needs either
+    server-side storage of the label or a Notification Service Extension reading
+    it from an app-group store — a deliberate follow-up, not done here.
+    **Web equivalent (`src/lib/webNotify.ts`):** the web app shows the same
+    content-free surface when a message arrives while its tab is not focused — a
+    tab dot (title marker + favicon badge) and, only if the user already granted
+    notification permission, a browser notification whose title is the decoy label
+    and which carries no body, sender, or text. It is generated locally from the
+    already-received message (no third party, unlike Web Push), and never fires
+    while the tab is focused or on native. Same content-free posture as the push;
+    a tab dot and an anonymous "New activity" reveal only that *something*
+    arrived, never who or what.
+23. **App-switcher snapshot is obscured** (native): iOS snapshots the UI on
+    deactivation for the multitasking switcher; the app covers it with a branded
+    overlay before the snapshot (AppDelegate `applicationWillResignActive` /
+    `applicationDidEnterBackground`), so an open conversation can't leak there.
+24. **TLS public-key pinning** (native): all traffic to `flatfold.ponderance.dev`
+    — the HTTPS API *and* the `wss://` WebSocket — is pinned via `NSPinnedDomains`
+    in `ios/App/App/Info.plist` (`NSPinnedCAIdentities`, `SPKI-SHA256-BASE64`).
+    This is the mechanism that reaches WKWebView traffic: the app's API `fetch()`
+    and `new WebSocket()` are issued by WebKit's networking process, so a
+    JS- or URLSession-delegate pin would NOT cover them; ATS `NSPinnedDomains`
+    does. **Evidence (both controls, on-simulator against the live prod cert):** a
+    deliberately-wrong pin blocks the real `GET /api/me` at trust evaluation
+    (`Trust evaluate failure [ca1 CAspkiSHA256][root CAspkiSHA256]` →
+    CFNetwork `-9802` → `NSURLErrorDomain -1200`) inside `com.apple.WebKit.Networking`;
+    the shipped pin set yields `TLS Trust result 0` and a normal HTTP response.
+    **What is pinned:** the two CA *roots* Cloudflare's Universal SSL rotates
+    between — **Google Trust Services GTS Root R4**
+    (`mEflZT5enoR1FuXLgYYGqnVEoZvmf9c2bVBpiOjYQ0c=`) and **Let's Encrypt ISRG Root
+    X1** (`C5+lpZ7tcVwmwQIMcRtPbsQtWLABXhQzejna0wHFr8M=`). Roots, not the leaf or
+    intermediate, because we do not own the Cloudflare-issued leaf keypair (it
+    rotates ~90-daily) and Google rolls its intermediates; a leaf/intermediate pin
+    would brick installed apps on rotation. Two CAs so a Cloudflare issuer switch
+    doesn't brick either. **Residual (honest):** this pins to a *CA set*, not to
+    our specific key — a mis-issuance by GTS or Let's Encrypt *themselves* for the
+    domain would still validate. It defeats the realistic threat (a rogue/other-CA
+    or corporate-proxy MITM of the auth-token + metadata channel; payloads are
+    already E2E-encrypted), not a compromise of the pinned CAs. **Operational
+    risk:** if Cloudflare moves the domain to a CA outside this set, the app loses
+    connectivity until an app-store update ships the new root — the pin is
+    declarative in the signed binary. Rotation runbook + re-derivation commands:
+    `docs/TLS_PINNING.md`. **Scope note:** only the app-server host is pinned. The
+    sealed-sender relay hosts (`VITE_SEAL_RELAY_URL` / `_FALLBACK_URL` —
+    oblivious.network, Fastly; see `src/lib/sealedFetch.ts`) are **intentionally
+    unpinned**: they are independent, deliberately-untrusted blind relays that see
+    only HPKE ciphertext (never plaintext or our session), their certs are outside
+    our control and rotate independently, and pinning a third-party relay we chose
+    *because* it is not us would defeat the point. Their integrity rests on the
+    HPKE sealing (§ sealed sender), not on TLS pinning.
 
 ---
 
@@ -301,12 +434,16 @@ Format per invariant: **quote → enforcing code → test/evidence → residual*
 - **Enforcing code:** `src/keystore/` — identity keys and ratchet state live
   in IndexedDB, encrypted at rest with an Argon2id-derived key
   (`src/keystore/crypto.ts` `deriveKeystoreKey`, separately salted from the
-  auth hash). Only *public* keys are published (`worker/keys.ts`). No escrow,
-  no cloud key backup.
+  auth hash). Only *public* keys are published (`worker/keys.ts`). No escrow;
+  no key backup **except** the opt-in, code-encrypted recovery blob (#19 in §4)
+  — ciphertext the server can't read, present only if the user enables recovery.
 - **Evidence:** the publish path sends only public key material; Playwright
   verifies the keystore-unlock gate is a separate step from server login.
 - **Residual:** the in-memory keystore key is reachable by an active in-origin
   XSS via the keystore's own API (#2 in §4) — no longer in `sessionStorage` (M7).
+  Opt-in recovery backs up the identity keys as an opaque code-encrypted blob
+  (#19 in §4) — a disclosed, scoped exception to "no key backup," never readable
+  by the server.
 
 ### Invariant 4 — "Forward secrecy and post-compromise security."
 

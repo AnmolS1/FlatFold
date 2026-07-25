@@ -1,9 +1,21 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Download, FileText } from 'lucide-react';
 import type { MediaRef } from '../../types';
 import * as keystore from '../../keystore';
 import { ackMediaFetched, downloadAndDecryptMedia } from '../../lib/media';
 import { VoiceNote } from './VoiceNote';
+import { isNativePlatform } from '../../lib/platform';
+
+// Chunked base64 (spreading a large Uint8Array into fromCharCode overflows the
+// call stack). Used to hand file bytes to @capacitor/filesystem.
+function bytesToBase64(bytes: Uint8Array): string {
+	let binary = '';
+	const chunk = 0x8000;
+	for (let i = 0; i < bytes.length; i += chunk) {
+		binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+	}
+	return btoa(binary);
+}
 
 interface MediaAttachmentProps {
 	username: string;
@@ -34,6 +46,10 @@ const MediaAttachmentComponent = ({ username, media, isOwnMessage }: MediaAttach
 	const [objectUrl, setObjectUrl] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const urlRef = useRef<string | null>(null);
+	// Retain the decrypted bytes for the native save/share path (WKWebView ignores
+	// <a download>). Only for files, and only native, to avoid doubling memory.
+	const bytesRef = useRef<Uint8Array | null>(null);
+	const [sharing, setSharing] = useState(false);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -57,6 +73,7 @@ const MediaAttachmentComponent = ({ username, media, isOwnMessage }: MediaAttach
 			new Uint8Array(buffer).set(bytes);
 			const url = URL.createObjectURL(new Blob([buffer], { type: safeType }));
 			urlRef.current = url;
+			if (isNativePlatform() && media.mediaKind === 'file') bytesRef.current = bytes;
 			setObjectUrl(url);
 		};
 
@@ -81,12 +98,33 @@ const MediaAttachmentComponent = ({ username, media, isOwnMessage }: MediaAttach
 
 		return () => {
 			cancelled = true;
+			bytesRef.current = null;
 			if (urlRef.current) {
 				URL.revokeObjectURL(urlRef.current);
 				urlRef.current = null;
 			}
 		};
 	}, [username, media]);
+
+	// Native: WKWebView ignores <a download>, so write the file to the cache dir
+	// and open the iOS share sheet (Save to Files / AirDrop / etc.).
+	const saveNativeFile = useCallback(async () => {
+		const bytes = bytesRef.current;
+		if (!bytes || sharing) return;
+		setSharing(true);
+		try {
+			const { Filesystem, Directory } = await import('@capacitor/filesystem');
+			const { Share } = await import('@capacitor/share');
+			const name = media.name ?? 'attachment';
+			const written = await Filesystem.writeFile({ path: name, data: bytesToBase64(bytes), directory: Directory.Cache });
+			await Share.share({ title: name, url: written.uri });
+		} catch (err) {
+			// User dismissing the share sheet rejects; ignore that, surface real errors.
+			if (err instanceof Error && !/cancel/i.test(err.message)) setError('Could not save the file.');
+		} finally {
+			setSharing(false);
+		}
+	}, [media.name, sharing]);
 
 	if (error) {
 		return <p className="text-xs italic opacity-70">{error}</p>;
@@ -107,7 +145,22 @@ const MediaAttachmentComponent = ({ username, media, isOwnMessage }: MediaAttach
 		return <VoiceNote url={objectUrl} durationMs={media.durationMs} own={isOwnMessage} />;
 	}
 
-	// Generic file.
+	// Generic file. Native: a button that opens the iOS share sheet (the
+	// download attribute is a no-op in WKWebView). Web: a normal download link.
+	if (isNativePlatform()) {
+		return (
+			<button
+				type="button"
+				onClick={() => void saveNativeFile()}
+				disabled={sharing}
+				className="flex items-center gap-2 underline decoration-dotted disabled:opacity-60"
+			>
+				<FileText className="w-4 h-4 flex-shrink-0" />
+				<span className="text-sm truncate">{media.name ?? 'Save attachment'}</span>
+				<Download className="w-3.5 h-3.5 flex-shrink-0 opacity-70" />
+			</button>
+		);
+	}
 	return (
 		<a
 			href={objectUrl}

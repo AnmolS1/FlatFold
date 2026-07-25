@@ -7,15 +7,18 @@
 // Unlock is a separate step from server login. AuthContext's session
 // bootstrap (GET /api/auth/me) restores *who's logged in* from an httpOnly
 // cookie on every fresh load — but the password itself is never retained
-// in JS memory past the login/signup call, so there's nothing to
-// re-derive the keystore key from on a plain reload. The derived key is
-// cached in `sessionStorage` (survives reload, dies on tab close, not
-// shared across tabs) so a reload doesn't force a re-prompt; a fresh tab
-// still does. This is a deliberate usability/security tradeoff — the key
-// sits in sessionStorage in plaintext for the tab's lifetime, readable by
-// any script-injection on the page, same risk class as most client-side
-// SPA secrets. Revisit in the M7 hardening pass if that tradeoff needs
-// tightening (e.g. a Web Worker holding the key out of the main JS realm).
+// in JS memory past the login/signup call, so there's nothing to unlock the
+// keystore from on a plain reload — the user re-enters their password.
+//
+// Encryption model (D7): a random 32-byte MASTER KEY (MK) encrypts every store.
+// MK is itself AEAD-wrapped in the identity record under a password-derived key
+// (see ./identityRecord + ./crypto). Unlock derives that wrapping key, unwraps
+// MK, and caches MK in-memory (a module-scoped Map — NOT sessionStorage; see the
+// unlock-key cache below). So a credential change (change-password / recovery)
+// is a cheap re-wrap of MK rather than re-encrypting every store. Legacy records
+// that predate MK (the password-derived key encrypted blobs directly) migrate on
+// their next unlock by adopting that key as MK — an atomic single-record rewrite,
+// no store re-encryption.
 //
 // New-device / cleared-storage handling: if `unlock()` finds no local
 // identity for a username that just authenticated successfully, the
@@ -37,7 +40,19 @@ import {
 	type SignedPreKey,
 } from '../crypto';
 import { base64ToBytes, bytesToBase64 } from './codec';
-import { decryptBlob, deriveKeystoreKey, encryptBlob, generateKeystoreSalt, type EncryptedBlob } from './crypto';
+import { decryptBlob, encryptBlob, generateMasterKey, type EncryptedBlob } from './crypto';
+import {
+	sealIdentityRecord,
+	openIdentityRecord,
+	stageRewrap,
+	promoteRewrap,
+	abortRewrap,
+	WrongPasswordError,
+	type IdentityRecordV2,
+	type StoredIdentityRecord,
+} from './identityRecord';
+import { buildRecoveryEnrollment, generateRecoveryCode, openRecoveryBlob, type RecoveryEnrollment } from './recovery';
+import { biometricDeleteSecret, biometricGetSecret, biometricHasSecret, biometricSetSecret } from '../lib/biometric';
 import type { DisplayMessage } from '../types';
 import {
 	deleteKeystoreDatabase,
@@ -137,11 +152,6 @@ interface StoredSession {
 type StoredSessionRecord = StoredSessionRecordOf<StoredSession>;
 type StoredSessionBlob = StoredSessionBlobOf<StoredSession>;
 
-interface IdentityRecord {
-	salt: string;
-	blob: EncryptedBlob;
-}
-
 function serializeRatchetState(state: RatchetState): StoredRatchetState {
 	const b64 = (v: Uint8Array | null) => (v ? bytesToBase64(v) : null);
 	return {
@@ -233,7 +243,7 @@ function requireCachedKey(username: string): Uint8Array {
 // ---- identity lifecycle ----
 
 export async function hasLocalIdentity(username: string): Promise<boolean> {
-	return (await getRecord<IdentityRecord>(IDENTITY_STORE, username)) !== undefined;
+	return (await getRecord<StoredIdentityRecord>(IDENTITY_STORE, username)) !== undefined;
 }
 
 export interface NewIdentityMaterial {
@@ -269,10 +279,12 @@ export async function createIdentity(username: string, password: string): Promis
 		contacts: {},
 	};
 
-	const salt = generateKeystoreSalt();
-	const key = await deriveKeystoreKey(password, salt);
-	await putRecord<IdentityRecord>(IDENTITY_STORE, username, { salt, blob: encryptBlob(key, doc) });
-	cacheKey(username, key);
+	// A fresh random master key encrypts every store; it's wrapped under the
+	// password in the record. The cached key IS the master key from here on.
+	const masterKey = generateMasterKey();
+	const record = await sealIdentityRecord(doc, password, masterKey);
+	await putRecord<StoredIdentityRecord>(IDENTITY_STORE, username, record);
+	cacheKey(username, masterKey);
 
 	return { identity, signedPreKey, oneTimePreKeys };
 }
@@ -283,18 +295,24 @@ export type UnlockResult =
 	| { status: 'unlocked'; identity: IdentityKeyPair };
 
 export async function unlock(username: string, password: string): Promise<UnlockResult> {
-	const record = await getRecord<IdentityRecord>(IDENTITY_STORE, username);
+	const record = await getRecord<StoredIdentityRecord>(IDENTITY_STORE, username);
 	if (!record) return { status: 'no-local-identity' };
 
-	const key = await deriveKeystoreKey(password, record.salt);
 	let doc: StoredIdentityDoc;
+	let masterKey: Uint8Array;
 	try {
-		doc = decryptBlob<StoredIdentityDoc>(key, record.blob);
-	} catch {
-		return { status: 'wrong-password' };
+		const opened = await openIdentityRecord<StoredIdentityDoc>(record, password);
+		doc = opened.doc;
+		masterKey = opened.masterKey;
+		// A legacy v1 record migrated to v2 on open (same key, same blob, added
+		// wrap) — persist it so the next unlock is a plain v2 open.
+		if (opened.migrated) await putRecord<StoredIdentityRecord>(IDENTITY_STORE, username, opened.migrated);
+	} catch (err) {
+		if (err instanceof WrongPasswordError) return { status: 'wrong-password' };
+		throw err;
 	}
 
-	cacheKey(username, key);
+	cacheKey(username, masterKey);
 	return {
 		status: 'unlocked',
 		identity: {
@@ -310,17 +328,197 @@ export async function unlock(username: string, password: string): Promise<Unlock
 	};
 }
 
+// ---- change password (D7 §1) — a durable two-wrap dance ----
+// MK never changes, so no store is re-encrypted and the cached key stays valid.
+// Only the wrap over MK is rewritten. The three steps map onto the server round
+// trip: stage BEFORE the call (durable, opens with either password), then either
+// finalize (server accepted → keep the new password) or rollback (server rejected
+// → keep the old). A crash between stage and settle is safe: the record still
+// opens with whichever password the server ended up on, and the next unlock
+// collapses it (see openIdentityRecord).
+
+export async function stageChangePassword(
+	username: string,
+	currentPassword: string,
+	newPassword: string
+): Promise<'ok' | 'wrong-password'> {
+	const record = await getRecord<StoredIdentityRecord>(IDENTITY_STORE, username);
+	if (!record) throw new Error(`No local identity for ${username}.`);
+	let staged: IdentityRecordV2;
+	try {
+		staged = await stageRewrap(record, currentPassword, newPassword);
+	} catch (err) {
+		if (err instanceof WrongPasswordError) return 'wrong-password';
+		throw err;
+	}
+	await putRecord<StoredIdentityRecord>(IDENTITY_STORE, username, staged);
+	return 'ok';
+}
+
+// Server accepted the change: promote the new password's wrap to be the only one.
+export async function finalizeChangePassword(username: string): Promise<void> {
+	const record = await getRecord<StoredIdentityRecord>(IDENTITY_STORE, username);
+	if (!record || !(record as IdentityRecordV2).altWrap) return;
+	await putRecord<StoredIdentityRecord>(IDENTITY_STORE, username, promoteRewrap(record as IdentityRecordV2));
+}
+
+// Server rejected the change: drop the staged wrap, keeping the old password.
+export async function rollbackChangePassword(username: string): Promise<void> {
+	const record = await getRecord<StoredIdentityRecord>(IDENTITY_STORE, username);
+	if (!record || !(record as IdentityRecordV2).altWrap) return;
+	await putRecord<StoredIdentityRecord>(IDENTITY_STORE, username, abortRewrap(record as IdentityRecordV2));
+}
+
+// ---- biometric unlock (D7 §5, native) ----
+// Store the master key in a Secure-Enclave-gated Keychain item (the custom
+// FlatFoldBiometric plugin) so a future unlock can retrieve MK with Face ID
+// instead of the password. MK is stored DIRECTLY — the OS gate IS the protection,
+// so there's nothing to wrap, and because a password change never changes MK, the
+// gated secret keeps working across one. The password + recovery code remain the
+// ultimate secrets; this is on-device convenience and never leaves the device.
+
+function biometricKey(username: string): string {
+	return `mk:${username}`;
+}
+
+// Requires the keystore to be unlocked (MK cached). Stores the cached MK gated by
+// biometrics.
+export async function enrollBiometric(username: string): Promise<void> {
+	const mk = requireCachedKey(username);
+	await biometricSetSecret(biometricKey(username), bytesToBase64(mk));
+}
+
+export async function isBiometricEnrolled(username: string): Promise<boolean> {
+	return biometricHasSecret(biometricKey(username));
+}
+
+export async function disableBiometric(username: string): Promise<void> {
+	await biometricDeleteSecret(biometricKey(username));
+}
+
+export type BiometricUnlockResult =
+	| { status: 'unlocked'; identity: IdentityKeyPair }
+	| { status: 'cancelled' }
+	| { status: 'no-local-identity' };
+
+// Retrieve MK from the gated Keychain (triggers the OS Face ID sheet), cache it,
+// and return the identity. 'cancelled' if the user cancels/fails or no secret is
+// stored — the caller falls back to the password gate.
+export async function unlockWithBiometric(username: string): Promise<BiometricUnlockResult> {
+	const record = await getRecord<StoredIdentityRecord>(IDENTITY_STORE, username);
+	if (!record) return { status: 'no-local-identity' };
+	const mkB64 = await biometricGetSecret(biometricKey(username), 'Unlock FlatFold');
+	if (!mkB64) return { status: 'cancelled' };
+	const masterKey = base64ToBytes(mkB64);
+	let doc: StoredIdentityDoc;
+	try {
+		doc = decryptBlob<StoredIdentityDoc>(masterKey, record.blob);
+	} catch {
+		// The stored MK no longer opens the record — drop the stale secret and
+		// fall back to the password.
+		await biometricDeleteSecret(biometricKey(username));
+		return { status: 'cancelled' };
+	}
+	cacheKey(username, masterKey);
+	return {
+		status: 'unlocked',
+		identity: {
+			signing: {
+				publicKey: base64ToBytes(doc.identity.signingPublicKey),
+				secretKey: base64ToBytes(doc.identity.signingSecretKey),
+			},
+			dh: { publicKey: base64ToBytes(doc.identity.dhPublicKey), secretKey: base64ToBytes(doc.identity.dhSecretKey) },
+		},
+	};
+}
+
+// ---- recovery code (D7 §3) ----
+// Opt-in. Because we NEVER retain the recovery code after enrollment (shown once,
+// the user writes it down), the recovery blob is a SNAPSHOT taken at enroll time,
+// not a live mirror — we can't re-derive its key later. We back up the identity
+// KEYPAIR (so a restored account keeps the same keys → no safety-number change
+// for contacts) plus the CONTACTS as of enrollment. Message history is never in
+// the blob — it only ever lived in this device's IndexedDB. On restore the
+// ephemeral prekeys are regenerated fresh (signed by the restored identity).
+
+interface RecoveryPayload {
+	identity: StoredIdentityDoc['identity'];
+	contacts: Record<string, StoredContact>;
+}
+
+// Build the (opt-in) recovery enrollment for the CURRENTLY UNLOCKED user. Returns
+// the code to show ONCE plus the payload to upload (opaque blob + authenticator).
+export async function enrollRecovery(username: string): Promise<{ code: string; enrollment: RecoveryEnrollment }> {
+	const { doc } = await loadDoc(username);
+	const payload: RecoveryPayload = { identity: doc.identity, contacts: doc.contacts };
+	const secret = new TextEncoder().encode(JSON.stringify(payload));
+	const code = generateRecoveryCode();
+	const enrollment = await buildRecoveryEnrollment(code, secret);
+	return { code, enrollment };
+}
+
+// Rebuild a working local identity from a recovery code + the server-held blob
+// (new device / reinstall). Restores the SAME identity keypair and contacts,
+// regenerates fresh signed-prekey + one-time prekeys, and seals everything under
+// a NEW password. Returns the public material to (re)publish — the identity
+// pubkey is unchanged, so contacts see no safety-number change. Throws
+// InvalidRecoveryCodeError on a wrong code (nothing is written).
+export async function restoreFromRecovery(
+	username: string,
+	code: string,
+	saltRec: string,
+	blob: EncryptedBlob,
+	newPassword: string
+): Promise<NewIdentityMaterial> {
+	const secret = await openRecoveryBlob(code, saltRec, blob); // throws InvalidRecoveryCodeError
+	const payload = JSON.parse(new TextDecoder().decode(secret)) as RecoveryPayload;
+
+	const identity: IdentityKeyPair = {
+		signing: {
+			publicKey: base64ToBytes(payload.identity.signingPublicKey),
+			secretKey: base64ToBytes(payload.identity.signingSecretKey),
+		},
+		dh: { publicKey: base64ToBytes(payload.identity.dhPublicKey), secretKey: base64ToBytes(payload.identity.dhSecretKey) },
+	};
+	// Fresh ephemeral material, tied to the restored identity — the old snapshot's
+	// prekeys may be stale/consumed on the server.
+	const signedPreKey = generateSignedPreKey(identity);
+	const oneTimePreKeys = generateOneTimePreKeys(20);
+
+	const doc: StoredIdentityDoc = {
+		identity: payload.identity,
+		signedPreKey: {
+			publicKey: bytesToBase64(signedPreKey.keyPair.publicKey),
+			secretKey: bytesToBase64(signedPreKey.keyPair.secretKey),
+			signature: bytesToBase64(signedPreKey.signature),
+		},
+		oneTimePreKeys: Object.fromEntries(
+			oneTimePreKeys.map((opk) => [bytesToBase64(opk.keyPair.publicKey), bytesToBase64(opk.keyPair.secretKey)])
+		),
+		contacts: payload.contacts ?? {},
+	};
+
+	const masterKey = generateMasterKey();
+	const record = await sealIdentityRecord(doc, newPassword, masterKey);
+	await putRecord<StoredIdentityRecord>(IDENTITY_STORE, username, record);
+	cacheKey(username, masterKey);
+
+	return { identity, signedPreKey, oneTimePreKeys };
+}
+
 async function loadDoc(username: string): Promise<{ key: Uint8Array; doc: StoredIdentityDoc }> {
 	const key = requireCachedKey(username);
-	const record = await getRecord<IdentityRecord>(IDENTITY_STORE, username);
+	const record = await getRecord<StoredIdentityRecord>(IDENTITY_STORE, username);
 	if (!record) throw new Error(`No local identity for ${username}.`);
 	return { key, doc: decryptBlob<StoredIdentityDoc>(key, record.blob) };
 }
 
 async function saveDoc(username: string, key: Uint8Array, doc: StoredIdentityDoc): Promise<void> {
-	const record = await getRecord<IdentityRecord>(IDENTITY_STORE, username);
+	const record = await getRecord<StoredIdentityRecord>(IDENTITY_STORE, username);
 	if (!record) throw new Error(`No local identity for ${username}.`);
-	await putRecord<IdentityRecord>(IDENTITY_STORE, username, { salt: record.salt, blob: encryptBlob(key, doc) });
+	// Preserve the record envelope (version + wrap + salt); only the doc changes.
+	// `key` is the master key, so the doc stays MK-encrypted.
+	await putRecord<StoredIdentityRecord>(IDENTITY_STORE, username, { ...record, blob: encryptBlob(key, doc) });
 }
 
 export async function getIdentity(username: string): Promise<IdentityKeyPair> {

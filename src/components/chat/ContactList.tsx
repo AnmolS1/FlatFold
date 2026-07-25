@@ -3,6 +3,7 @@ import { ShieldAlert, ShieldCheck, UserPlus, Users, Plus, Search, Clock, X } fro
 import type { ContactRecord, GroupRecord, ConversationSummary } from '../../keystore';
 import { groupConversationKey } from '../../lib/messaging';
 import { isUnread, previewLabel } from '../../lib/conversationSummary';
+import { isBlocked } from '../../lib/blocklist';
 import { formatListTimestamp } from '../../utils/formatTimestamp';
 import { Avatar } from '../common/Avatar';
 import { EmptyStateIllustration } from '../common/Brand';
@@ -18,6 +19,12 @@ interface ContactListProps {
 	onSelectGroup: (group: GroupRecord) => void;
 	onAddContact: (username: string) => Promise<void>;
 	onNewGroup: () => void;
+	/** Notifies the shell when the compose bar opens/closes, so it can hide the
+	    tab bar — keeping the add-username input the bottom-most element above the
+	    keyboard (otherwise iOS scroll-to-reveal drags the list under the bar). */
+	onComposeOpenChange?: (open: boolean) => void;
+	/** Bumps when the block list changes, to re-run the (blocked-filtered) rows. */
+	blockVersion?: number;
 }
 
 // A single normalized conversation row, whether it's a 1:1 or a group.
@@ -48,11 +55,22 @@ const ContactListComponent = ({
 	onSelectGroup,
 	onAddContact,
 	onNewGroup,
+	onComposeOpenChange,
+	blockVersion,
 }: ContactListProps) => {
 	const [query, setQuery] = useState('');
 	const [newChatOpen, setNewChatOpen] = useState(false);
 	const [input, setInput] = useState('');
 	const [adding, setAdding] = useState(false);
+
+	// Toggle compose + tell the shell (so it can hide the tab bar) in one place.
+	const setCompose = useCallback(
+		(open: boolean) => {
+			setNewChatOpen(open);
+			onComposeOpenChange?.(open);
+		},
+		[onComposeOpenChange]
+	);
 
 	const handleSubmit = useCallback(
 		async (e: FormEvent<HTMLFormElement>) => {
@@ -64,17 +82,18 @@ const ContactListComponent = ({
 			try {
 				await onAddContact(username);
 				setInput('');
-				setNewChatOpen(false);
+				setCompose(false);
 			} finally {
 				setAdding(false);
 			}
 		},
-		[input, onAddContact]
+		[input, onAddContact, setCompose]
 	);
 
 	// Unified, activity-sorted conversation list (groups + contacts together),
 	// then filtered by the local search box.
 	const rows = useMemo<Row[]>(() => {
+		void blockVersion; // re-run the blocked filter when the block list changes
 		const all: Row[] = [
 			...groups.map((group) => ({
 				key: groupConversationKey(group.id),
@@ -91,8 +110,10 @@ const ContactListComponent = ({
 				summary: summaries[contact.username],
 			})),
 		];
+		// Hide blocked contacts' conversations (groups are unaffected).
+		const visible = all.filter((r) => r.isGroup || !isBlocked(currentUsername, r.key));
 		const q = query.trim().toLowerCase();
-		const filtered = q ? all.filter((r) => r.name.toLowerCase().includes(q)) : all;
+		const filtered = q ? visible.filter((r) => r.name.toLowerCase().includes(q)) : visible;
 		// Most-recent conversation first; those with no activity fall to the
 		// bottom, ordered by name.
 		return filtered.sort((a, b) => {
@@ -101,7 +122,7 @@ const ContactListComponent = ({
 			if (at !== bt) return bt - at;
 			return a.name.localeCompare(b.name);
 		});
-	}, [contacts, groups, summaries, query]);
+	}, [contacts, groups, summaries, query, currentUsername, blockVersion]);
 
 	const renderPreview = (row: Row): { text: string; muted: boolean } => {
 		if (row.summary) return { text: previewLabel(row.summary, currentUsername), muted: false };
@@ -121,12 +142,14 @@ const ContactListComponent = ({
 			<div className="p-3 border-b border-crease-line">
 				<div className="relative">
 					<Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-graphite-40 pointer-events-none" />
+					{/* 16px floor (D2 §0.1): no text-sm on an input — sub-16px focus
+					    auto-zooms iOS Safari. Native additionally locks the viewport. */}
 					<input
 						value={query}
 						onChange={(e) => setQuery(e.target.value)}
 						placeholder="Search locally"
 						aria-label="Search conversations locally"
-						className="w-full rounded-full border border-crease-line-bold bg-inset text-graphite placeholder-graphite-40 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-crease focus:border-transparent"
+						className="w-full rounded-full border border-crease-line-bold bg-inset text-graphite placeholder-graphite-40 pl-9 pr-3 py-2 focus:outline-none focus:ring-2 focus:ring-crease focus:border-transparent"
 					/>
 				</div>
 			</div>
@@ -148,7 +171,16 @@ const ContactListComponent = ({
 						return (
 							<button
 								key={row.key}
-								onClick={() => (row.isGroup ? onSelectGroup(row.group!) : onSelectContact(row.key))}
+								onClick={() => {
+									// If the compose bar is open, a tap on the list just dismisses it
+									// (and the keyboard) — it must NOT also open the chat you tapped.
+									if (newChatOpen) {
+										setCompose(false);
+										return;
+									}
+									if (row.isGroup) onSelectGroup(row.group!);
+									else onSelectContact(row.key);
+								}}
 								className={`w-full text-left flex items-center gap-3 px-4 min-h-[60px] py-2 border-b border-crease-line transition-colors relative ${
 									active ? 'bg-crease/10 border-l-2 border-l-crane pl-[14px]' : 'hover:bg-inset'
 								}`}
@@ -187,46 +219,70 @@ const ContactListComponent = ({
 				)}
 			</div>
 
-			{/* New-chat FAB — 48px crane, bottom-right, in the thumb zone. */}
-			<button
-				onClick={() => setNewChatOpen((v) => !v)}
-				aria-label={newChatOpen ? 'Close new conversation' : 'New conversation'}
-				aria-expanded={newChatOpen}
-				className="absolute bottom-4 right-4 w-12 h-12 rounded-full bg-crane text-white flex items-center justify-center hover:bg-crane-dark transition-colors shadow-[0_4px_14px_rgba(232,74,39,0.35)] focus:outline-none focus:ring-2 focus:ring-crane focus:ring-offset-2"
-			>
-				{newChatOpen ? <X className="w-6 h-6" /> : <Plus className="w-6 h-6" />}
-			</button>
-
-			{/* New-chat panel — anchored above the FAB. (Becomes a bottom sheet in
-			    the sheet milestone; kept as a simple anchored card for now.) */}
-			{newChatOpen && (
-				<div className="absolute bottom-20 right-4 left-4 min-[900px]:left-auto min-[900px]:w-72 bg-inset border border-crease-line-bold rounded-2xl p-3 space-y-3 shadow-[var(--shadow-card)]">
-					<form onSubmit={handleSubmit} className="flex gap-2">
+			{/* Compose — no floating FAB (D2 §2). Closed: a docked "New message"
+			    button, with the tab bar beneath it. Open: the add-username input
+			    becomes the BOTTOM-MOST element (New group sits above it) and the
+			    shell hides the tab bar, so the input docks directly above the
+			    keyboard — iOS never has to scroll-to-reveal it and drag the list. */}
+			{newChatOpen ? (
+				<>
+					<div className="flex-shrink-0 border-t border-crease-line bg-inset px-3 py-2">
+						<button
+							onClick={() => {
+								setCompose(false);
+								onNewGroup();
+							}}
+							className="w-full flex items-center justify-center gap-2 min-h-11 px-3 rounded-lg border border-crease-line-bold text-graphite hover:border-crease transition-colors"
+						>
+							<Users className="w-4 h-4" /> New group
+						</button>
+					</div>
+					<form
+						onSubmit={handleSubmit}
+						className="flex-shrink-0 flex items-center gap-2 border-t border-crease-line bg-graph-card px-3 pt-2.5 env-safe-x"
+						// Keep a small gap above the keyboard when it's up (env-safe-bottom
+						// alone collapses to 0 there), and the full home-indicator inset when
+						// it's down.
+						style={{ paddingBottom: 'max(0.75rem, calc(env(safe-area-inset-bottom) - var(--keyboard-height, 0px)))' }}
+					>
+						<button
+							type="button"
+							onClick={() => setCompose(false)}
+							aria-label="Cancel new message"
+							className="h-11 w-11 flex-shrink-0 flex items-center justify-center rounded-full border border-crease-line-bold text-graphite hover:border-crease transition-colors"
+						>
+							<X className="w-5 h-5" />
+						</button>
 						<input
 							value={input}
 							onChange={(e) => setInput(e.target.value)}
 							placeholder="Add someone by username"
+							aria-label="Add someone by username"
 							disabled={adding}
 							autoFocus
-							className="flex-1 min-w-0 rounded-lg border border-crease-line-bold bg-graph-card text-graphite placeholder-graphite-40 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-crease focus:border-transparent disabled:opacity-50"
+							autoCapitalize="none"
+							autoCorrect="off"
+							className="flex-1 min-w-0 rounded-full border border-crease-line-bold bg-inset text-graphite placeholder-graphite-40 px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-crease focus:border-transparent disabled:opacity-50"
 						/>
 						<button
 							type="submit"
 							disabled={adding || !input.trim()}
-							className="flex-shrink-0 bg-crane text-white w-10 h-10 flex items-center justify-center rounded-lg hover:bg-crane-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+							className="flex-shrink-0 bg-crane text-white w-11 h-11 flex items-center justify-center rounded-full hover:bg-crane-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
 							aria-label="Start conversation"
 						>
-							<UserPlus className="w-4 h-4" />
+							<UserPlus className="w-5 h-5" />
 						</button>
 					</form>
+				</>
+			) : (
+				<div className="flex-shrink-0 border-t border-crease-line bg-graph-card px-3 py-2.5 env-safe-x">
 					<button
-						onClick={() => {
-							setNewChatOpen(false);
-							onNewGroup();
-						}}
-						className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-crease-line-bold text-graphite hover:border-crease transition-colors text-sm"
+						onClick={() => setCompose(true)}
+						aria-label="New message"
+						aria-expanded={false}
+						className="w-full min-h-11 flex items-center justify-center gap-2 rounded-full bg-crane text-white font-medium hover:bg-crane-dark transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-crane focus-visible:ring-offset-2"
 					>
-						<Users className="w-4 h-4" /> New group
+						<Plus className="w-5 h-5" /> New message
 					</button>
 				</div>
 			)}

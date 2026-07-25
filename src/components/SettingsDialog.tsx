@@ -366,7 +366,7 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 								what gets you back into your account — your identity and your contacts. If you lose both your password and
 								this code, no one can get the account back, not even me. That&rsquo;s the point.
 							</p>
-							<div className="font-mono text-sm text-graphite bg-inset border border-crease-line-bold rounded-lg p-3 leading-relaxed select-text break-words">
+							<div className="selectable-text font-mono text-sm text-graphite bg-inset border border-crease-line-bold rounded-lg p-3 leading-relaxed break-words">
 								{recoveryCode}
 							</div>
 							<button

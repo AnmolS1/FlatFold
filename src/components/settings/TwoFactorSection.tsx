@@ -1,8 +1,9 @@
 import { useState, useCallback } from 'react';
-import { ShieldCheck, ShieldOff } from 'lucide-react';
+import { ShieldCheck, ShieldOff, Copy, Check, ExternalLink } from 'lucide-react';
 import { QrCode } from '../common/QrCode';
 import { apiEnable2fa, apiDisable2fa } from '../../lib/api';
 import { generateTotpSecret, buildOtpauthUri, generateBackupCodes } from '../../lib/totp';
+import { copyText } from '../../lib/clipboard';
 
 // D7 §4 — Settings two-factor. Enable: generate the secret + backup codes once,
 // show the QR to scan, confirm with a live code (+ password re-auth). Disable:
@@ -20,6 +21,14 @@ export function TwoFactorSection({ username, initialEnabled }: { username: strin
 	const [disarming, setDisarming] = useState(false);
 	const [disablePw, setDisablePw] = useState('');
 	const [disableCode, setDisableCode] = useState('');
+	const [copied, setCopied] = useState<string | null>(null);
+
+	const copy = useCallback(async (label: string, text: string) => {
+		if (await copyText(text)) {
+			setCopied(label);
+			setTimeout(() => setCopied(null), 1500);
+		}
+	}, []);
 
 	const startSetup = useCallback(() => {
 		const secret = generateTotpSecret();
@@ -117,24 +126,47 @@ export function TwoFactorSection({ username, initialEnabled }: { username: strin
 			) : (
 				<div className="space-y-3 border border-crease-line-bold rounded-lg p-3">
 					<p className="text-xs text-graphite-60">
-						Scan this with your authenticator app, then enter a code to confirm.
+						Add this to your authenticator app, then enter a code to confirm.
 					</p>
-					<div className="flex justify-center">
-						<div className="rounded-lg overflow-hidden bg-white p-2">
-							<QrCode text={draft.uri} label="Two-factor setup QR" />
+					{/* On the same phone, the QR can't be scanned — this hands the code
+					    straight to an installed authenticator app. */}
+					<button
+						onClick={() => window.open(draft.uri, '_system')}
+						className="w-full flex items-center justify-center gap-2 bg-crease text-white rounded-lg py-2 text-sm hover:opacity-90 transition-opacity"
+					>
+						<ExternalLink className="w-4 h-4" /> Open in your authenticator app
+					</button>
+					<details className="text-xs text-graphite-40">
+						<summary className="cursor-pointer">On another device? Scan a QR instead</summary>
+						<div className="flex justify-center mt-2">
+							<div className="rounded-lg overflow-hidden bg-white p-2">
+								<QrCode text={draft.uri} label="Two-factor setup QR" />
+							</div>
 						</div>
-					</div>
+					</details>
 					<div>
-						<p className="text-xs text-graphite-40 mb-1">Or enter this key manually:</p>
-						<p className="font-mono text-xs text-graphite break-all select-text bg-inset border border-crease-line rounded p-2">{draft.secret}</p>
+						<div className="flex items-center justify-between mb-1">
+							<p className="text-xs text-graphite-40">Or enter this key manually:</p>
+							<button onClick={() => void copy('key', draft.secret)} className="text-xs flex items-center gap-1 text-crease hover:text-crane transition-colors">
+								{copied === 'key' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+								{copied === 'key' ? 'Copied' : 'Copy'}
+							</button>
+						</div>
+						<p className="selectable-text font-mono text-xs text-graphite break-all bg-inset border border-crease-line rounded p-2">{draft.secret}</p>
 					</div>
 
 					<div>
-						<p className="text-sm font-semibold text-graphite">Backup codes</p>
+						<div className="flex items-center justify-between">
+							<p className="text-sm font-semibold text-graphite">Backup codes</p>
+							<button onClick={() => void copy('backup', draft.backupCodes.join('\n'))} className="text-xs flex items-center gap-1 text-crease hover:text-crane transition-colors">
+								{copied === 'backup' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+								{copied === 'backup' ? 'Copied' : 'Copy all'}
+							</button>
+						</div>
 						<p className="text-xs text-graphite-40 mb-2">
 							Save these somewhere safe. Each one works once, for when you don&rsquo;t have your authenticator.
 						</p>
-						<div className="grid grid-cols-2 gap-1 font-mono text-xs text-graphite bg-inset border border-crease-line rounded p-2 select-text">
+						<div className="selectable-text grid grid-cols-2 gap-1 font-mono text-xs text-graphite bg-inset border border-crease-line rounded p-2">
 							{draft.backupCodes.map((c) => (
 								<span key={c}>{c}</span>
 							))}

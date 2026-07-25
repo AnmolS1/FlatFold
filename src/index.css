@@ -190,6 +190,16 @@ html.capacitor-native [contenteditable]:not([contenteditable='false']) {
 	-webkit-user-select: text;
 	user-select: text;
 }
+/* Opt specific read-only content back INTO long-press-to-copy — e.g. the 2FA
+   manual key and backup codes, which the user needs to copy but can't retype.
+   Re-enables the iOS callout the shell suppresses above (class beats the
+   universal selector, so this wins). */
+html.capacitor-native .selectable-text,
+.selectable-text {
+	-webkit-user-select: text;
+	user-select: text;
+	-webkit-touch-callout: default;
+}
 
 /* ── Mobile primitives ──────────────────────────────────────────
    Safe-area insets for notch/home-indicator devices. Applied to the

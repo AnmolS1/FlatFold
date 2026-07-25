@@ -41,6 +41,7 @@
 		"@capacitor/filesystem": "^8.1.2",
 		"@capacitor/haptics": "^8.0.2",
 		"@capacitor/keyboard": "^8.0.5",
+		"@capacitor/local-notifications": "^8.2.1",
 		"@capacitor/push-notifications": "^8.1.2",
 		"@capacitor/share": "^8.0.1",
 		"@hpke/core": "^1.9.0",

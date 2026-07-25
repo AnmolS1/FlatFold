@@ -22,7 +22,11 @@ function App() {
 	// disabling the long-press text-selection callout). Set in an effect so the
 	// Capacitor bridge is guaranteed attached.
 	useEffect(() => {
-		if (isNativePlatform()) document.documentElement.classList.add('capacitor-native');
+		if (!isNativePlatform()) return;
+		document.documentElement.classList.add('capacitor-native');
+		// Register the content-free push → decoy local-notification handler once, so
+		// an APNs wake-up surfaces a non-identifying banner (Step 5).
+		void import('./lib/nativePush').then((m) => m.initNativePushDisplay());
 	}, []);
 
 	return (

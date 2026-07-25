@@ -7,8 +7,34 @@
 // {"aps":{"content-available":1}}, and the app's push handler shows the decoy
 // label — nothing identifying, same privacy posture as Web Push.
 import { PushNotifications } from '@capacitor/push-notifications';
+import { LocalNotifications } from '@capacitor/local-notifications';
 import { apiSubscribeApns, apiUnsubscribeApns } from './api';
-import type { SubscribeResult } from './push';
+import { getDecoyLabel, type SubscribeResult } from './push';
+
+let displayHandlerRegistered = false;
+
+// Turn a content-free APNs wake-up into a VISIBLE but non-identifying banner: a
+// local notification titled with the user's decoy label. The server payload
+// carries no text or sender ({"aps":{"content-available":1}}); the decoy label
+// lives only on this device. Best-effort by nature — iOS throttles silent
+// (content-available) pushes, so delivery isn't guaranteed when the app has been
+// idle/force-quit; the reliable-delivery upgrade is a Notification Service
+// Extension (documented as a follow-up). Registered once at app start.
+export async function initNativePushDisplay(): Promise<void> {
+	if (displayHandlerRegistered) return;
+	displayHandlerRegistered = true;
+	await PushNotifications.addListener('pushNotificationReceived', () => {
+		void LocalNotifications.schedule({
+			notifications: [
+				{
+					id: Date.now() % 2_000_000_000,
+					title: getDecoyLabel(),
+					body: '',
+				},
+			],
+		});
+	});
+}
 
 // register() is fire-and-forget; the APNs device token arrives on the
 // 'registration' event. Wrap that into a promise (with a timeout + cleanup).

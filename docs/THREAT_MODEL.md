@@ -336,6 +336,22 @@ right tool. The `/transparency` page says this to users directly.
       stored MK no longer opens the record. **Residual:** it inherits the device's
       biometric strength (e.g. Face ID's ~1e-6 false-accept, a compelled unlock),
       which is why it's opt-in and password-backed.
+22. **Native push notifications are content-free, and their DISPLAY is
+    best-effort.** The APNs payload is only `{"aps":{"content-available":1}}` — no
+    text, no sender, ever (worker/push.ts). On wake, the app surfaces a local
+    notification titled with the user's own on-device **decoy label** (src/lib/
+    nativePush.ts) — same privacy posture as the Web Push service worker. Because
+    the wake-up is a *silent* content-available push, iOS throttles it, so a
+    notification banner is **not guaranteed** when the app has been idle or
+    force-quit (an active user is fine; the messages themselves always sync on
+    next open). The reliable-delivery upgrade — an alert push with `mutable-content`
+    + a Notification Service Extension that swaps in the decoy from an app-group
+    store — is a deliberate follow-up, not done here, because it adds a second
+    native target and a shared store to disclose.
+23. **App-switcher snapshot is obscured** (native): iOS snapshots the UI on
+    deactivation for the multitasking switcher; the app covers it with a branded
+    overlay before the snapshot (AppDelegate `applicationWillResignActive` /
+    `applicationDidEnterBackground`), so an open conversation can't leak there.
 
 ---
 

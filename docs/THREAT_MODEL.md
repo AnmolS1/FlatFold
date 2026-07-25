@@ -354,6 +354,40 @@ right tool. The `/transparency` page says this to users directly.
     deactivation for the multitasking switcher; the app covers it with a branded
     overlay before the snapshot (AppDelegate `applicationWillResignActive` /
     `applicationDidEnterBackground`), so an open conversation can't leak there.
+24. **TLS public-key pinning** (native): all traffic to `flatfold.ponderance.dev`
+    — the HTTPS API *and* the `wss://` WebSocket — is pinned via `NSPinnedDomains`
+    in `ios/App/App/Info.plist` (`NSPinnedCAIdentities`, `SPKI-SHA256-BASE64`).
+    This is the mechanism that reaches WKWebView traffic: the app's API `fetch()`
+    and `new WebSocket()` are issued by WebKit's networking process, so a
+    JS- or URLSession-delegate pin would NOT cover them; ATS `NSPinnedDomains`
+    does. **Evidence (both controls, on-simulator against the live prod cert):** a
+    deliberately-wrong pin blocks the real `GET /api/me` at trust evaluation
+    (`Trust evaluate failure [ca1 CAspkiSHA256][root CAspkiSHA256]` →
+    CFNetwork `-9802` → `NSURLErrorDomain -1200`) inside `com.apple.WebKit.Networking`;
+    the shipped pin set yields `TLS Trust result 0` and a normal HTTP response.
+    **What is pinned:** the two CA *roots* Cloudflare's Universal SSL rotates
+    between — **Google Trust Services GTS Root R4**
+    (`mEflZT5enoR1FuXLgYYGqnVEoZvmf9c2bVBpiOjYQ0c=`) and **Let's Encrypt ISRG Root
+    X1** (`C5+lpZ7tcVwmwQIMcRtPbsQtWLABXhQzejna0wHFr8M=`). Roots, not the leaf or
+    intermediate, because we do not own the Cloudflare-issued leaf keypair (it
+    rotates ~90-daily) and Google rolls its intermediates; a leaf/intermediate pin
+    would brick installed apps on rotation. Two CAs so a Cloudflare issuer switch
+    doesn't brick either. **Residual (honest):** this pins to a *CA set*, not to
+    our specific key — a mis-issuance by GTS or Let's Encrypt *themselves* for the
+    domain would still validate. It defeats the realistic threat (a rogue/other-CA
+    or corporate-proxy MITM of the auth-token + metadata channel; payloads are
+    already E2E-encrypted), not a compromise of the pinned CAs. **Operational
+    risk:** if Cloudflare moves the domain to a CA outside this set, the app loses
+    connectivity until an app-store update ships the new root — the pin is
+    declarative in the signed binary. Rotation runbook + re-derivation commands:
+    `docs/TLS_PINNING.md`. **Scope note:** only the app-server host is pinned. The
+    sealed-sender relay hosts (`VITE_SEAL_RELAY_URL` / `_FALLBACK_URL` —
+    oblivious.network, Fastly; see `src/lib/sealedFetch.ts`) are **intentionally
+    unpinned**: they are independent, deliberately-untrusted blind relays that see
+    only HPKE ciphertext (never plaintext or our session), their certs are outside
+    our control and rotate independently, and pinning a third-party relay we chose
+    *because* it is not us would defeat the point. Their integrity rests on the
+    HPKE sealing (§ sealed sender), not on TLS pinning.
 
 ---
 

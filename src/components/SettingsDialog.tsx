@@ -6,6 +6,8 @@ import { useAuth } from '../hooks/useAuth';
 import { panicWipe } from '../lib/panicWipe';
 import { TwoFactorSection } from './settings/TwoFactorSection';
 import { BiometricSection } from './settings/BiometricSection';
+import { ThemeSection } from './settings/ThemeSection';
+import { AboutSection } from './settings/AboutSection';
 import {
 	DEFAULT_DECOY_LABEL,
 	getDecoyLabel,
@@ -282,6 +284,9 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 					</p>
 				</section>
 
+				{/* Appearance — theme picker (D3) */}
+				<ThemeSection />
+
 				{/* Change password (D7 §1) */}
 				<section className="mb-6">
 					<h3 className="text-sm font-semibold text-graphite mb-2 flex items-center gap-2">
@@ -482,6 +487,9 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 						</>
 					)}
 				</section>
+
+				{/* About (D4 / up-front) */}
+				<AboutSection />
 
 				{/* Danger zone — account deletion */}
 				<section className="mt-6 border border-crane/40 rounded-lg p-4">

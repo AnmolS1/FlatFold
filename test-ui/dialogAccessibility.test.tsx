@@ -14,6 +14,8 @@ import { BottomSheet } from '../src/components/common/BottomSheet';
 import { SettingsDialog } from '../src/components/SettingsDialog';
 import { useModalDialog } from '../src/hooks/useModalDialog';
 import { AuthContext } from '../src/hooks/useAuth';
+import { ThemeProvider } from '../src/contexts/ThemeContext';
+import { MemoryRouter } from 'react-router-dom';
 import type { AuthContextType } from '../src/types';
 
 // SettingsDialog now reads changePassword from auth context — a minimal stub is
@@ -64,9 +66,13 @@ describe.each([
 	{
 		name: 'SettingsDialog',
 		render: (close: () => void) => (
-			<AuthContext.Provider value={stubAuth}>
-				<SettingsDialog username="alice" onClose={close} onSignOut={vi.fn()} />
-			</AuthContext.Provider>
+			<MemoryRouter>
+				<ThemeProvider>
+					<AuthContext.Provider value={stubAuth}>
+						<SettingsDialog username="alice" onClose={close} onSignOut={vi.fn()} />
+					</AuthContext.Provider>
+				</ThemeProvider>
+			</MemoryRouter>
 		),
 	},
 ])('$name accessibility', ({ render: renderDialog }) => {

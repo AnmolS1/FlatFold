@@ -81,9 +81,15 @@
 	--font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace;
 }
 
-/* Mirrors @theme so `var(--color-*)` resolves in raw CSS too — @theme alone
-   tree-shakes a color var unless a utility class references it. */
-:root {
+/* Five themes (D3): Paper, Ink, Vellum, Graphite, Midnight Crane. Every theme
+   supplies values for the SAME token names, so no component ever changes — only
+   the values swap, keyed off `data-theme` on <html> (set by useThemeInternal).
+   `:root` is Paper (the default + `@theme` mirror so raw-CSS `var(--color-*)`
+   resolves and Tailwind doesn't tree-shake an unused color). Per-theme derived
+   values: crease-line-bold ≈ structural @0.28-0.32, grid-line ≈ structural @0.07,
+   graphite-40 ≈ ink @~0.45. Core role contrasts are AA-verified in D3_themes.md. */
+:root,
+:root[data-theme='paper'] {
 	--color-graph: #EEF0EC;
 	--color-graph-card: #F6F7F4;
 	--color-inset: #FFFFFF;
@@ -103,26 +109,87 @@
 	color-scheme: light;
 }
 
-/* Dark theme — "the blueprint at night". Values lifted from ponderance's
-   [data-theme="dark"] block, applied here via the `.dark` class this app
-   already uses. */
-.dark {
+/* Ink — the blueprint at night (dark default). */
+:root[data-theme='ink'] {
 	--color-graph: #0E1A24;
 	--color-graph-card: #182530;
 	--color-inset: #1E2C38;
 	--color-graphite: #E9ECE7;
-	--color-graphite-60: rgba(233, 236, 231, 0.66);
+	--color-graphite-60: rgba(233, 236, 231, 0.70);
 	--color-graphite-40: rgba(233, 236, 231, 0.50);
 	--color-crease: #82A9CE;
-	--color-crease-line: rgba(130, 169, 206, 0.15);
+	--color-crease-line: rgba(130, 169, 206, 0.16);
 	--color-crease-line-bold: rgba(130, 169, 206, 0.30);
-	--color-grid-line: rgba(122, 162, 200, 0.07);
-	--color-crane: #F5613C;
+	--color-grid-line: rgba(130, 169, 206, 0.07);
+	--color-crane: #E84A27;
 	--color-crane-dark: #C23A1C;
 	--color-sax: #E0B43F;
 	--color-orbit: #212146;
 	--color-orbit-ink: #A6A8DC;
 	--shadow-card: 0 10px 26px rgba(0, 0, 0, 0.45);
+	color-scheme: dark;
+}
+
+/* Vellum — warm parchment, calmest (branded light). */
+:root[data-theme='vellum'] {
+	--color-graph: #EFE7D6;
+	--color-graph-card: #F7F1E4;
+	--color-inset: #FFFDF7;
+	--color-graphite: #3A2F23;
+	--color-graphite-60: #6B5C48;
+	--color-graphite-40: rgba(58, 47, 35, 0.45);
+	--color-crease: #8A4B2A;
+	--color-crease-line: rgba(138, 75, 42, 0.15);
+	--color-crease-line-bold: rgba(138, 75, 42, 0.30);
+	--color-grid-line: rgba(138, 75, 42, 0.07);
+	--color-crane: #B23A1B;
+	--color-crane-dark: #8F2E14;
+	--color-sax: #8A6D14;
+	--color-orbit: #EDE3CE;
+	--color-orbit-ink: #463A66;
+	--shadow-card: 0 8px 22px rgba(58, 47, 35, 0.12);
+	color-scheme: light;
+}
+
+/* Graphite — crisp high-contrast mono, minimal (branded light). */
+:root[data-theme='graphite'] {
+	--color-graph: #FBFBFA;
+	--color-graph-card: #FFFFFF;
+	--color-inset: #FFFFFF;
+	--color-graphite: #16181A;
+	--color-graphite-60: #4A4E52;
+	--color-graphite-40: rgba(22, 24, 26, 0.45);
+	--color-crease: #2E5E8C;
+	--color-crease-line: rgba(22, 24, 26, 0.12);
+	--color-crease-line-bold: rgba(22, 24, 26, 0.24);
+	--color-grid-line: rgba(46, 94, 140, 0.06);
+	--color-crane: #C23A1C;
+	--color-crane-dark: #A32E13;
+	--color-sax: #B8860B;
+	--color-orbit: #2A2A6E;
+	--color-orbit-ink: #2A2A6E;
+	--shadow-card: 0 8px 22px rgba(22, 24, 26, 0.10);
+	color-scheme: light;
+}
+
+/* Midnight Crane — warm dark, crane-forward (branded dark). */
+:root[data-theme='midnight-crane'] {
+	--color-graph: #14110E;
+	--color-graph-card: #1F1A15;
+	--color-inset: #251F19;
+	--color-graphite: #F0E9E2;
+	--color-graphite-60: rgba(240, 233, 226, 0.70);
+	--color-graphite-40: rgba(240, 233, 226, 0.50);
+	--color-crease: #F08A5D;
+	--color-crease-line: rgba(240, 138, 93, 0.18);
+	--color-crease-line-bold: rgba(240, 138, 93, 0.32);
+	--color-grid-line: rgba(240, 138, 93, 0.07);
+	--color-crane: #E84A27;
+	--color-crane-dark: #C23A1C;
+	--color-sax: #E0B43F;
+	--color-orbit: #2A2246;
+	--color-orbit-ink: #C0A6DC;
+	--shadow-card: 0 10px 26px rgba(0, 0, 0, 0.5);
 	color-scheme: dark;
 }
 

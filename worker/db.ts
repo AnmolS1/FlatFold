@@ -164,6 +164,18 @@ export async function addOneTimePreKeys(
 	await db.batch(publicKeys.map((publicKey) => stmt.bind(username, publicKey, createdAt)));
 }
 
+// How many unconsumed one-time prekeys this user has left. Drives client-side
+// replenishment: the pool is finite and consumed one per first contact, so
+// without a top-up an ordinary account runs dry after its initial batch and
+// every later contact degrades to no-OTP X3DH. Read-only, no schema change.
+export async function countOneTimePreKeys(db: D1Database, username: string): Promise<number> {
+	const row = await db
+		.prepare('SELECT COUNT(*) AS n FROM one_time_prekeys WHERE username = ?')
+		.bind(username)
+		.first<{ n: number }>();
+	return row?.n ?? 0;
+}
+
 // Atomic: the SELECT-then-DELETE happens as a single SQL statement (one D1
 // round trip), so two concurrent bundle fetches for the same user can never
 // both claim the same one-time prekey — a read-then-separate-delete would

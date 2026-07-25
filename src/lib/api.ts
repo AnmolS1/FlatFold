@@ -213,6 +213,26 @@ export async function apiPublishKeys(request: PublishKeysRequest): Promise<void>
 	await parseJsonOrThrow(response);
 }
 
+// How many of MY one-time prekeys are left on the server. Drives replenishment
+// (src/lib/prekeyReplenish.ts).
+export async function apiGetPreKeyCount(): Promise<number> {
+	const response = await apiFetch('/api/keys/prekeys');
+	const body = (await parseJsonOrThrow(response)) as { remaining?: number };
+	return body.remaining ?? 0;
+}
+
+// Top up ONLY the one-time prekey pool. Deliberately not /api/keys/publish,
+// which would also rewrite the identity + signed prekey and read as a key
+// change to every contact.
+export async function apiAddOneTimePreKeys(oneTimePreKeys: string[]): Promise<void> {
+	const response = await apiFetch('/api/keys/prekeys', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ oneTimePreKeys }),
+	});
+	await parseJsonOrThrow(response);
+}
+
 // Sealed sender: register (or rotate) my delivery token with my own mailbox DO,
 // which holds the authoritative valid set that gates incoming sealed sends. The
 // DO keeps the newest few for a rotation grace window. Idempotent — re-called on

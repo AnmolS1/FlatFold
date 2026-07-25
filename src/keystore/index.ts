@@ -548,6 +548,32 @@ export async function getSignedPreKey(username: string): Promise<SignedPreKey> {
 // to an incoming first message that names which OPK the sender consumed.
 // Removing it locally is a second no-reuse guarantee independent of the
 // server's own atomic delete-on-fetch (worker/keys.ts).
+// Generates `count` fresh one-time prekeys, PERSISTS their secrets into this
+// user's encrypted doc, and returns the public keys (base64) for publishing.
+//
+// The ordering is the whole point, and it mirrors D7's stageRewrap: the secrets
+// are durably saved before this returns, so a caller can only ever publish keys
+// we can already complete a handshake with. If the subsequent publish fails (or
+// the app dies first), the extra local secrets are harmless — nothing claims
+// them, and the next replenishment tops up again. The reverse order would put
+// public keys on the server whose secrets we might never have stored, silently
+// wedging first contact for whoever claimed one (the server deletes each prekey
+// on use, so that conversation could not recover).
+//
+// Why this exists: the initial batch is generated ONCE at identity creation and
+// consumed one per first contact, so without replenishment an ordinary account
+// runs dry and every later contact degrades to no-OTP X3DH (FULL_AUDIT §2).
+export async function addOneTimePreKeys(username: string, count: number): Promise<string[]> {
+	if (count <= 0) return [];
+	const { key, doc } = await loadDoc(username);
+	const fresh = generateOneTimePreKeys(count);
+	for (const opk of fresh) {
+		doc.oneTimePreKeys[bytesToBase64(opk.keyPair.publicKey)] = bytesToBase64(opk.keyPair.secretKey);
+	}
+	await saveDoc(username, key, doc); // durable BEFORE the caller can publish
+	return fresh.map((opk) => bytesToBase64(opk.keyPair.publicKey));
+}
+
 export async function takeOneTimePreKeySecret(username: string, publicKeyBase64: string): Promise<Uint8Array | null> {
 	const { key, doc } = await loadDoc(username);
 	const secretBase64 = doc.oneTimePreKeys[publicKeyBase64];

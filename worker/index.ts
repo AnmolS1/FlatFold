@@ -9,6 +9,8 @@
 //   POST /api/auth/logout
 //   POST /api/keys/publish
 //   GET  /api/keys/bundle/:username
+//   GET  /api/keys/prekeys          (remaining one-time prekey count)
+//   POST /api/keys/prekeys          (top up the one-time prekey pool)
 //   GET  /ws            (WebSocket upgrade -> the caller's mailbox DO)
 
 import {
@@ -62,7 +64,7 @@ import {
 	verifySessionPayload,
 	WS_ECHO_SUBPROTOCOL,
 } from './auth';
-import { handleGetBundle, handlePublishKeys } from './keys';
+import { handleAddOneTimePreKeys, handleGetBundle, handleGetPreKeyCount, handlePublishKeys } from './keys';
 import { handleMediaDelete, handleMediaDownload, handleMediaUpload } from './media';
 import { handlePushSubscribe, handlePushUnsubscribe, handleVapidPublicKey, handleApnsSubscribe, handleApnsUnsubscribe } from './push';
 import { handleDeleteAccount } from './account';
@@ -556,6 +558,16 @@ async function route(request: Request, env: Env): Promise<Response> {
 			const username = await readAuthenticatedUsername(request, env);
 			if (!username) return json({ error: 'Not authenticated.' }, { status: 401 });
 			return handlePublishKeys(request, env, username);
+		}
+
+		// One-time prekey pool: read the remaining count, or top it up. Separate
+		// from /publish so a replenishment never rewrites identity/signed-prekey.
+		if (pathname === '/api/keys/prekeys' && (method === 'GET' || method === 'POST')) {
+			const username = await readAuthenticatedUsername(request, env);
+			if (!username) return json({ error: 'Not authenticated.' }, { status: 401 });
+			return method === 'GET'
+				? handleGetPreKeyCount(env, username)
+				: handleAddOneTimePreKeys(request, env, username);
 		}
 
 		const bundleMatch = /^\/api\/keys\/bundle\/([^/]+)$/.exec(pathname);

@@ -22,7 +22,7 @@ const supporting = (...types: string[]) => (t: string) => types.some((s) => t.st
 describe('pickRecordingMimeType', () => {
 	it('prefers MP4 when the browser can record it (Safari, recent Chrome)', () => {
 		const picked = pickRecordingMimeType(supporting('audio/mp4', 'audio/webm'));
-		expect(picked).toBe('audio/mp4');
+		expect(picked).toBe('audio/mp4;codecs=mp4a.40.2');
 		expect(isApplePlayable(picked!)).toBe(true);
 	});
 
@@ -40,6 +40,23 @@ describe('pickRecordingMimeType', () => {
 	// chose WebM and Apple devices silently could not play the result.
 	it('never picks a WebM container while an Apple-playable one is offered', () => {
 		expect(pickRecordingMimeType(supporting('audio/webm', 'audio/mp4'))).not.toContain('webm');
+	});
+
+	// The trap that made the first version of this fix useless. Chrome reports
+	// BOTH `audio/mp4` and `audio/mp4;codecs=opus` as recordable, and a bare
+	// `audio/mp4` lets it choose Opus-in-MP4 — an MP4 container Safari still
+	// cannot decode. Verified against a real Chromium: isTypeSupported said true
+	// for all three mp4 variants. So the AAC codec must be named explicitly.
+	it('names the AAC codec explicitly, so Chrome cannot pick Opus-in-MP4', () => {
+		const chromeLike = supporting('audio/mp4', 'audio/webm');
+		expect(pickRecordingMimeType(chromeLike)).toBe('audio/mp4;codecs=mp4a.40.2');
+		// And the bare form must never be preferred over the qualified one.
+		expect(APPLE_PLAYABLE.indexOf('audio/mp4;codecs=mp4a.40.2')).toBeLessThan(APPLE_PLAYABLE.indexOf('audio/mp4'));
+	});
+
+	it('Opus in an MP4 container is NOT treated as Apple-playable', () => {
+		expect(isApplePlayable('audio/mp4;codecs=opus')).toBe(false);
+		expect(isApplePlayable('audio/mp4;codecs=mp4a.40.2')).toBe(true);
 	});
 
 	it('APPLE_PLAYABLE lists only containers Safari actually decodes', () => {

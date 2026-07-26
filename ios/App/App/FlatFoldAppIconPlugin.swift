@@ -17,7 +17,13 @@ public class FlatFoldAppIconPlugin: CAPPlugin, CAPBridgedPlugin {
     ]
 
     @objc func isSupported(_ call: CAPPluginCall) {
-        call.resolve(["supported": UIApplication.shared.supportsAlternateIcons])
+        // Main thread, like getIcon/setIcon below. Capacitor dispatches plugin
+        // calls off the main thread, and every UIApplication accessor is
+        // main-thread-only — Main Thread Checker flags this one specifically.
+        // It was the only accessor here missing the hop.
+        DispatchQueue.main.async {
+            call.resolve(["supported": UIApplication.shared.supportsAlternateIcons])
+        }
     }
 
     @objc func getIcon(_ call: CAPPluginCall) {

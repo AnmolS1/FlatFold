@@ -19,8 +19,20 @@
 // Apple-unplayable. That residual is real and the sender is told about it rather
 // than the receiver discovering it.
 
-/** Containers Safari / WKWebView can actually decode. Order = preference. */
-export const APPLE_PLAYABLE = ['audio/mp4', 'audio/aac', 'audio/mpeg'] as const;
+/**
+ * Types Safari / WKWebView can actually decode, most-preferred first.
+ *
+ * The AAC codec is named EXPLICITLY, and that is load-bearing rather than
+ * pedantic. Verified against a real Chromium: `isTypeSupported` returns true for
+ * `audio/mp4`, `audio/mp4;codecs=mp4a.40.2` AND `audio/mp4;codecs=opus`. Asking
+ * for the bare container therefore lets Chrome choose Opus-in-MP4 — an MP4 that
+ * Safari still cannot play. The first version of this fix did exactly that, so
+ * it looked applied and changed nothing.
+ */
+export const APPLE_PLAYABLE = ['audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/aac', 'audio/mpeg'] as const;
+
+/** Codecs that defeat an otherwise-Apple-playable container. */
+const APPLE_HOSTILE_CODECS = ['opus', 'vorbis'];
 
 /** Everything else we would accept, least-bad first. Apple cannot play these. */
 const FALLBACKS = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/webm'] as const;
@@ -47,8 +59,17 @@ export function pickRecordingMimeType(isSupported: SupportCheck = defaultSupport
 	return null;
 }
 
-/** Whether a recorded/received note will play on Safari and WKWebView. */
+/**
+ * Whether a recorded/received note will play on Safari and WKWebView.
+ *
+ * Checks the codec as well as the container, because `audio/mp4;codecs=opus` is
+ * an Apple-playable container carrying a codec Apple cannot decode.
+ */
 export function isApplePlayable(mimeType: string): boolean {
-	const base = mimeType.split(';')[0].trim().toLowerCase();
-	return (APPLE_PLAYABLE as readonly string[]).includes(base);
+	const lower = mimeType.toLowerCase();
+	const base = lower.split(';')[0].trim();
+	const containerOk = (APPLE_PLAYABLE as readonly string[]).some((t) => t.split(';')[0] === base);
+	if (!containerOk) return false;
+	const codecs = /codecs\s*=\s*"?([^";]+)/.exec(lower)?.[1] ?? '';
+	return !APPLE_HOSTILE_CODECS.some((c) => codecs.includes(c));
 }

@@ -110,14 +110,20 @@ export const Chat = () => {
 	// the "you can always reach Settings" invariant is checkable across the whole
 	// state space — it was not, and a dead end shipped. See that file.
 	const wide = useIsWideViewport();
-	// Does this device actually have a software keyboard? The shell animates its
-	// height to track the keyboard, and that transition is applied ONLY on native
-	// — which is exactly the scope of the ghosting artifact seen on "My Mac
-	// (Designed for iPad)": a duplicated, offset copy of the composer row that
-	// cleared on any layout change and came back. A Mac has no software keyboard,
-	// so the animating layer buys nothing there and costs a stale repaint.
-	// maxTouchPoints is the discriminator: 5 on iPhone/iPad, 0 on a Mac. iOS
-	// behaviour is untouched.
+	// Does this device actually have a software keyboard?
+	//
+	// On "My Mac (Designed for iPad)" iPadOS still fires `keyboardWillShow` when a
+	// text field is focused, and reports a height, even though no keyboard is ever
+	// drawn. The shell subtracts that height, and the result is an empty band at
+	// the bottom of the window — the reported artifact. It appears on focusing the
+	// composer, "New message", or "Search locally", and clears when focus moves
+	// (tapping "+"), which is exactly the show/hide pairing.
+	//
+	// So the whole keyboard-compensation mechanism is gated, not just its
+	// transition: no listeners, no height subtraction, where there is no software
+	// keyboard. maxTouchPoints is the discriminator — 5 on iPhone/iPad, 0 on a Mac
+	// — so a real iPad keeps today's behaviour, including the accessory-bar height
+	// it correctly reports when a hardware keyboard is attached.
 	const hasSoftwareKeyboard = native && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0;
 	const [activeTab, setActiveTab] = useState<NativeTab>('chats');
 	// True while the Chats list's "New message" compose bar is open. Hides the
@@ -938,7 +944,9 @@ export const Chat = () => {
 	// willShow/WillHide fire at the animation's start, so the CSS transition on
 	// the root runs concurrently with the keyboard — no catch-up jump.
 	useEffect(() => {
-		if (!native) return;
+		// Gated on hasSoftwareKeyboard, not `native`: a Mac running the iPad app
+		// fires these events with a height for a keyboard it never draws.
+		if (!hasSoftwareKeyboard) return;
 		const root = document.documentElement;
 		let showRemove: (() => void) | undefined;
 		let hideRemove: (() => void) | undefined;
@@ -958,7 +966,7 @@ export const Chat = () => {
 			hideRemove?.();
 			root.style.removeProperty('--keyboard-height');
 		};
-	}, [native]);
+	}, [hasSoftwareKeyboard]);
 
 	// Sealed sender: on connect, make sure my delivery token exists and both
 	// server stores know it (register-token writes the DO validator + the D1
@@ -1335,8 +1343,10 @@ export const Chat = () => {
 	return (
 		<div
 			className="h-dvh flex flex-col overflow-hidden"
-			// Native: height = full viewport minus the keyboard, where
-			// `--keyboard-height` is set from keyboardWillShow/WillHide (below). The
+				// Native WITH a software keyboard: height = full viewport minus the
+			// keyboard, where `--keyboard-height` comes from keyboardWillShow/WillHide
+			// (below). Without one (a Mac running the iPad app) the height is fixed —
+			// see the note on the height line. The
 			// transition makes the composer slide up in lockstep with the keyboard
 			// (no lag), and shrinking the app keeps content above the keyboard so
 			// WKWebView never scroll-reveals the input. Web: pin to visualViewport
@@ -1344,12 +1354,16 @@ export const Chat = () => {
 			style={
 				native
 					? {
-							height: 'calc(100dvh - var(--keyboard-height, 0px))',
+							// Fixed height where there is no software keyboard. The ghost row is
+							// caused by this height CHANGING: focusing a field on a Mac makes
+							// iPadOS fire keyboardWillShow with a height for a keyboard it never
+							// draws, the shell shrinks, the bottom row moves up, and WKWebView
+							// leaves a stale copy painted at the OLD position. Nothing to
+							// subtract means nothing to leave behind.
+							height: hasSoftwareKeyboard ? 'calc(100dvh - var(--keyboard-height, 0px))' : '100dvh',
 							// Front-loaded easing (fast start) so the composer catches the
 							// keyboard from the first frame despite the ~1-frame JS delay
-							// before the transition begins. Only where a software keyboard
-							// exists — on a Mac it never fires, and the permanently
-							// animatable height left ghost repaints in WKWebView.
+							// before the transition begins.
 							...(hasSoftwareKeyboard ? { transition: 'height 0.25s cubic-bezier(0.16, 0.8, 0.3, 1)' } : {}),
 						}
 					: viewportHeight

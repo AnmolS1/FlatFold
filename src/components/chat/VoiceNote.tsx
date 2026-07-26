@@ -124,7 +124,7 @@ export const VoiceNote = ({ url, durationMs, own }: VoiceNoteProps) => {
 				})}
 			</div>
 
-			<span className={`flex-shrink-0 font-mono text-xs ${own ? 'text-on-crease/80' : 'text-graphite-40'}`}>{formatDuration(duration)}</span>
+			<span className={`flex-shrink-0 font-mono text-xs ${own ? 'text-on-crease-dim' : 'text-graphite-40'}`}>{formatDuration(duration)}</span>
 		</div>
 	);
 };

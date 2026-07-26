@@ -116,17 +116,17 @@ export const MessageItem = memo(({ message, isOwnMessage, currentUsername, anima
 								isOwnMessage ? 'border-on-crease/60 bg-on-crease/10' : 'border-crease bg-crease/5'
 							}`}
 						>
-							<span className={`block font-mono font-semibold ${isOwnMessage ? 'text-on-crease/80' : 'text-crease'}`}>
+							<span className={`block font-mono font-semibold ${isOwnMessage ? 'text-on-crease-dim' : 'text-crease'}`}>
 								{message.replyTo.from === currentUsername ? 'You' : message.replyTo.from}
 							</span>
-							<span className={`block truncate ${isOwnMessage ? 'text-on-crease/80' : 'text-graphite-60'}`}>
+							<span className={`block truncate ${isOwnMessage ? 'text-on-crease-dim' : 'text-graphite-60'}`}>
 								{message.replyTo.text}
 							</span>
 						</div>
 					)}
 
 					{message.deleted ? (
-						<p className={`text-sm italic ${isOwnMessage ? 'text-on-crease/80' : 'text-graphite-40'}`}>This message was deleted</p>
+						<p className={`text-sm italic ${isOwnMessage ? 'text-on-crease-dim' : 'text-graphite-40'}`}>This message was deleted</p>
 					) : (
 						<>
 							{message.media && (
@@ -140,7 +140,7 @@ export const MessageItem = memo(({ message, isOwnMessage, currentUsername, anima
 
 					<div
 						className={`flex items-center gap-1 mt-1 text-xs font-mono ${
-							isOwnMessage ? 'text-on-crease/80 justify-end' : 'text-graphite-40'
+							isOwnMessage ? 'text-on-crease-dim justify-end' : 'text-graphite-40'
 						}`}
 					>
 						<span>{formatTimestamp(message.ts)}</span>

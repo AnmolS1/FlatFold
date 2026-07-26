@@ -67,6 +67,7 @@
 
 	--color-crease: #2E5E8C;
 	--color-on-crease: #FFFFFF;
+	--color-on-crease-dim: #F0F4F7;
 	--color-crease-line: rgba(46, 94, 140, 0.13);
 	--color-crease-line-bold: rgba(46, 94, 140, 0.28);
 	--color-grid-line: rgba(46, 94, 140, 0.07);
@@ -82,6 +83,7 @@
 	--color-on-sax: #1B2A33;
 	--color-orbit: #2A2A6E;
 	--color-orbit-fg: #FFFFFF;
+	--color-orbit-fg-dim: #C3C3D6;
 	--color-orbit-ink: #2A2A6E;
 
 	--font-display: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
@@ -134,6 +136,7 @@
 	--color-graphite-40: rgba(27, 42, 51, 0.4);
 	--color-crease: #2E5E8C;
 	--color-on-crease: #FFFFFF;
+	--color-on-crease-dim: #F0F4F7;
 	--color-crease-line: rgba(46, 94, 140, 0.13);
 	--color-crease-line-bold: rgba(46, 94, 140, 0.28);
 	--color-grid-line: rgba(46, 94, 140, 0.07);
@@ -145,6 +148,7 @@
 	--color-sax-on-orbit: #D9A521;
 	--color-on-sax: #1B2A33;
 	--color-orbit: #2A2A6E;
+	--color-orbit-fg-dim: #C3C3D6;
 	--color-orbit-fg: #FFFFFF;
 	--color-orbit-ink: #2A2A6E;
 	--shadow-card: 0 8px 22px rgba(27, 42, 51, 0.10);
@@ -160,6 +164,7 @@
 	--color-graphite-60: rgba(233, 236, 231, 0.70);
 	--color-graphite-40: rgba(233, 236, 231, 0.50);
 	--color-crease: #82A9CE;
+	--color-on-crease-dim: #1D2D3A;
 	--color-on-crease: #0E1A24;
 	--color-crease-line: rgba(130, 169, 206, 0.16);
 	--color-crease-line-bold: rgba(130, 169, 206, 0.30);
@@ -172,6 +177,7 @@
 	--color-sax-on-orbit: #E0B43F;
 	--color-on-sax: #0E1A24;
 	--color-orbit: #212146;
+	--color-orbit-fg-dim: #B1B3BA;
 	--color-orbit-fg: #E9ECE7;
 	--color-orbit-ink: #A6A8DC;
 	--shadow-card: 0 10px 26px rgba(0, 0, 0, 0.45);
@@ -187,6 +193,7 @@
 	--color-graphite-60: #6B5C48;
 	--color-graphite-40: rgba(58, 47, 35, 0.45);
 	--color-crease: #8A4B2A;
+	--color-on-crease-dim: #F7F2F0;
 	--color-on-crease: #FFFFFF;
 	--color-crease-line: rgba(138, 75, 42, 0.15);
 	--color-crease-line-bold: rgba(138, 75, 42, 0.30);
@@ -202,6 +209,7 @@
 	   sheet 1.27:1. The orbit panel is a dark console in every other theme; a deep
 	   aubergine keeps that role while staying warm enough for Vellum. */
 	--color-orbit: #2B2340;
+	--color-orbit-fg-dim: #BEB7B6;
 	--color-orbit-fg: #F7F1E4;
 	--color-orbit-ink: #463A66;
 	--shadow-card: 0 8px 22px rgba(58, 47, 35, 0.12);
@@ -217,6 +225,7 @@
 	--color-graphite-60: #4A4E52;
 	--color-graphite-40: rgba(22, 24, 26, 0.45);
 	--color-crease: #2E5E8C;
+	--color-on-crease-dim: #F0F4F7;
 	--color-on-crease: #FFFFFF;
 	--color-crease-line: rgba(22, 24, 26, 0.12);
 	--color-crease-line-bold: rgba(22, 24, 26, 0.24);
@@ -229,6 +238,7 @@
 	--color-sax-on-orbit: #D9A521;
 	--color-on-sax: #16181A;
 	--color-orbit: #2A2A6E;
+	--color-orbit-fg-dim: #C3C3D6;
 	--color-orbit-fg: #FFFFFF;
 	--color-orbit-ink: #2A2A6E;
 	--shadow-card: 0 8px 22px rgba(22, 24, 26, 0.10);
@@ -244,6 +254,7 @@
 	--color-graphite-60: rgba(240, 233, 226, 0.70);
 	--color-graphite-40: rgba(240, 233, 226, 0.50);
 	--color-crease: #F08A5D;
+	--color-on-crease-dim: #39261B;
 	--color-on-crease: #14110E;
 	--color-crease-line: rgba(240, 138, 93, 0.18);
 	--color-crease-line-bold: rgba(240, 138, 93, 0.32);
@@ -256,6 +267,7 @@
 	--color-sax-on-orbit: #E0B43F;
 	--color-on-sax: #14110E;
 	--color-orbit: #2A2246;
+	--color-orbit-fg-dim: #B9B1B6;
 	--color-orbit-fg: #F0E9E2;
 	--color-orbit-ink: #C0A6DC;
 	--shadow-card: 0 10px 26px rgba(0, 0, 0, 0.5);

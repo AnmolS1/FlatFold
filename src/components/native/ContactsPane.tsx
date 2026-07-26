@@ -183,7 +183,7 @@ const ContactsPaneComponent = ({
 											onClick={() => onRemove(c.username)}
 											aria-label={`Remove ${c.username}`}
 											title="Remove contact"
-											className="flex-shrink-0 w-11 h-11 flex items-center justify-center rounded-lg text-crane-ink/80 hover:text-crane-ink transition-colors"
+											className="flex-shrink-0 w-11 h-11 flex items-center justify-center rounded-lg text-crane-ink hover:opacity-70 transition-opacity"
 										>
 											<Trash2 className="w-5 h-5" />
 										</button>

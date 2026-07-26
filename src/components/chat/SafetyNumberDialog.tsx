@@ -167,13 +167,13 @@ export const SafetyNumberDialog = ({ selfUsername, contact, onClose, onSetVerifi
 					<ShieldCheck className="w-5 h-5" />
 					Verify {contact.username}
 				</h2>
-				<p className="text-sm text-orbit-fg/70 mb-4">
+				<p className="text-sm text-orbit-fg-dim mb-4">
 					Compare this safety number with {contact.username} through a channel you already trust. If it matches on both
 					devices, no one is intercepting your messages.
 				</p>
 
 				{safetyNumber === null ? (
-					<p className="font-mono text-sm text-orbit-fg/60 py-8 text-center">Computing…</p>
+					<p className="font-mono text-sm text-orbit-fg-dim py-8 text-center">Computing…</p>
 				) : (
 					<>
 						<div className="font-mono text-base tracking-wide bg-black/25 rounded-xl p-4 mb-4 grid grid-cols-3 gap-x-3 gap-y-2 text-center">
@@ -191,7 +191,7 @@ export const SafetyNumberDialog = ({ selfUsername, contact, onClose, onSetVerifi
 						{scanning && (
 							<div className="mb-4">
 								<video ref={videoRef} className="w-full rounded-lg bg-black" playsInline />
-								<button onClick={stopScanning} className="mt-2 text-sm text-orbit-fg/70 hover:text-orbit-fg">
+								<button onClick={stopScanning} className="mt-2 text-sm text-orbit-fg-dim hover:text-orbit-fg">
 									Cancel scan
 								</button>
 							</div>
@@ -205,7 +205,7 @@ export const SafetyNumberDialog = ({ selfUsername, contact, onClose, onSetVerifi
 									<span className="flex items-center gap-2 text-sax-on-orbit font-medium">
 										<Check className="w-4 h-4" /> Verified
 									</span>
-									<button onClick={() => void markVerified(false)} className="text-sm text-orbit-fg/60 hover:text-orbit-fg underline">
+									<button onClick={() => void markVerified(false)} className="text-sm text-orbit-fg-dim hover:text-orbit-fg underline">
 										Clear verification
 									</button>
 								</div>
@@ -226,7 +226,7 @@ export const SafetyNumberDialog = ({ selfUsername, contact, onClose, onSetVerifi
 										Mark as verified
 									</button>
 									{!scanSupported && (
-										<p className="text-xs text-orbit-fg/60 text-center">
+										<p className="text-xs text-orbit-fg-dim text-center">
 											Live scanning isn&rsquo;t supported in this browser — compare the digits above instead.
 										</p>
 									)}

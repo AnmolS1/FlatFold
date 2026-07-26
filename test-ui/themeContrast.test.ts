@@ -22,6 +22,20 @@ import { resolve as resolvePath } from 'node:path';
 //
 // Add a row here whenever a component introduces a new foreground/background
 // pairing. That is cheaper than another round of "the theme looked fine".
+//
+// A LIMIT worth knowing, found by checking these numbers against a real browser
+// (Chrome, painting to a canvas and reading the pixel back): the composite()
+// below models a Tailwind `/NN` modifier as straight sRGB alpha, but Tailwind v4
+// emits `color-mix(in oklab, …)`, and the two disagree — measured 4.61 where
+// this file computed 4.99. Optimistic, i.e. in the unsafe direction.
+//
+// So no TEXT that has to clear 4.5 uses an opacity modifier any more. Where
+// something needed to look de-emphasised it gets a token whose value is
+// precomputed per theme (`--color-orbit-fg-dim`, `--color-on-crease-dim`), which
+// is an exact colour with no mixing at render time — nothing left to model, and
+// this file and the browser agree by construction. `/NN` survives only on fills
+// and boundaries at the 3.0 bar, where the margin swallows the difference. A
+// grep below enforces that.
 
 // Read off disk, from the repo root (vitest's cwd). Not via Vite's `?raw`:
 // index.css would come back COMPILED by Tailwind, with the token blocks gone —
@@ -145,13 +159,11 @@ interface Pairing {
 const PAIRINGS: Pairing[] = [
 	// --- the orbit panel: SafetyNumberDialog, the verification surface -------
 	{ where: 'SafetyNumberDialog:155 sheet body', fg: 'orbit-fg', bg: ['orbit'], bar: TEXT },
-	{ where: 'SafetyNumberDialog:170 explainer', fg: 'orbit-fg/70', bg: ['orbit'], bar: TEXT },
-	{ where: 'SafetyNumberDialog:176 "Computing…"', fg: 'orbit-fg/60', bg: ['orbit'], bar: TEXT },
+	{ where: 'SafetyNumberDialog:170/176/194/208/229 de-emphasis', fg: 'orbit-fg-dim', bg: ['orbit'], bar: TEXT },
 	{ where: 'SafetyNumberDialog:179 safety digits', fg: 'orbit-fg', bg: ['orbit', 'black/25'], bar: TEXT },
 	{ where: 'SafetyNumberDialog:205 "Verified"', fg: 'sax-on-orbit', bg: ['orbit'], bar: TEXT },
 	{ where: 'SafetyNumberDialog:217 scan button border', fg: 'orbit-fg/40', bg: ['orbit'], bar: GRAPHIC },
 	{ where: 'SafetyNumberDialog:224 "Mark as verified"', fg: 'on-sax', bg: ['sax'], bar: TEXT },
-	{ where: 'SafetyNumberDialog:229 unsupported hint', fg: 'orbit-fg/60', bg: ['orbit'], bar: TEXT },
 	{ where: 'SafetyNumberDialog:160 key-change banner', fg: 'white', bg: ['crane'], bar: TEXT },
 
 	// --- crane, the primary-action fill: 18 sites, every button in the app ----
@@ -162,7 +174,11 @@ const PAIRINGS: Pairing[] = [
 	// Own-message bubbles are bg-crease. The most-rendered text in the app, and
 	// `text-white` on crease was 2.47:1 in both dark themes.
 	{ where: 'MessageItem:106 own bubble body', fg: 'on-crease', bg: ['crease'], bar: TEXT },
-	{ where: 'MessageItem:119/122/129/143 own-bubble meta', fg: 'on-crease/80', bg: ['crease'], bar: TEXT },
+	{ where: 'MessageItem:129/143 own-bubble meta', fg: 'on-crease-dim', bg: ['crease'], bar: TEXT },
+	// Inside the reply quote the surface is crease LIGHTENED by a 10% on-crease
+	// wash, not bare crease. Omitting that layer is how this row read 4.97 here
+	// while a real browser measured 3.81 — see the note on opacity below.
+	{ where: 'MessageItem:119/122 reply-quote text', fg: 'on-crease-dim', bg: ['crease', 'on-crease/10'], bar: TEXT },
 	{ where: 'MessageItem:116 own-bubble reply rule', fg: 'on-crease/60', bg: ['crease'], bar: GRAPHIC },
 	{ where: 'VoiceNote:88 own waveform accent', fg: 'on-crease', bg: ['crease'], bar: GRAPHIC },
 	// GRAPHIC, not TEXT: it is a play/pause glyph in a button that carries its own
@@ -247,6 +263,16 @@ describe('theme contrast', () => {
 			// crease is a LIGHT blue/apricot in the dark themes, so white on it is
 			// 2.47:1 there. Own-message bubbles are the biggest instance.
 			const offenders = SOURCES.filter(([, body]) => /\bbg-crease\b[^"'`]*\btext-white\b/.test(body)).map(([path]) => path);
+			expect(offenders).toEqual([]);
+		});
+
+		it('no opacity-modified TEXT — de-emphasis uses a precomputed -dim token', () => {
+			// The sRGB model above disagrees with Tailwind v4's oklab color-mix by
+			// enough to matter (4.99 computed vs 4.61 measured), always optimistic.
+			// Fills and borders may still use /NN; text may not.
+			const offenders = SOURCES.filter(([, body]) => /\btext-[a-z-]+\/\d+/.test(body)).flatMap(([path, body]) =>
+				(body.match(/\btext-[a-z-]+\/\d+/g) ?? []).map((cls) => `${path}: ${cls}`)
+			);
 			expect(offenders).toEqual([]);
 		});
 

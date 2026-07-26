@@ -1,6 +1,6 @@
 # FlatFold: current status — START HERE
 
-**This file is the entry point. There are 26 docs; you do not need most of them,
+**This file is the entry point. There are 28 docs; you do not need most of them,
 and several look current but are not.**
 
 Read in this order:
@@ -21,7 +21,15 @@ and the demo-account section of `redesign/D5_appstore_copy.md` (superseded by
 the **Build** id (a stale WKWebView bundle has already caused two misfiled bug
 reports) and the **Platform** line (`iPad app on Mac` vs `iOS/iPadOS`).
 
-Originally written 2026-07-25 for a Cowork review session; kept current.
+Originally written 2026-07-25 for a Cowork review session.
+
+**On the numbers below.** Anything that moves per-deploy — worker version, test
+count, which PR is merged — is stamped with the date it was checked, because this
+file asserts them and will therefore go stale by construction. It already did
+once: the commit that made this the entry point left the version, test count and
+tracked-file claims describing the state before the last merge. If a number here
+is not stamped today, trust `redesign/HANDOFF_2026-07-26.md` over it — being
+dated, its staleness is at least legible.
 
 ## What FlatFold is
 
@@ -44,13 +52,19 @@ Objects for mailboxes, D1 for storage, and R2 for media.
 
 ## Status: the build is done and shipped
 
-Every step of the native build order is complete and live. PRs #8 (48 commits),
-#9 (prekey replenishment) and #10 (passkey unlock) are merged to `prod`; prod
-worker version `f806820a`. Everything described here is deployed.
+*Verified 2026-07-26 against `d96ebe4`.*
 
-**FULL_AUDIT_2 response (2026-07-25) is on `feat/native-token-auth` and NOT yet
-merged or deployed** — 7 commits covering A1–A4, S1, S2, S3, R1 and U1. See
-"What is genuinely open" below for what it did and did not close.
+Every step of the native build order is complete and live. PRs #8 (48 commits),
+#9 (prekey replenishment), #10 (passkey unlock) and #11 (the FULL_AUDIT_2
+response — A1–A4, S1, S2, S3, R1, U1) are all merged to `prod`; prod worker
+version `e4f83dc8`. Everything in the table below is deployed.
+
+**Four commits are NOT** — `864cf16`, `9ce31a1`, `acd170a`, `d96ebe4`, sitting
+unpushed on `feat/native-token-auth`. They are the Mac follow-ups and the docs
+work; the handoff covers what they do and which of them is unverified on device.
+Note that `git log prod..HEAD` overstates this badly: PR #11 was **squash**-merged
+as `bd367c6`, so all 17 pre-squash originals still look unmerged. Compare against
+`origin/prod` and read the squash commit, not the count.
 
 | Area | State |
 | --- | --- |
@@ -62,9 +76,9 @@ merged or deployed** — 7 commits covering A1–A4, S1, S2, S3, R1 and U1. See
 | TLS pinning | Shipped and proven with both controls. See `TLS_PINNING.md`. |
 | Release pipeline | Working. A `v*` tag builds and uploads to TestFlight via CI. |
 | Compliance | US: nothing to file (public source is not subject to the EAR). France: ANSSI declaration accepted. |
-| macOS, Android | **Not built.** In the original scope, never started. |
+| macOS, Android | **Not built.** Android never started. macOS is not merely unstarted — Mac Catalyst was spiked and is **blocked**; see open item 2. |
 
-Tests: 641 passing. `tsc -b` and eslint are clean.
+Tests: 662 passing across 63 files (2026-07-26). `tsc -b` and eslint are clean.
 
 ## The two-layer auth model, which trips everyone up
 
@@ -237,9 +251,19 @@ per-feature evidence is described in the commit messages and in
    The interesting part for a reviewer is the ordering: secrets are persisted
    locally before the public halves are published, so a crash can never leave a
    published key whose secret was lost.
-2. **macOS and Android are unbuilt.** Only the iOS app exists. iPadOS comes free
-   through the universal build, and Macs can run the iPad app, but there is no true
-   Mac Catalyst or Android target.
+2. **macOS is BLOCKED, not merely unstarted. Do not start a Catalyst attempt
+   without reading this.** Only the iOS app exists; iPadOS comes free through the
+   universal build, and a Mac can run the iPad app ("Designed for iPad"). Mac
+   Catalyst was spiked on 2026-07-26 and **cannot link**: Capacitor 8's SwiftPM
+   distribution of `Capacitor.xcframework` ships only `ios-arm64` and
+   `ios-arm64_x86_64-simulator`, with no `maccatalyst` slice. Recorded on branch
+   `spike/mac-catalyst` (`5bc798e`), not merged. The only escape is migrating the
+   build to CocoaPods, which compiles from source. `DESKTOP_SHELL_OPTIONS.md` lays
+   out five options and argues the decision turns on **secure storage** — the
+   master key currently lives in a Secure-Enclave-gated Keychain item, and the
+   Tauri routes move that custody onto single-maintainer community plugins. The
+   passthrough Mac build also has **no microphone** (open item 7). Android was
+   never started.
 3. **App Store submission items:** the D5 store copy and the D6 privacy label are
    drafted but not submitted. The review demo accounts now EXIST: `flatfold_review1`
    and `flatfold_review2` on prod, created and sign-in-verified 2026-07-25, sharing
@@ -261,17 +285,39 @@ per-feature evidence is described in the commit messages and in
    `useMailboxSocket` / `useConversationState` extraction is deliberately NOT done
    — restructuring that much untested code alongside a theme migration is how you
    introduce the bug an audit didn't find. Tests first, extraction as its own change.
-6. **`docs/` is closer to trackable, but not cleared.** FULL_AUDIT_2 P1 recommends
-   putting the design docs under version control on the grounds that they hold
-   nothing sensitive. That was not true: a live prod password and a personal
-   device UDID were in the handoff doc. **Both were redacted 2026-07-25** and now
-   live in `.env.asc` (gitignored), which the docs point at rather than quote.
-   Nothing ever leaked — the directory has never been committed. Still open
-   The personal account names and the preview hostname were redacted in the same
-   pass and on the same reasoning: identifiers rather than secrets, but they tie
-   the repo to a person. Re-run a scan before flipping the ignore, and remember
-   git history is not undoable.
-7. **Smaller follow-ups:** the native push title is a fixed generic rather than the
+6. ~~`docs/` is untracked and not cleared for tracking.~~ **Tracked as of
+   `9ce31a1` — but that commit is NOT PUSHED, so this is the last reversible
+   moment.** FULL_AUDIT_2 P1 recommended putting the design docs under version
+   control on the grounds that they hold nothing sensitive. That was not true when
+   it was written: a live prod password and a personal device UDID sat in the
+   handoff doc. Both were redacted on 2026-07-25 into `.env.asc` (gitignored via
+   the `.*env*` pattern), which the docs now point at rather than quote; the
+   personal account names and the preview hostname went the same way, on the
+   reasoning that they are identifiers rather than secrets but still tie the repo
+   to a person.
+
+   A scan of all 28 tracked blobs **at `d96ebe4`** — the content a push would
+   actually publish, not the working tree — was re-run on 2026-07-26 against every
+   value in `.env.asc`, with word-boundary matching (a naive substring scan gives
+   false positives; `disco` matches inside `discovery`). Clean for the password,
+   the UDID, the personal handles and the preview hostname.
+
+   **The one accepted exposure**, so nobody thinks it was missed: the two demo
+   account *usernames* appear in four docs. That is deliberate — `D5b` exists to
+   be pasted into App Store Connect and has to name them — and the shared password
+   is only in `.env.asc`. The repo is **public**, so this does publish two valid
+   usernames. Low risk, because username-based identity is enumerable by design
+   here, but it is a decision rather than an oversight. Remember git history is not
+   undoable: once `9ce31a1` is pushed, this is settled.
+7. **The Mac ("Designed for iPad") round left two things open.** Full detail, with
+   what has already been ruled out on each, is in `redesign/HANDOFF_2026-07-26.md`
+   — read that before touching either, because between them they cost four wrong
+   fixes. In short: (a) the **ghost row** over the composer on focus was an empty
+   iPadOS input accessory bar, not anything in the web layer; the fix is `9ce31a1`
+   and it **compiles but is unverified on device**. (b) The **microphone** never
+   prompts, and the likely fix is a Catalyst-only sandbox entitlement, so it is
+   blocked behind item 2. Recommendation was to park it rather than keep digging.
+8. **Smaller follow-ups:** the native push title is a fixed generic rather than the
    user's custom decoy label (the setting's help text now says so explicitly);
    `@capacitor/local-notifications` and `initNativePushDisplay` are now inert and
    could be removed; `--color-orbit-ink` is defined in every theme block and used
@@ -292,8 +338,13 @@ docs/            THREAT_MODEL and TLS_PINNING are public; the rest is local
 docs/redesign/   design specs D1 to D7, the build prompt, the live handoff
 ```
 
-Only `docs/THREAT_MODEL.md` and `docs/TLS_PINNING.md` are tracked in git. The rest
-of `docs/` is gitignored, so anything deleted there is gone permanently.
+**All 28 files in `docs/` are now tracked in git** (as of `9ce31a1`, unpushed —
+see open item 6). This reverses the old warning that deleting a doc lost it
+permanently: they are now the recoverable ones. `THREAT_MODEL.md` and
+`TLS_PINNING.md` were always tracked and are written for a public audience; the
+rest were written as working documents and read that way, so treat anything in
+`redesign/` as internal notes that happen to be published rather than as
+documentation.
 
 ## Where a review would help most
 

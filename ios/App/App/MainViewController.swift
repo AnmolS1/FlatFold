@@ -30,6 +30,51 @@ class MainViewController: CAPBridgeViewController {
         )
         bridge?.webView?.configuration.userContentController.addUserScript(script)
 
+        // Kill the empty input-accessory bar on Mac.
+        //
+        // THIS is the "ghost row": focusing any text field made iPadOS dock an
+        // input accessory bar at the bottom of the webview, drawn over the real
+        // bottom row and empty because a Mac has no software keyboard. Three
+        // CSS-side fixes failed because it was never in the web layer at all.
+        //
+        // @capacitor/keyboard already suppresses this — but by swizzling
+        // `inputAccessoryView` on classes looked up by HARDCODED name
+        // ("UIWebBrowserView", "WKContentView"). On a Mac those do not resolve,
+        // `class_getInstanceMethod(nil, ...)` returns NULL, and the swizzle
+        // silently no-ops. Hence: iPhone and iPad fine, Mac not.
+        //
+        // Fixed by finding the content view at RUNTIME and reclassing that one
+        // instance, rather than guessing a name or mutating a shared class.
+        // Scoped to isiOSAppOnMac so iOS behaviour is untouched.
+        if isOnMac { suppressInputAccessoryView() }
+    }
+
+    private func suppressInputAccessoryView() {
+        guard let webView = bridge?.webView else { return }
+        // The content view is the scroll view's subview that can become first
+        // responder — that is the one UIKit asks for an accessory view.
+        guard let contentView = webView.scrollView.subviews.first(where: { $0.canBecomeFirstResponder }) else { return }
+
+        let baseClass: AnyClass = type(of: contentView)
+        guard let baseName = String(cString: class_getName(baseClass), encoding: .utf8) else { return }
+        let subclassName = "FlatFoldNoAccessory_\(baseName)"
+
+        // Reuse the subclass if a previous webview already created it.
+        let subclass: AnyClass
+        if let existing = NSClassFromString(subclassName) {
+            subclass = existing
+        } else {
+            guard let created = objc_allocateClassPair(baseClass, subclassName, 0) else { return }
+            let getter = #selector(getter: UIResponder.inputAccessoryView)
+            let block: @convention(block) (AnyObject) -> UIView? = { _ in nil }
+            if let method = class_getInstanceMethod(UIResponder.self, getter) {
+                class_addMethod(created, getter, imp_implementationWithBlock(block), method_getTypeEncoding(method))
+            }
+            objc_registerClassPair(created)
+            subclass = created
+        }
+        object_setClass(contentView, subclass)
+
         // Hardening (build-order step 7): a shipped build must never expose the
         // WKWebView to the Safari Web Inspector — decrypted message content and the
         // bearer token live in this webview, and an inspectable webview on a

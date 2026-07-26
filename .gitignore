@@ -24,7 +24,7 @@ dist-ssr
 *.sw?
 
 /hidden
-.env*
+.*env*
 temp.txt
 .vercel
 .wrangler
@@ -34,14 +34,33 @@ worker-configuration.d.ts
 /.claude
 .clinerules
 
-# Internal design/architecture/prompt/ops docs — kept LOCAL, not public.
-# The only public markdown is README.md, LICENSE, SECURITY.md, and
-# docs/THREAT_MODEL.md — force-included below despite the blanket ignores.
+# docs/ IS TRACKED as of 2026-07-26 (FULL_AUDIT_2 P1).
+#
+# It used to be blanket-ignored, which meant the whole design set, every audit,
+# and all the verification evidence existed on exactly one machine with no
+# backup — for a project whose security claims rest on "it was actually
+# checked", the evidence trail is the asset.
+#
+# It was made safe to track first, not assumed to be: the prod test-account
+# password, a personal device UDID, the personal account handles and the preview
+# hostname were all moved out to `.env.asc` (ignored by `.*env*` above) and the
+# directory re-scanned for credential-shaped strings, key material and private
+# addresses. Anything genuinely secret belongs in `.env.asc`, never here.
+#
+# What remains and is a JUDGEMENT CALL rather than an oversight: Apple team ID
+# G2KBQH7KWT, the APNs key IDs and the ASC resource id. Those identify the
+# account but are not credentials — the team id ships inside the app binary
+# anyway, and an APNs key id is useless without the .p8.
+#
+# Re-scan before adding new docs. Git history is not undoable.
+#
+# Root-level markdown stays local (build prompts and scratch notes).
 /*.md
-/docs/*.md
 !/README.md
 !/SECURITY.md
-!/docs/THREAT_MODEL.md
+
+# Local verification captures — may contain real message content.
+screenshots/
 
 # Playwright MCP screenshots / traces (local verification)
 .playwright-mcp/

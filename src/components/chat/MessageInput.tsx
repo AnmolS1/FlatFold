@@ -5,6 +5,8 @@ import type { DisplayMessage } from '../../types';
 import { haptic } from '../../lib/haptics';
 import { replySnippet } from '../../lib/reply';
 import { isApplePlayable, pickRecordingMimeType } from '../../lib/audioFormat';
+import { describeMicrophoneError } from '../../lib/mediaErrors';
+import { isIOSAppOnMac } from '../../lib/platform';
 
 interface MessageInputProps {
 	onSendMessage: (text: string) => Promise<void>;
@@ -125,8 +127,10 @@ const MessageInputComponent = ({
 			recordStartRef.current = Date.now();
 			recorder.start();
 			setRecording(true);
-		} catch {
-			setError('Could not access the microphone.');
+		} catch (err) {
+			// Name the failure. A bare catch here made the Mac microphone bug
+			// undiagnosable for several rounds — see lib/mediaErrors.
+			setError(describeMicrophoneError(err, isIOSAppOnMac()));
 		}
 	}, [onSendMedia]);
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Play, Pause } from 'lucide-react';
-import { getSharedAudioContext } from '../../lib/audioContext';
+import { getSharedAudioContext, decodeAudioLimited } from '../../lib/audioContext';
 import { describeVoiceNotePlaybackError } from '../../lib/mediaErrors';
 
 interface VoiceNoteProps {
@@ -69,8 +69,12 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 				// player and reported a codec error for a codec that was fine.
 				const ctx = getSharedAudioContext();
 				if (!ctx) throw new Error('no AudioContext');
-				const buf = await (await fetch(url)).arrayBuffer();
-				const decoded = await ctx.decodeAudioData(buf);
+				// Capped: N notes decoding at once is a memory spike and a pile
+				// of simultaneous decoder work. See lib/audioContext.
+				const decoded = await decodeAudioLimited(async () => {
+					const buf = await (await fetch(url)).arrayBuffer();
+					return ctx.decodeAudioData(buf);
+				});
 				if (cancelled) return;
 				setBars(peaksFrom(decoded.getChannelData(0)));
 				if (!durationMs) setDuration(decoded.duration);
@@ -84,9 +88,26 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 		};
 	}, [url, durationMs]);
 
+	// Take the media resource only on the first play.
+	//
+	// Every note used to hand its audio element the blob URL at mount time, so
+	// WebKit held a decoder per note — including every note nobody ever touched.
+	// That was the remaining exhaustion after the shared-AudioContext fix: notes
+	// failed 3-in-7 in a busy conversation and recovered on restart. Assigning the
+	// source on demand means an untouched note costs nothing at all.
+	const [activated, setActivated] = useState(false);
+
 	const toggle = () => {
 		const el = audioRef.current;
 		if (!el) return;
+		if (!activated) {
+			// Assign src and play inside the same user gesture, or autoplay
+			// policies reject the play().
+			el.src = url;
+			setActivated(true);
+			void el.play();
+			return;
+		}
 		if (el.paused) void el.play();
 		else el.pause();
 	};
@@ -99,7 +120,13 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 		return (
 			<div className="flex flex-col gap-1 min-w-[12rem]">
 				<audio
+					// This one KEEPS a source: it is the native `controls` player,
+					// and the user drives it directly, so there is no gesture of ours
+					// to hang a lazy assignment on. Preloading is disabled instead,
+					// which is what stops it opening a decoder — the browser fetches
+					// only once play is pressed. Same saving, working control.
 					src={url}
+					preload="none"
 					controls
 					className="h-8 max-w-full"
 					onError={() => {
@@ -119,7 +146,7 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 		<div className="flex items-center gap-3 min-w-[12rem]">
 			<audio
 				ref={audioRef}
-				src={url}
+				preload="none"
 				onPlay={() => setPlaying(true)}
 				onPause={() => setPlaying(false)}
 				onEnded={() => {

@@ -25,6 +25,42 @@ let shared: AudioContext | null = null;
 let unavailable = false;
 
 /**
+ * How many waveform decodes may run at once.
+ *
+ * Sharing the context was necessary but not sufficient: a conversation with
+ * several voice notes still failed (3 of 7), because every note also fetched and
+ * decoded on mount. `decodeAudioData` allocates a full PCM buffer per note —
+ * roughly 5 MB for 30 seconds of mono 44.1 kHz — so N notes decoding together is
+ * both a memory spike and a pile of simultaneous decoder work.
+ *
+ * Two is enough to keep waveforms appearing promptly while bounding the peak.
+ */
+export const DECODE_CONCURRENCY = 2;
+
+let active = 0;
+const waiting: Array<() => void> = [];
+
+/**
+ * Run an audio decode under a global concurrency cap.
+ *
+ * The slot is released in `finally`, so a decode that throws — which is exactly
+ * what happens when resources are already exhausted — cannot wedge the queue for
+ * every note after it.
+ */
+export async function decodeAudioLimited<T>(task: () => Promise<T>): Promise<T> {
+	if (active >= DECODE_CONCURRENCY) {
+		await new Promise<void>((resolve) => waiting.push(resolve));
+	}
+	active++;
+	try {
+		return await task();
+	} finally {
+		active--;
+		waiting.shift()?.();
+	}
+}
+
+/**
  * The process-wide AudioContext, or null if this platform has none.
  *
  * Returns null rather than throwing so callers can degrade to the native

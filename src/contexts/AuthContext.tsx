@@ -178,6 +178,15 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 	// A crash between (1) and (3) is safe: the record still opens with whichever
 	// password the server ended up on, and the next unlock collapses it. On a
 	// server rejection we roll the staged wrap back so the old password is intact.
+	//
+	// Then (4): revoke this device's unlock enrollments (FULL_AUDIT_2 S1). The
+	// re-wrap keeps the SAME master key — that is what makes the change atomic —
+	// so the passkey wrap and the Secure-Enclave Keychain item both still release
+	// MK afterwards. People change their password because they think it is
+	// compromised, and a change that leaves someone else's enrolled Face ID
+	// working has not done the thing it appeared to do. The server already gets
+	// this right by bumping the epoch and killing other sessions; this is the
+	// local half. Re-enrolling is one tap and is the user's deliberate choice.
 	const changePassword = async (current: string, next: string): Promise<'ok' | 'wrong-password'> => {
 		if (!username) throw new Error('Cannot change password with no authenticated user.');
 		const staged = await keystore.stageChangePassword(username, current, next);
@@ -189,6 +198,12 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 			throw err;
 		}
 		await keystore.finalizeChangePassword(username);
+		// Strictly after finalize, and best-effort. The password HAS changed by
+		// now, both locally and on the server; reporting that as a failure because
+		// a Keychain delete complained would be a lie, and there is nothing left to
+		// roll back at this point. A revocation that fails leaves a stale unlock,
+		// which is the pre-existing behaviour, not a new hole.
+		await Promise.allSettled([keystore.disablePasskeyUnlock(username), keystore.disableBiometric(username)]);
 		return 'ok';
 	};
 

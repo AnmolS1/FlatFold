@@ -109,6 +109,9 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 	const [changeBusy, setChangeBusy] = useState(false);
 	const [changeError, setChangeError] = useState<string | null>(null);
 	const [changeDone, setChangeDone] = useState(false);
+	// Bumped whenever something invalidates the device unlock enrollments, to force
+	// BiometricSection / PasskeySection to re-read them.
+	const [unlockEpoch, setUnlockEpoch] = useState(0);
 
 	const resetChangeForm = useCallback(() => {
 		setChangeArmed(false);
@@ -141,6 +144,12 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 			}
 			resetChangeForm();
 			setChangeDone(true);
+			// A successful change revokes this device's passkey / Face ID unlock
+			// (S1). Those sections read their enrolled state once on mount, so
+			// without this they'd keep showing ON for an enrollment that no longer
+			// exists — the settings screen lying about a security control is worse
+			// than the stale unlock was.
+			setUnlockEpoch((n) => n + 1);
 		} catch (err) {
 			setChangeError(err instanceof Error ? err.message : 'Could not change your password.');
 		} finally {
@@ -309,7 +318,12 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 							>
 								<KeyRound className="w-3.5 h-3.5" /> Change password
 							</button>
-							{changeDone && <p className="text-xs text-sax-ink mt-2">Password changed. Every other device has been signed out.</p>}
+							{changeDone && (
+							<p className="text-xs text-sax-ink mt-2">
+								Password changed. Every other device has been signed out, and passkey and Face ID unlock
+								were turned off on this device — turn them back on below if you want them.
+							</p>
+						)}
 						</>
 					) : (
 						<div className="space-y-2 border border-crease-line-bold rounded-lg p-3">
@@ -441,8 +455,8 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 				{twoFactorEnabled !== null && <TwoFactorSection username={username} initialEnabled={twoFactorEnabled} />}
 
 				{/* Biometric unlock (D7 §5, native — self-hides on web) */}
-				<BiometricSection username={username} />
-				<PasskeySection username={username} />
+				<BiometricSection key={`bio-${unlockEpoch}`} username={username} />
+				<PasskeySection key={`pk-${unlockEpoch}`} username={username} />
 
 				{/* Notifications + decoy label */}
 				<section>

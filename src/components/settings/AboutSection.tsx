@@ -28,16 +28,16 @@ export function AboutSection() {
 						href={SOURCE_URL}
 						target="_blank"
 						rel="noopener noreferrer"
-						className="flex items-center gap-2 text-crease hover:text-crane transition-colors"
+						className="flex items-center gap-2 text-crease hover:text-crane-ink transition-colors"
 					>
 						<ExternalLink className="w-4 h-4" /> View source
 					</a>
-					<Link to="/transparency" className="flex items-center gap-2 text-crease hover:text-crane transition-colors">
+					<Link to="/transparency" className="flex items-center gap-2 text-crease hover:text-crane-ink transition-colors">
 						<ShieldCheck className="w-4 h-4" /> What the server stores
 					</Link>
 					<a
 						href={`mailto:${SECURITY_EMAIL}`}
-						className="flex items-center gap-2 text-crease hover:text-crane transition-colors"
+						className="flex items-center gap-2 text-crease hover:text-crane-ink transition-colors"
 					>
 						<Mail className="w-4 h-4" /> Report a security issue
 					</a>

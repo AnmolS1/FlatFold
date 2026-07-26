@@ -152,7 +152,7 @@ export const SafetyNumberDialog = ({ selfUsername, contact, onClose, onSetVerifi
 	}, [scanSupported, safetyNumber, stopScanning, markVerified]);
 
 	return (
-		<BottomSheet onClose={onClose} panelClassName="bg-orbit text-white" labelledBy="safety-number-title">
+		<BottomSheet onClose={onClose} panelClassName="bg-orbit text-orbit-fg" labelledBy="safety-number-title">
 			<div className="px-5 pb-5 max-w-md mx-auto w-full">
 				{keyChanged && (
 					// Reused for key-change warnings: a crane banner at the top of the
@@ -167,13 +167,13 @@ export const SafetyNumberDialog = ({ selfUsername, contact, onClose, onSetVerifi
 					<ShieldCheck className="w-5 h-5" />
 					Verify {contact.username}
 				</h2>
-				<p className="text-sm text-white/70 mb-4">
+				<p className="text-sm text-orbit-fg/70 mb-4">
 					Compare this safety number with {contact.username} through a channel you already trust. If it matches on both
 					devices, no one is intercepting your messages.
 				</p>
 
 				{safetyNumber === null ? (
-					<p className="font-mono text-sm text-white/60 py-8 text-center">Computing…</p>
+					<p className="font-mono text-sm text-orbit-fg/60 py-8 text-center">Computing…</p>
 				) : (
 					<>
 						<div className="font-mono text-base tracking-wide bg-black/25 rounded-xl p-4 mb-4 grid grid-cols-3 gap-x-3 gap-y-2 text-center">
@@ -191,21 +191,21 @@ export const SafetyNumberDialog = ({ selfUsername, contact, onClose, onSetVerifi
 						{scanning && (
 							<div className="mb-4">
 								<video ref={videoRef} className="w-full rounded-lg bg-black" playsInline />
-								<button onClick={stopScanning} className="mt-2 text-sm text-white/70 hover:text-white">
+								<button onClick={stopScanning} className="mt-2 text-sm text-orbit-fg/70 hover:text-orbit-fg">
 									Cancel scan
 								</button>
 							</div>
 						)}
 
-						{scanError && <p className="text-sm text-crane mb-3">{scanError}</p>}
+						{scanError && <p className="text-sm text-crane-ink mb-3">{scanError}</p>}
 
 						<div className="flex flex-col gap-2">
 							{verified ? (
 								<div className="flex items-center justify-between gap-2">
-									<span className="flex items-center gap-2 text-sax font-medium">
+									<span className="flex items-center gap-2 text-sax-on-orbit font-medium">
 										<Check className="w-4 h-4" /> Verified
 									</span>
-									<button onClick={() => void markVerified(false)} className="text-sm text-white/60 hover:text-white underline">
+									<button onClick={() => void markVerified(false)} className="text-sm text-orbit-fg/60 hover:text-orbit-fg underline">
 										Clear verification
 									</button>
 								</div>
@@ -214,19 +214,19 @@ export const SafetyNumberDialog = ({ selfUsername, contact, onClose, onSetVerifi
 									{scanSupported && !scanning && (
 										<button
 											onClick={() => void startScanning()}
-											className="flex items-center justify-center gap-2 border border-white/30 hover:border-white rounded-lg min-h-11 py-2 transition-colors"
+											className="flex items-center justify-center gap-2 border border-orbit-fg/40 hover:border-orbit-fg rounded-lg min-h-11 py-2 transition-colors"
 										>
 											<Camera className="w-4 h-4" /> Scan their code
 										</button>
 									)}
 									<button
 										onClick={() => void markVerified(true)}
-										className="bg-sax text-orbit font-semibold rounded-lg min-h-11 py-2 hover:opacity-90 transition-opacity"
+										className="bg-sax text-on-sax font-semibold rounded-lg min-h-11 py-2 hover:opacity-90 transition-opacity"
 									>
 										Mark as verified
 									</button>
 									{!scanSupported && (
-										<p className="text-xs text-white/50 text-center">
+										<p className="text-xs text-orbit-fg/60 text-center">
 											Live scanning isn&rsquo;t supported in this browser — compare the digits above instead.
 										</p>
 									)}

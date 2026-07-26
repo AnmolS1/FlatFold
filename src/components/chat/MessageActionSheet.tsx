@@ -99,10 +99,10 @@ const Row = ({ icon, label, onClick, danger = false, expanded }: RowProps) => (
 		onClick={onClick}
 		aria-expanded={expanded}
 		className={`w-full flex items-center gap-3 px-3 min-h-[48px] rounded-lg transition-colors ${
-			danger ? 'text-crane hover:bg-crane/10' : 'text-graphite hover:bg-inset'
+			danger ? 'text-crane-ink hover:bg-crane/10' : 'text-graphite hover:bg-inset'
 		}`}
 	>
-		<span className={danger ? 'text-crane' : 'text-graphite-60'}>{icon}</span>
+		<span className={danger ? 'text-crane-ink' : 'text-graphite-60'}>{icon}</span>
 		<span className="text-sm font-medium">{label}</span>
 	</button>
 );

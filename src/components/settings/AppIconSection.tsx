@@ -83,7 +83,7 @@ export function AppIconSection() {
 				})}
 			</div>
 			<p className="text-xs text-graphite-40 mt-2">iOS will ask you to confirm each change.</p>
-			{error && <p className="text-xs text-crane mt-1">{error}</p>}
+			{error && <p className="text-xs text-crane-ink mt-1">{error}</p>}
 		</section>
 	);
 }

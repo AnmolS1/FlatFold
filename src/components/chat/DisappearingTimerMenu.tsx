@@ -20,7 +20,7 @@ const DisappearingTimerMenuComponent = ({ seconds, onChange }: DisappearingTimer
 	return (
 		<label
 			className={`text-xs flex items-center gap-1 px-2 py-1 border rounded transition-colors cursor-pointer ${
-				seconds > 0 ? 'border-sax text-sax' : 'border-crease-line-bold text-graphite hover:border-crease'
+				seconds > 0 ? 'border-sax-ink text-sax-ink' : 'border-crease-line-bold text-graphite hover:border-crease'
 			}`}
 			title="Disappearing messages"
 		>

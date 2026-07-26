@@ -227,7 +227,7 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 						</div>
 						<button
 							onClick={onSignOut}
-							className="text-xs flex items-center gap-1 px-2 py-1 border border-crane/40 text-crane hover:border-crane rounded transition-colors"
+							className="text-xs flex items-center gap-1 px-2 py-1 border border-crane-ink/40 text-crane-ink hover:border-crane-ink rounded transition-colors"
 						>
 							<LogOut className="w-3.5 h-3.5" /> Sign out
 						</button>
@@ -237,12 +237,12 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 						{!signOutAllArmed ? (
 							<button
 								onClick={() => setSignOutAllArmed(true)}
-								className="text-xs flex items-center gap-1 px-2 py-1 border border-crane/40 text-crane hover:border-crane rounded transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-crane"
+								className="text-xs flex items-center gap-1 px-2 py-1 border border-crane-ink/40 text-crane-ink hover:border-crane-ink rounded transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-crane-ink"
 							>
 								<LogOut className="w-3.5 h-3.5" /> Sign out everywhere
 							</button>
 						) : (
-							<div className="space-y-2 border border-crane/40 rounded-lg p-3">
+							<div className="space-y-2 border border-crane-ink/40 rounded-lg p-3">
 								<p className="text-sm font-semibold text-graphite">Sign out everywhere?</p>
 								<p className="text-xs text-graphite-40">
 									This signs you out on every device, including this one. You&rsquo;ll need to log back in. It
@@ -254,10 +254,10 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 									onChange={(e) => setSignOutAllPassword(e.target.value)}
 									placeholder="Password"
 									aria-label="Password"
-									className="w-full rounded-lg border border-crane/40 bg-inset text-graphite placeholder-graphite-40 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-crane"
+									className="w-full rounded-lg border border-crane-ink/40 bg-inset text-graphite placeholder-graphite-40 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-crane-ink"
 								/>
 								<p className="text-xs text-graphite-40">Enter your password to confirm it&rsquo;s you.</p>
-								{signOutAllError && <p className="text-xs text-crane">{signOutAllError}</p>}
+								{signOutAllError && <p className="text-xs text-crane-ink">{signOutAllError}</p>}
 								<div className="flex gap-2">
 									<button
 										onClick={() => void signOutEverywhere()}
@@ -309,7 +309,7 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 							>
 								<KeyRound className="w-3.5 h-3.5" /> Change password
 							</button>
-							{changeDone && <p className="text-xs text-sax mt-2">Password changed. Every other device has been signed out.</p>}
+							{changeDone && <p className="text-xs text-sax-ink mt-2">Password changed. Every other device has been signed out.</p>}
 						</>
 					) : (
 						<div className="space-y-2 border border-crease-line-bold rounded-lg p-3">
@@ -345,7 +345,7 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 								aria-label="Confirm new password"
 								className="w-full rounded-lg border border-crease-line-bold bg-inset text-graphite placeholder-graphite-40 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-crease"
 							/>
-							{changeError && <p className="text-xs text-crane">{changeError}</p>}
+							{changeError && <p className="text-xs text-crane-ink">{changeError}</p>}
 							<div className="flex gap-2">
 								<button
 									onClick={() => void submitChangePassword()}
@@ -383,7 +383,7 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 							</div>
 							<button
 								onClick={finishRecoverySetup}
-								className="w-full bg-sax text-white rounded-lg py-1.5 text-sm hover:opacity-90 transition-opacity"
+								className="w-full bg-sax text-on-sax rounded-lg py-1.5 text-sm hover:opacity-90 transition-opacity"
 							>
 								I&rsquo;ve saved my recovery code
 							</button>
@@ -413,7 +413,7 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 								aria-label="Password"
 								className="w-full rounded-lg border border-crease-line-bold bg-inset text-graphite placeholder-graphite-40 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-crease"
 							/>
-							{recoveryError && <p className="text-xs text-crane">{recoveryError}</p>}
+							{recoveryError && <p className="text-xs text-crane-ink">{recoveryError}</p>}
 							<div className="flex gap-2">
 								<button
 									onClick={() => void startRecoverySetup()}
@@ -464,11 +464,11 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 										Wake-ups only — the push carries no message text or sender, ever.
 									</p>
 								</div>
-								<span className={`text-xs font-mono px-2 py-1 rounded ${subscribed ? 'bg-sax/20 text-sax' : 'bg-inset text-graphite-40'}`}>
+								<span className={`text-xs font-mono px-2 py-1 rounded ${subscribed ? 'bg-sax/20 text-sax-ink' : 'bg-inset text-graphite-40'}`}>
 									{subscribed ? 'ON' : 'OFF'}
 								</span>
 							</button>
-							{pushMessage && <p className="text-xs text-crane mt-2">{pushMessage}</p>}
+							{pushMessage && <p className="text-xs text-crane-ink mt-2">{pushMessage}</p>}
 
 							<div className="mt-4">
 								<label className="text-xs text-graphite-60 block mb-1">
@@ -499,8 +499,8 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 				<AboutSection />
 
 				{/* Danger zone — account deletion */}
-				<section className="mt-6 border border-crane/40 rounded-lg p-4">
-					<h3 className="text-sm font-semibold text-crane mb-2 flex items-center gap-2">
+				<section className="mt-6 border border-crane-ink/40 rounded-lg p-4">
+					<h3 className="text-sm font-semibold text-crane-ink mb-2 flex items-center gap-2">
 						<AlertTriangle className="w-4 h-4" /> Delete account
 					</h3>
 					<p className="text-xs text-graphite-40 mb-3">
@@ -510,7 +510,7 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 					{!deleteArmed ? (
 						<button
 							onClick={() => setDeleteArmed(true)}
-							className="text-xs flex items-center gap-1 px-3 py-1.5 border border-crane/40 text-crane hover:border-crane rounded transition-colors"
+							className="text-xs flex items-center gap-1 px-3 py-1.5 border border-crane-ink/40 text-crane-ink hover:border-crane-ink rounded transition-colors"
 						>
 							<Trash2 className="w-3.5 h-3.5" /> Delete my account
 						</button>
@@ -521,9 +521,9 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 								value={deletePassword}
 								onChange={(e) => setDeletePassword(e.target.value)}
 								placeholder="Confirm your password"
-								className="w-full rounded-lg border border-crane/40 bg-inset text-graphite placeholder-graphite-40 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-crane"
+								className="w-full rounded-lg border border-crane-ink/40 bg-inset text-graphite placeholder-graphite-40 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-crane-ink"
 							/>
-							{deleteError && <p className="text-xs text-crane">{deleteError}</p>}
+							{deleteError && <p className="text-xs text-crane-ink">{deleteError}</p>}
 							<div className="flex gap-2">
 								<button
 									onClick={() => void deleteAccount()}

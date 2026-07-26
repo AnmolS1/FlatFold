@@ -70,13 +70,13 @@ export const SignupForm = () => {
 						value={username}
 						onChange={(e) => setUsername(e.target.value)}
 						className={`w-full pl-10 pr-4 py-2 border rounded-lg bg-inset text-graphite placeholder-graphite-40 font-mono focus:outline-none focus:ring-2 focus:ring-crease focus:border-transparent ${
-							errors.username ? 'border-crane' : 'border-crease-line-bold'
+							errors.username ? 'border-crane-ink' : 'border-crease-line-bold'
 						}`}
 						placeholder="yourhandle"
 						disabled={loading}
 					/>
 				</div>
-				{errors.username && <p className="mt-1 text-sm text-crane">{errors.username}</p>}
+				{errors.username && <p className="mt-1 text-sm text-crane-ink">{errors.username}</p>}
 				<p className="mt-1 text-xs text-graphite-40">No email or phone number — just a username.</p>
 			</div>
 
@@ -93,19 +93,19 @@ export const SignupForm = () => {
 						value={password}
 						onChange={(e) => setPassword(e.target.value)}
 						className={`w-full pl-10 pr-4 py-2 border rounded-lg bg-inset text-graphite placeholder-graphite-40 focus:outline-none focus:ring-2 focus:ring-crease focus:border-transparent ${
-							errors.password ? 'border-crane' : 'border-crease-line-bold'
+							errors.password ? 'border-crane-ink' : 'border-crease-line-bold'
 						}`}
 						placeholder="••••••••"
 						disabled={loading}
 					/>
 				</div>
-				{errors.password && <p className="mt-1 text-sm text-crane">{errors.password}</p>}
+				{errors.password && <p className="mt-1 text-sm text-crane-ink">{errors.password}</p>}
 			</div>
 
 			<button
 				type="submit"
 				disabled={loading}
-				className="w-full bg-crane text-white py-2 px-4 rounded-lg hover:bg-crane-dark focus:outline-none focus:ring-2 focus:ring-crane focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+				className="w-full bg-crane text-white py-2 px-4 rounded-lg hover:bg-crane-dark focus:outline-none focus:ring-2 focus:ring-crane-ink focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
 			>
 				{loading ? (
 					<span className="flex items-center justify-center gap-2">

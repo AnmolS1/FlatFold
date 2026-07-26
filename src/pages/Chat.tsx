@@ -1369,10 +1369,10 @@ export const Chat = () => {
 								<h1 className="font-display text-xl font-bold text-graphite leading-tight">FlatFold</h1>
 								<p className="text-xs text-graphite-60 font-mono flex items-center gap-1.5 truncate">
 									<span
-										className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${connected ? 'bg-sax' : 'bg-crane'}`}
+										className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${connected ? 'bg-sax-ink' : 'bg-crane'}`}
 										aria-hidden="true"
 									/>
-									<span className={`truncate ${connected ? '' : 'text-crane font-semibold'}`}>
+									<span className={`truncate ${connected ? '' : 'text-crane-ink font-semibold'}`}>
 										{connected ? 'connected' : hasConnectedRef.current ? 'reconnecting…' : 'connecting…'} · {username}
 									</span>
 								</p>
@@ -1403,7 +1403,7 @@ export const Chat = () => {
 							<ThemeToggle />
 							<button
 								onClick={() => requestPanicWipe()}
-								className="flex items-center justify-center gap-2 min-w-11 min-h-11 sm:px-3 sm:min-w-0 border border-crane/40 hover:border-crane text-crane rounded-lg transition-colors text-sm"
+								className="flex items-center justify-center gap-2 min-w-11 min-h-11 sm:px-3 sm:min-w-0 border border-crane-ink/40 hover:border-crane-ink text-crane-ink rounded-lg transition-colors text-sm"
 								title="Destroy all local data on this device (triple-tap Esc also triggers this)"
 								aria-label="Panic wipe"
 							>
@@ -1428,8 +1428,8 @@ export const Chat = () => {
 			</header>
 
 			{error && (
-				<div className="bg-graph-card border-b border-crane px-4 py-3">
-					<p className="text-sm text-crane">{error}</p>
+				<div className="bg-graph-card border-b border-crane-ink px-4 py-3">
+					<p className="text-sm text-crane-ink">{error}</p>
 				</div>
 			)}
 
@@ -1550,7 +1550,7 @@ export const Chat = () => {
 													<button
 														onClick={() => void handleRemoveMember(activeGroup, m)}
 														aria-label={`Remove ${m}`}
-														className="text-crane hover:text-crane-dark"
+														className="text-crane-ink hover:opacity-80"
 													>
 														×
 													</button>
@@ -1606,7 +1606,7 @@ export const Chat = () => {
 										title={activeContactRecord.verified ? 'Safety number' : 'Verify'}
 										className={`flex items-center justify-center w-9 h-9 border rounded transition-colors ${
 											activeContactRecord.verified
-												? 'border-sax/50 text-sax hover:border-sax'
+												? 'border-sax/50 text-sax-ink hover:border-sax-ink'
 												: 'border-crease-line-bold text-graphite hover:border-crease'
 										}`}
 									>
@@ -1622,10 +1622,10 @@ export const Chat = () => {
 
 							{/* Non-dismissable-until-acknowledged key-change warning */}
 							{activeContactRecord.keyChangeUnacknowledged && (
-								<div className="bg-crane/10 border-b border-crane px-4 py-3 flex items-start gap-3 flex-shrink-0">
-									<ShieldAlert className="w-5 h-5 text-crane flex-shrink-0 mt-0.5" />
+								<div className="bg-crane/10 border-b border-crane-ink px-4 py-3 flex items-start gap-3 flex-shrink-0">
+									<ShieldAlert className="w-5 h-5 text-crane-ink flex-shrink-0 mt-0.5" />
 									<div className="flex-1">
-										<p className="text-sm text-crane font-medium">
+										<p className="text-sm text-crane-ink font-medium">
 											{activeContactRecord.username}&rsquo;s safety number has changed.
 										</p>
 										<p className="text-xs text-graphite-60 mt-0.5">
@@ -1635,7 +1635,7 @@ export const Chat = () => {
 										<div className="flex gap-3 mt-2">
 											<button
 												onClick={() => setVerifyDialogOpen(true)}
-												className="text-xs font-medium text-crane underline"
+												className="text-xs font-medium text-crane-ink underline"
 											>
 												Verify now
 											</button>

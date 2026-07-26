@@ -84,25 +84,25 @@ export function TwoFactorSection({ username, initialEnabled }: { username: strin
 					<>
 						<div className="flex items-center justify-between border border-sax/40 rounded-lg p-3">
 							<p className="text-sm text-graphite">Two-factor is on.</p>
-							<span className="text-xs font-mono px-2 py-1 rounded bg-sax/20 text-sax">ON</span>
+							<span className="text-xs font-mono px-2 py-1 rounded bg-sax/20 text-sax-ink">ON</span>
 						</div>
 						<button
 							onClick={() => {
 								setDisarming(true);
 								setError(null);
 							}}
-							className="mt-2 text-xs flex items-center gap-1 px-2 py-1 border border-crane/40 text-crane hover:border-crane rounded transition-colors"
+							className="mt-2 text-xs flex items-center gap-1 px-2 py-1 border border-crane-ink/40 text-crane-ink hover:border-crane-ink rounded transition-colors"
 						>
 							<ShieldOff className="w-3.5 h-3.5" /> Turn off two-factor
 						</button>
 					</>
 				) : (
-					<div className="space-y-2 border border-crane/40 rounded-lg p-3">
+					<div className="space-y-2 border border-crane-ink/40 rounded-lg p-3">
 						<p className="text-sm text-graphite">Turn off two-factor?</p>
 						<p className="text-xs text-graphite-40">Enter your password and a current code to confirm it&rsquo;s you.</p>
 						<input type="password" autoComplete="current-password" value={disablePw} onChange={(e) => setDisablePw(e.target.value)} placeholder="Password" aria-label="Password" className={inputCls} />
 						<input type="text" inputMode="numeric" value={disableCode} onChange={(e) => setDisableCode(e.target.value)} placeholder="Authenticator or backup code" aria-label="Two-factor code" className={`${inputCls} font-mono`} />
-						{error && <p className="text-xs text-crane">{error}</p>}
+						{error && <p className="text-xs text-crane-ink">{error}</p>}
 						<div className="flex gap-2">
 							<button onClick={() => void confirmDisable()} disabled={busy || !disablePw || !disableCode} className="flex-1 bg-crane text-white rounded-lg py-1.5 text-sm hover:bg-crane-dark disabled:opacity-50 transition-colors">
 								{busy ? 'Turning off…' : 'Turn off'}
@@ -136,7 +136,7 @@ export function TwoFactorSection({ username, initialEnabled }: { username: strin
 					<div>
 						<div className="flex items-center justify-between mb-1">
 							<p className="text-xs text-graphite-40">Setup key</p>
-							<button onClick={() => void copy('key', draft.secret)} className="text-xs flex items-center gap-1 text-crease hover:text-crane transition-colors">
+							<button onClick={() => void copy('key', draft.secret)} className="text-xs flex items-center gap-1 text-crease hover:text-crane-ink transition-colors">
 								{copied === 'key' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
 								{copied === 'key' ? 'Copied' : 'Copy'}
 							</button>
@@ -144,7 +144,7 @@ export function TwoFactorSection({ username, initialEnabled }: { username: strin
 						<p className="selectable-text font-mono text-sm text-graphite break-all bg-inset border border-crease-line-bold rounded p-2 tracking-wide">{draft.secret}</p>
 					</div>
 					<div className="space-y-2 text-xs">
-						<button onClick={() => window.open(draft.uri, '_system')} className="flex items-center gap-1 text-crease hover:text-crane transition-colors">
+						<button onClick={() => window.open(draft.uri, '_system')} className="flex items-center gap-1 text-crease hover:text-crane-ink transition-colors">
 							<ExternalLink className="w-3.5 h-3.5" /> Add to Apple Passwords instead
 						</button>
 						<details className="text-graphite-40">
@@ -160,7 +160,7 @@ export function TwoFactorSection({ username, initialEnabled }: { username: strin
 					<div>
 						<div className="flex items-center justify-between">
 							<p className="text-sm font-semibold text-graphite">Backup codes</p>
-							<button onClick={() => void copy('backup', draft.backupCodes.join('\n'))} className="text-xs flex items-center gap-1 text-crease hover:text-crane transition-colors">
+							<button onClick={() => void copy('backup', draft.backupCodes.join('\n'))} className="text-xs flex items-center gap-1 text-crease hover:text-crane-ink transition-colors">
 								{copied === 'backup' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
 								{copied === 'backup' ? 'Copied' : 'Copy all'}
 							</button>
@@ -181,7 +181,7 @@ export function TwoFactorSection({ username, initialEnabled }: { username: strin
 
 					<input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Your password" aria-label="Password" className={inputCls} />
 					<input type="text" inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value)} placeholder="6-digit code from your app" aria-label="Authenticator code" className={`${inputCls} font-mono`} />
-					{error && <p className="text-xs text-crane">{error}</p>}
+					{error && <p className="text-xs text-crane-ink">{error}</p>}
 					<div className="flex gap-2">
 						<button onClick={() => void confirmEnable()} disabled={busy || !password || !code || !savedBackup} className="flex-1 bg-crease text-white rounded-lg py-1.5 text-sm hover:opacity-90 disabled:opacity-50 transition-opacity">
 							{busy ? 'Turning on…' : 'Turn on two-factor'}

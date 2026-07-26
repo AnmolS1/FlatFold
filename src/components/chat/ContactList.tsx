@@ -204,9 +204,9 @@ const ContactListComponent = ({
 										</span>
 										<span className="flex items-center gap-1.5 flex-shrink-0">
 											{!row.isGroup && row.contact?.keyChangeUnacknowledged ? (
-												<ShieldAlert className="w-4 h-4 text-crane" aria-label="Safety number changed" />
+												<ShieldAlert className="w-4 h-4 text-crane-ink" aria-label="Safety number changed" />
 											) : !row.isGroup && row.contact?.verified ? (
-												<ShieldCheck className="w-4 h-4 text-sax" aria-label="Verified" />
+												<ShieldCheck className="w-4 h-4 text-sax-ink" aria-label="Verified" />
 											) : null}
 											{row.isGroup && <Users className="w-3.5 h-3.5 text-graphite-40" aria-hidden="true" />}
 											{unread && <span className="w-2 h-2 rounded-full bg-crane" aria-label="Unread" />}
@@ -280,7 +280,7 @@ const ContactListComponent = ({
 						onClick={() => setCompose(true)}
 						aria-label="New message"
 						aria-expanded={false}
-						className="w-full min-h-11 flex items-center justify-center gap-2 rounded-full bg-crane text-white font-medium hover:bg-crane-dark transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-crane focus-visible:ring-offset-2"
+						className="w-full min-h-11 flex items-center justify-center gap-2 rounded-full bg-crane text-white font-medium hover:bg-crane-dark transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-crane-ink focus-visible:ring-offset-2"
 					>
 						<Plus className="w-5 h-5" /> New message
 					</button>

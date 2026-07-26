@@ -65,7 +65,7 @@ export function ContactMenu({ contactUsername, onRemoveContact, onBlockContact }
 							<button
 								role="menuitem"
 								onClick={() => setConfirming(true)}
-								className="w-full text-left text-sm text-crane px-3 py-2 rounded hover:bg-crane/10 transition-colors"
+								className="w-full text-left text-sm text-crane-ink px-3 py-2 rounded hover:bg-crane/10 transition-colors"
 							>
 								Remove contact
 							</button>

@@ -26,16 +26,16 @@ const TOAST_CONFIGS: Record<ToastVariant, ToastConfig> = {
 	success: {
 		icon: <CheckCircle className="w-5 h-5" />,
 		bgColor: 'bg-graph-card',
-		borderColor: 'border-sax',
+		borderColor: 'border-sax-ink',
 		textColor: 'text-graphite',
-		iconColor: 'text-sax',
+		iconColor: 'text-sax-ink',
 	},
 	error: {
 		icon: <XCircle className="w-5 h-5" />,
 		bgColor: 'bg-graph-card',
-		borderColor: 'border-crane',
+		borderColor: 'border-crane-ink',
 		textColor: 'text-graphite',
-		iconColor: 'text-crane',
+		iconColor: 'text-crane-ink',
 	},
 	info: {
 		icon: <Info className="w-5 h-5" />,

@@ -89,7 +89,7 @@ export const MessageItem = memo(({ message, isOwnMessage, currentUsername, anima
 					style={{ opacity: Math.min(1, dragX / SWIPE_TRIGGER) }}
 					aria-hidden="true"
 				>
-					<Reply className={`w-5 h-5 ${armed ? 'text-crane' : 'text-graphite-40'}`} />
+					<Reply className={`w-5 h-5 ${armed ? 'text-crane-ink' : 'text-graphite-40'}`} />
 				</div>
 			)}
 			<div

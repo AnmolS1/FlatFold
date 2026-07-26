@@ -159,7 +159,7 @@ export const RecoverForm = ({ onBack }: { onBack: () => void }) => {
 				</div>
 			</div>
 
-			{error && <p className="text-sm text-crane">{error}</p>}
+			{error && <p className="text-sm text-crane-ink">{error}</p>}
 			{noRecovery && (
 				<p className="text-sm text-graphite-60">
 					No recovery code for that account? Then there’s no way back into this one, by design. You can start fresh with a
@@ -170,7 +170,7 @@ export const RecoverForm = ({ onBack }: { onBack: () => void }) => {
 			<button
 				type="submit"
 				disabled={loading || !username || !code || !newPassword || !confirm}
-				className="w-full bg-crane text-white py-2 px-4 rounded-lg hover:bg-crane-dark focus:outline-none focus:ring-2 focus:ring-crane disabled:opacity-50 transition-colors font-medium"
+				className="w-full bg-crane text-white py-2 px-4 rounded-lg hover:bg-crane-dark focus:outline-none focus:ring-2 focus:ring-crane-ink disabled:opacity-50 transition-colors font-medium"
 			>
 				{loading ? 'Recovering…' : 'Recover my account'}
 			</button>

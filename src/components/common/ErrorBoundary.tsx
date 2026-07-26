@@ -45,7 +45,7 @@ export class ErrorBoundary extends Component<Props, State> {
 		return (
 			<div role="alert" className="min-h-dvh flex items-center justify-center bg-graph p-6">
 				<div className="max-w-sm w-full bg-graph-card border border-crease-line rounded-2xl p-6 text-center">
-					<AlertTriangle className="w-8 h-8 text-crane mx-auto mb-3" aria-hidden="true" />
+					<AlertTriangle className="w-8 h-8 text-crane-ink mx-auto mb-3" aria-hidden="true" />
 					<h1 className="font-display text-lg font-bold text-graphite mb-2">Something broke</h1>
 					<p className="text-sm text-graphite-60 mb-5">
 						This part of the app hit an error and stopped. Your messages and keys are stored on this device and are
@@ -56,7 +56,7 @@ export class ErrorBoundary extends Component<Props, State> {
 						    a full reload would throw away. */}
 						<button
 							onClick={this.retry}
-							className="h-11 rounded-full bg-crane text-white font-medium hover:bg-crane-dark focus:outline-none focus:ring-2 focus:ring-crane focus:ring-offset-2"
+							className="h-11 rounded-full bg-crane text-white font-medium hover:bg-crane-dark focus:outline-none focus:ring-2 focus:ring-crane-ink focus:ring-offset-2"
 						>
 							Try again
 						</button>

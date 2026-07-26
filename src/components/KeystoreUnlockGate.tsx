@@ -141,7 +141,7 @@ export const KeystoreUnlockGate = ({ children }: KeystoreUnlockGateProps) => {
 						autoComplete="current-password"
 						className="w-full rounded-lg border border-crease-line-bold bg-inset text-graphite placeholder-graphite-40 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-crease focus:border-transparent"
 					/>
-					{error && <p className="text-sm text-crane">{error}</p>}
+					{error && <p className="text-sm text-crane-ink">{error}</p>}
 					<button
 						type="submit"
 						disabled={unlocking || !password}
@@ -153,7 +153,7 @@ export const KeystoreUnlockGate = ({ children }: KeystoreUnlockGateProps) => {
 				<div className="mt-5 flex flex-col gap-2 text-sm">
 					<button
 						onClick={() => leaveGate('/login?recover=1')}
-						className="text-crease hover:text-crane transition-colors"
+						className="text-crease hover:text-crane-ink transition-colors"
 					>
 						Forgot your password?
 					</button>
@@ -166,7 +166,7 @@ export const KeystoreUnlockGate = ({ children }: KeystoreUnlockGateProps) => {
 				</div>
 				<button
 					onClick={() => requestPanicWipe()}
-					className="mt-6 text-xs text-graphite-40 hover:text-crane transition-colors underline"
+					className="mt-6 text-xs text-graphite-40 hover:text-crane-ink transition-colors underline"
 				>
 					Panic wipe this device
 				</button>

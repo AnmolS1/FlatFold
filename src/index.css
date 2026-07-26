@@ -66,14 +66,22 @@
 	--color-graphite-40: rgba(27, 42, 51, 0.4);
 
 	--color-crease: #2E5E8C;
+	--color-on-crease: #FFFFFF;
 	--color-crease-line: rgba(46, 94, 140, 0.13);
 	--color-crease-line-bold: rgba(46, 94, 140, 0.28);
 	--color-grid-line: rgba(46, 94, 140, 0.07);
 
-	--color-crane: #E84A27;
-	--color-crane-dark: #C23A1C;
+	--color-crane: #C23A1C;
+	--color-crane-dark: #A32E13;
+	--color-crane-ink: #C23A1C;
+	/* The gold has four jobs and one value can't do all four — see the block
+	   comment above the themes for why they're split. */
 	--color-sax: #D9A521;
+	--color-sax-ink: #7E5C0C;
+	--color-sax-on-orbit: #D9A521;
+	--color-on-sax: #1B2A33;
 	--color-orbit: #2A2A6E;
+	--color-orbit-fg: #FFFFFF;
 	--color-orbit-ink: #2A2A6E;
 
 	--font-display: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
@@ -87,7 +95,35 @@
    `:root` is Paper (the default + `@theme` mirror so raw-CSS `var(--color-*)`
    resolves and Tailwind doesn't tree-shake an unused color). Per-theme derived
    values: crease-line-bold ≈ structural @0.28-0.32, grid-line ≈ structural @0.07,
-   graphite-40 ≈ ink @~0.45. Core role contrasts are AA-verified in D3_themes.md. */
+   graphite-40 ≈ ink @~0.45.
+
+   The gold is FOUR tokens, not one (FULL_AUDIT_2 A1-A3). It was one, and one
+   value cannot satisfy the pressures pulling in opposite directions: a fill
+   bright enough to carry dark ink is far too light to read as text on parchment,
+   and a gold dark enough to read as text is too dark to be a fill. Vellum had
+   already darkened `--color-sax` to make its text legible, which silently broke
+   it as a button fill; Paper kept it bright, which left `text-sax` at 2.09:1.
+   Both themes were "fixed" and both were wrong, because they were fighting over
+   the same token. So:
+
+     --color-sax           the brand gold as a SURFACE: bg-sax, bg-sax/20 chips,
+                           bg-sax/10 washes, translucent gold borders.
+     --color-sax-ink       the gold rendered ON graph-card / inset — text, icons,
+                           status dots. Dark in light themes, bright in dark ones.
+     --color-sax-on-orbit  the gold as text on the orbit console panel, which is
+                           dark in every theme, so this is always a bright gold.
+     --color-on-sax        the ink that sits on a sax fill. NEVER white: white on
+                           mid-gold is the classic AA failure (1.95-3.25:1).
+
+   Likewise --color-orbit-fg is the foreground on the orbit panel. It exists
+   because SafetyNumberDialog hardcoded `text-white`, and Vellum's light-parchment
+   orbit made the safety-number screen 1.27:1 — a theme silently disabling the
+   app's most trust-critical control. Vellum's orbit is now dark like every other
+   theme's, so the "console" role is consistent, AND the foreground is a token so
+   the next theme can't reintroduce the same failure.
+
+   Every pairing these tokens participate in is computed and asserted per theme in
+   test-ui/themeContrast.test.ts, against the values parsed out of THIS file. */
 :root,
 :root[data-theme='paper'] {
 	--color-graph: #EEF0EC;
@@ -97,13 +133,19 @@
 	--color-graphite-60: rgba(27, 42, 51, 0.72);
 	--color-graphite-40: rgba(27, 42, 51, 0.4);
 	--color-crease: #2E5E8C;
+	--color-on-crease: #FFFFFF;
 	--color-crease-line: rgba(46, 94, 140, 0.13);
 	--color-crease-line-bold: rgba(46, 94, 140, 0.28);
 	--color-grid-line: rgba(46, 94, 140, 0.07);
-	--color-crane: #E84A27;
-	--color-crane-dark: #C23A1C;
+	--color-crane: #C23A1C;
+	--color-crane-dark: #A32E13;
+	--color-crane-ink: #C23A1C;
 	--color-sax: #D9A521;
+	--color-sax-ink: #7E5C0C;
+	--color-sax-on-orbit: #D9A521;
+	--color-on-sax: #1B2A33;
 	--color-orbit: #2A2A6E;
+	--color-orbit-fg: #FFFFFF;
 	--color-orbit-ink: #2A2A6E;
 	--shadow-card: 0 8px 22px rgba(27, 42, 51, 0.10);
 	color-scheme: light;
@@ -118,13 +160,19 @@
 	--color-graphite-60: rgba(233, 236, 231, 0.70);
 	--color-graphite-40: rgba(233, 236, 231, 0.50);
 	--color-crease: #82A9CE;
+	--color-on-crease: #0E1A24;
 	--color-crease-line: rgba(130, 169, 206, 0.16);
 	--color-crease-line-bold: rgba(130, 169, 206, 0.30);
 	--color-grid-line: rgba(130, 169, 206, 0.07);
-	--color-crane: #E84A27;
-	--color-crane-dark: #C23A1C;
+	--color-crane: #C23A1C;
+	--color-crane-dark: #A32E13;
+	--color-crane-ink: #F0653F;
 	--color-sax: #E0B43F;
+	--color-sax-ink: #E0B43F;
+	--color-sax-on-orbit: #E0B43F;
+	--color-on-sax: #0E1A24;
 	--color-orbit: #212146;
+	--color-orbit-fg: #E9ECE7;
 	--color-orbit-ink: #A6A8DC;
 	--shadow-card: 0 10px 26px rgba(0, 0, 0, 0.45);
 	color-scheme: dark;
@@ -139,13 +187,22 @@
 	--color-graphite-60: #6B5C48;
 	--color-graphite-40: rgba(58, 47, 35, 0.45);
 	--color-crease: #8A4B2A;
+	--color-on-crease: #FFFFFF;
 	--color-crease-line: rgba(138, 75, 42, 0.15);
 	--color-crease-line-bold: rgba(138, 75, 42, 0.30);
 	--color-grid-line: rgba(138, 75, 42, 0.07);
 	--color-crane: #B23A1B;
 	--color-crane-dark: #8F2E14;
-	--color-sax: #8A6D14;
-	--color-orbit: #EDE3CE;
+	--color-crane-ink: #B23A1B;
+	--color-sax: #D9A521;
+	--color-sax-ink: #7A5A08;
+	--color-sax-on-orbit: #D9A521;
+	--color-on-sax: #3A2F23;
+	/* Was #EDE3CE — a LIGHT parchment, which made the white-on-orbit safety-number
+	   sheet 1.27:1. The orbit panel is a dark console in every other theme; a deep
+	   aubergine keeps that role while staying warm enough for Vellum. */
+	--color-orbit: #2B2340;
+	--color-orbit-fg: #F7F1E4;
 	--color-orbit-ink: #463A66;
 	--shadow-card: 0 8px 22px rgba(58, 47, 35, 0.12);
 	color-scheme: light;
@@ -160,13 +217,19 @@
 	--color-graphite-60: #4A4E52;
 	--color-graphite-40: rgba(22, 24, 26, 0.45);
 	--color-crease: #2E5E8C;
+	--color-on-crease: #FFFFFF;
 	--color-crease-line: rgba(22, 24, 26, 0.12);
 	--color-crease-line-bold: rgba(22, 24, 26, 0.24);
 	--color-grid-line: rgba(46, 94, 140, 0.06);
 	--color-crane: #C23A1C;
 	--color-crane-dark: #A32E13;
+	--color-crane-ink: #C23A1C;
 	--color-sax: #B8860B;
+	--color-sax-ink: #7A5A08;
+	--color-sax-on-orbit: #D9A521;
+	--color-on-sax: #16181A;
 	--color-orbit: #2A2A6E;
+	--color-orbit-fg: #FFFFFF;
 	--color-orbit-ink: #2A2A6E;
 	--shadow-card: 0 8px 22px rgba(22, 24, 26, 0.10);
 	color-scheme: light;
@@ -181,13 +244,19 @@
 	--color-graphite-60: rgba(240, 233, 226, 0.70);
 	--color-graphite-40: rgba(240, 233, 226, 0.50);
 	--color-crease: #F08A5D;
+	--color-on-crease: #14110E;
 	--color-crease-line: rgba(240, 138, 93, 0.18);
 	--color-crease-line-bold: rgba(240, 138, 93, 0.32);
 	--color-grid-line: rgba(240, 138, 93, 0.07);
-	--color-crane: #E84A27;
-	--color-crane-dark: #C23A1C;
+	--color-crane: #C23A1C;
+	--color-crane-dark: #A32E13;
+	--color-crane-ink: #F0653F;
 	--color-sax: #E0B43F;
+	--color-sax-ink: #E0B43F;
+	--color-sax-on-orbit: #E0B43F;
+	--color-on-sax: #14110E;
 	--color-orbit: #2A2246;
+	--color-orbit-fg: #F0E9E2;
 	--color-orbit-ink: #C0A6DC;
 	--shadow-card: 0 10px 26px rgba(0, 0, 0, 0.5);
 	color-scheme: dark;

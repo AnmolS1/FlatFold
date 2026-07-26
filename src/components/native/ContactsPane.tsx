@@ -137,15 +137,15 @@ const ContactsPaneComponent = ({
 										<span className="block truncate text-graphite font-medium lowercase">{c.username}</span>
 										<span className="flex items-center gap-1 text-xs font-mono mt-0.5">
 											{blocked ? (
-												<span className="flex items-center gap-1 text-crane">
+												<span className="flex items-center gap-1 text-crane-ink">
 													<Ban className="w-3.5 h-3.5" /> blocked
 												</span>
 											) : c.keyChangeUnacknowledged ? (
-												<span className="flex items-center gap-1 text-crane">
+												<span className="flex items-center gap-1 text-crane-ink">
 													<ShieldAlert className="w-3.5 h-3.5" /> safety number changed
 												</span>
 											) : c.verified ? (
-												<span className="flex items-center gap-1 text-sax">
+												<span className="flex items-center gap-1 text-sax-ink">
 													<ShieldCheck className="w-3.5 h-3.5" /> verified
 												</span>
 											) : (
@@ -175,7 +175,7 @@ const ContactsPaneComponent = ({
 											onClick={() => onBlock(c.username)}
 											aria-label={`Block ${c.username}`}
 											title="Block"
-											className="flex-shrink-0 w-11 h-11 flex items-center justify-center rounded-lg text-graphite hover:text-crane transition-colors"
+											className="flex-shrink-0 w-11 h-11 flex items-center justify-center rounded-lg text-graphite hover:text-crane-ink transition-colors"
 										>
 											<Ban className="w-5 h-5" />
 										</button>
@@ -183,7 +183,7 @@ const ContactsPaneComponent = ({
 											onClick={() => onRemove(c.username)}
 											aria-label={`Remove ${c.username}`}
 											title="Remove contact"
-											className="flex-shrink-0 w-11 h-11 flex items-center justify-center rounded-lg text-crane/80 hover:text-crane transition-colors"
+											className="flex-shrink-0 w-11 h-11 flex items-center justify-center rounded-lg text-crane-ink/80 hover:text-crane-ink transition-colors"
 										>
 											<Trash2 className="w-5 h-5" />
 										</button>

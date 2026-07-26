@@ -89,7 +89,7 @@ export const MessageItem = memo(({ message, isOwnMessage, currentUsername, anima
 					style={{ opacity: Math.min(1, dragX / SWIPE_TRIGGER) }}
 					aria-hidden="true"
 				>
-					<Reply className={`w-5 h-5 ${armed ? 'text-crane' : 'text-graphite-40'}`} />
+					<Reply className={`w-5 h-5 ${armed ? 'text-crane-ink' : 'text-graphite-40'}`} />
 				</div>
 			)}
 			<div
@@ -103,7 +103,7 @@ export const MessageItem = memo(({ message, isOwnMessage, currentUsername, anima
 			>
 				<div
 					className={`rounded-xl px-4 py-2 ${
-						isOwnMessage ? 'bg-crease text-white rounded-br-[4px]' : 'bg-graph-card text-graphite border border-crease-line rounded-bl-[4px]'
+						isOwnMessage ? 'bg-crease text-on-crease rounded-br-[4px]' : 'bg-graph-card text-graphite border border-crease-line rounded-bl-[4px]'
 					}`}
 				>
 					{!isOwnMessage && <p className="text-xs font-semibold mb-1 font-mono text-graphite-60">{message.from}</p>}
@@ -113,20 +113,20 @@ export const MessageItem = memo(({ message, isOwnMessage, currentUsername, anima
 					{message.replyTo && (
 						<div
 							className={`mb-1.5 rounded-md border-l-2 pl-2 pr-2 py-1 text-xs ${
-								isOwnMessage ? 'border-white/60 bg-white/10' : 'border-crease bg-crease/5'
+								isOwnMessage ? 'border-on-crease/60 bg-on-crease/10' : 'border-crease bg-crease/5'
 							}`}
 						>
-							<span className={`block font-mono font-semibold ${isOwnMessage ? 'text-white/80' : 'text-crease'}`}>
+							<span className={`block font-mono font-semibold ${isOwnMessage ? 'text-on-crease-dim' : 'text-crease'}`}>
 								{message.replyTo.from === currentUsername ? 'You' : message.replyTo.from}
 							</span>
-							<span className={`block truncate ${isOwnMessage ? 'text-white/70' : 'text-graphite-60'}`}>
+							<span className={`block truncate ${isOwnMessage ? 'text-on-crease-dim' : 'text-graphite-60'}`}>
 								{message.replyTo.text}
 							</span>
 						</div>
 					)}
 
 					{message.deleted ? (
-						<p className={`text-sm italic ${isOwnMessage ? 'text-white/70' : 'text-graphite-40'}`}>This message was deleted</p>
+						<p className={`text-sm italic ${isOwnMessage ? 'text-on-crease-dim' : 'text-graphite-40'}`}>This message was deleted</p>
 					) : (
 						<>
 							{message.media && (
@@ -140,7 +140,7 @@ export const MessageItem = memo(({ message, isOwnMessage, currentUsername, anima
 
 					<div
 						className={`flex items-center gap-1 mt-1 text-xs font-mono ${
-							isOwnMessage ? 'text-white/70 justify-end' : 'text-graphite-40'
+							isOwnMessage ? 'text-on-crease-dim justify-end' : 'text-graphite-40'
 						}`}
 					>
 						<span>{formatTimestamp(message.ts)}</span>

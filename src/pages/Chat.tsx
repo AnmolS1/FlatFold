@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { ChevronLeft, LogOut, Search, Settings, ShieldAlert, ShieldCheck, ShieldOff, Users } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useToast } from '../hooks/useToast';
-import type { DisplayMessage, WsDeliveredFrame, WsGroupMessageFrame, WsMessageFrame, WsServerToClientFrame, X3dhHandshakeWire } from '../types';
+import type { DisplayMessage, WsDeliveredFrame, WsGroupMessageFrame, WsMessageFrame, X3dhHandshakeWire } from '../types';
 import * as keystore from '../keystore';
 import type { ContactRecord, GroupRecord, ConversationSummary } from '../keystore';
 import {
@@ -42,6 +42,9 @@ import { isBlocked, blockContact, unblockContact } from '../lib/blocklist';
 import { replyRefFrom } from '../lib/reply';
 import { orderedVisibleMessages } from '../lib/messageOrder';
 import { haptic } from '../lib/haptics';
+import { createSessionOpChain, routeInboundFrame, type SessionOpChain } from '../lib/inboundDispatch';
+import { showContactsPane, showHeaderSettings, showTabBar, type ChatChromeState } from '../lib/chatChrome';
+import { useIsWideViewport } from '../hooks/useIsWideViewport';
 import { useVisualViewportHeight } from '../hooks/useVisualViewport';
 import { ContactList } from '../components/chat/ContactList';
 import { DisappearingTimerMenu } from '../components/chat/DisappearingTimerMenu';
@@ -102,6 +105,26 @@ export const Chat = () => {
 	// full-screen over the Chats tab (mobileView==='conversation'), which hides
 	// the tab bar, so nav never fights the composer/keyboard.
 	const native = isNativePlatform();
+	// Both panes render side by side above this width, which changes what chrome
+	// makes sense. Every visibility decision below goes through lib/chatChrome, so
+	// the "you can always reach Settings" invariant is checkable across the whole
+	// state space — it was not, and a dead end shipped. See that file.
+	const wide = useIsWideViewport();
+	// Does this device actually have a software keyboard?
+	//
+	// On "My Mac (Designed for iPad)" iPadOS still fires `keyboardWillShow` when a
+	// text field is focused, and reports a height, even though no keyboard is ever
+	// drawn. The shell subtracts that height, and the result is an empty band at
+	// the bottom of the window — the reported artifact. It appears on focusing the
+	// composer, "New message", or "Search locally", and clears when focus moves
+	// (tapping "+"), which is exactly the show/hide pairing.
+	//
+	// So the whole keyboard-compensation mechanism is gated, not just its
+	// transition: no listeners, no height subtraction, where there is no software
+	// keyboard. maxTouchPoints is the discriminator — 5 on iPhone/iPad, 0 on a Mac
+	// — so a real iPad keeps today's behaviour, including the accessory-bar height
+	// it correctly reports when a hardware keyboard is attached.
+	const hasSoftwareKeyboard = native && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0;
 	const [activeTab, setActiveTab] = useState<NativeTab>('chats');
 	// True while the Chats list's "New message" compose bar is open. Hides the
 	// tab bar so the add-username input is the bottom-most element above the
@@ -140,6 +163,8 @@ export const Chat = () => {
 	);
 	// Keyboard-aware shell height (see the hook): keeps the composer above the
 	// on-screen keyboard on iOS. Falls back to the h-dvh class until it resolves.
+	const chrome: ChatChromeState = { native, wide, mobileView, composeOpen, activeTab };
+
 	const viewportHeight = useVisualViewportHeight();
 
 	const wsRef = useRef<WebSocket | null>(null);
@@ -147,16 +172,10 @@ export const Chat = () => {
 	// server sees us offline and pushes, and we suppress auto-reconnect until the
 	// app returns to the foreground.
 	const backgroundedRef = useRef(false);
-	// Serializes every session-touching operation — inbound decrypt AND
-	// outbound encrypt — onto one chain. Both paths do
-	// loadSession→mutate→saveSession against IndexedDB, and saveSession
-	// rewrites the *whole* record, so any two overlapping ops (receive/receive
-	// during an offline-queue flush, OR a send crossing a receive when both
-	// people type at once) would clobber each other's ratchet state — benign
-	// within one chain, but permanently wedging across a DH-ratchet step.
-	// Chaining makes each op atomic and ordered. Mirrors the sender-side send
-	// chain in worker/mailbox.ts.
-	const sessionOpChain = useRef<Promise<unknown>>(Promise.resolve());
+	// Serializes every session-touching operation — inbound decrypt AND outbound
+	// encrypt — onto one chain, so an offline-queue flush can't clobber its own
+	// ratchet state. The why is in lib/inboundDispatch.ts, along with its tests.
+	const sessionOpChain = useRef<SessionOpChain>(createSessionOpChain());
 	// X3DH material to attach to the NEXT outgoing message per contact —
 	// only the first message of a new session carries it. Component state
 	// (not the keystore) since it only needs to survive until that next
@@ -169,18 +188,7 @@ export const Chat = () => {
 	// back to keystore.findMessageByRid.
 	const ridToLocationRef = useRef<Map<string, { contact: string; messageId: string }>>(new Map());
 
-	// Runs `task` after all previously-enqueued session ops settle. The chain
-	// tail never rejects (one failure must not poison later ops), but the
-	// returned promise does — so a failed send still surfaces its error to the
-	// message input.
-	const enqueueSessionOp = useCallback(<T,>(task: () => Promise<T>): Promise<T> => {
-		const result = sessionOpChain.current.then(task, task);
-		sessionOpChain.current = result.then(
-			() => {},
-			() => {}
-		);
-		return result;
-	}, []);
+	const enqueueSessionOp = useCallback(<T,>(task: () => Promise<T>): Promise<T> => sessionOpChain.current.enqueue(task), []);
 	const usernameRef = useRef(username);
 	usernameRef.current = username;
 	// Latest contacts, readable inside stable callbacks (e.g. the send path
@@ -804,22 +812,15 @@ export const Chat = () => {
 		};
 
 		ws.onmessage = (event) => {
-			let frame: WsServerToClientFrame;
-			try {
-				frame = JSON.parse(event.data as string) as WsServerToClientFrame;
-			} catch {
-				return; // ignore malformed frames rather than crash the chat view
-			}
-			// Enqueue on the shared session-op chain so frames process one at a
-			// time, in arrival order, and never overlap an outbound send.
-			const run =
-				frame.type === 'message'
-					? () => handleIncomingMessage(frame)
-					: frame.type === 'groupMessage'
-						? () => handleIncomingGroupMessage(frame)
-						: frame.type === 'delivered'
-							? () => handleDeliveredFrame(frame)
-							: null;
+			// routeInboundFrame returns null for anything malformed, non-object or
+			// of an unknown type — never throws, so nothing on the wire can take the
+			// chat view down. Then enqueue on the shared session-op chain so frames
+			// process one at a time, in arrival order, and never overlap a send.
+			const run = routeInboundFrame(event.data as string, {
+				onMessage: handleIncomingMessage,
+				onGroupMessage: handleIncomingGroupMessage,
+				onDelivered: handleDeliveredFrame,
+			});
 			if (run) {
 				enqueueSessionOp(run).catch((err) => console.error('Inbound frame handler failed:', err));
 			}
@@ -943,7 +944,9 @@ export const Chat = () => {
 	// willShow/WillHide fire at the animation's start, so the CSS transition on
 	// the root runs concurrently with the keyboard — no catch-up jump.
 	useEffect(() => {
-		if (!native) return;
+		// Gated on hasSoftwareKeyboard, not `native`: a Mac running the iPad app
+		// fires these events with a height for a keyboard it never draws.
+		if (!hasSoftwareKeyboard) return;
 		const root = document.documentElement;
 		let showRemove: (() => void) | undefined;
 		let hideRemove: (() => void) | undefined;
@@ -963,7 +966,7 @@ export const Chat = () => {
 			hideRemove?.();
 			root.style.removeProperty('--keyboard-height');
 		};
-	}, [native]);
+	}, [hasSoftwareKeyboard]);
 
 	// Sealed sender: on connect, make sure my delivery token exists and both
 	// server stores know it (register-token writes the DO validator + the D1
@@ -1340,8 +1343,10 @@ export const Chat = () => {
 	return (
 		<div
 			className="h-dvh flex flex-col overflow-hidden"
-			// Native: height = full viewport minus the keyboard, where
-			// `--keyboard-height` is set from keyboardWillShow/WillHide (below). The
+				// Native WITH a software keyboard: height = full viewport minus the
+			// keyboard, where `--keyboard-height` comes from keyboardWillShow/WillHide
+			// (below). Without one (a Mac running the iPad app) the height is fixed —
+			// see the note on the height line. The
 			// transition makes the composer slide up in lockstep with the keyboard
 			// (no lag), and shrinking the app keeps content above the keyboard so
 			// WKWebView never scroll-reveals the input. Web: pin to visualViewport
@@ -1349,11 +1354,17 @@ export const Chat = () => {
 			style={
 				native
 					? {
-							height: 'calc(100dvh - var(--keyboard-height, 0px))',
+							// Fixed height where there is no software keyboard. The ghost row is
+							// caused by this height CHANGING: focusing a field on a Mac makes
+							// iPadOS fire keyboardWillShow with a height for a keyboard it never
+							// draws, the shell shrinks, the bottom row moves up, and WKWebView
+							// leaves a stale copy painted at the OLD position. Nothing to
+							// subtract means nothing to leave behind.
+							height: hasSoftwareKeyboard ? 'calc(100dvh - var(--keyboard-height, 0px))' : '100dvh',
 							// Front-loaded easing (fast start) so the composer catches the
 							// keyboard from the first frame despite the ~1-frame JS delay
 							// before the transition begins.
-							transition: 'height 0.25s cubic-bezier(0.16, 0.8, 0.3, 1)',
+							...(hasSoftwareKeyboard ? { transition: 'height 0.25s cubic-bezier(0.16, 0.8, 0.3, 1)' } : {}),
 						}
 					: viewportHeight
 						? { height: `${viewportHeight}px` }
@@ -1369,10 +1380,10 @@ export const Chat = () => {
 								<h1 className="font-display text-xl font-bold text-graphite leading-tight">FlatFold</h1>
 								<p className="text-xs text-graphite-60 font-mono flex items-center gap-1.5 truncate">
 									<span
-										className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${connected ? 'bg-sax' : 'bg-crane'}`}
+										className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${connected ? 'bg-sax-ink' : 'bg-crane-ink'}`}
 										aria-hidden="true"
 									/>
-									<span className={`truncate ${connected ? '' : 'text-crane font-semibold'}`}>
+									<span className={`truncate ${connected ? '' : 'text-crane-ink font-semibold'}`}>
 										{connected ? 'connected' : hasConnectedRef.current ? 'reconnecting…' : 'connecting…'} · {username}
 									</span>
 								</p>
@@ -1388,9 +1399,11 @@ export const Chat = () => {
 								<Search className="w-4 h-4" />
 								<span className="hidden sm:inline">Search</span>
 							</button>
-							{/* On native, Settings is a bottom-tab, not a header button
-							    (D2 §2: cap header actions). Web keeps the header glyph. */}
-							{!native && (
+							{/* Phones put Settings in the bottom tab bar (D2 §2: cap header
+							    actions); the web and any wide window keep the header glyph.
+							    Wide native NEEDS it: the tab bar is gone there, and without it
+							    the screen had no route to Settings at all. */}
+							{showHeaderSettings(chrome) && (
 								<button
 									onClick={() => setSettingsOpen(true)}
 									className="flex items-center justify-center min-w-11 min-h-11 border border-crease-line-bold hover:border-crease text-graphite rounded-lg transition-colors text-sm"
@@ -1403,7 +1416,7 @@ export const Chat = () => {
 							<ThemeToggle />
 							<button
 								onClick={() => requestPanicWipe()}
-								className="flex items-center justify-center gap-2 min-w-11 min-h-11 sm:px-3 sm:min-w-0 border border-crane/40 hover:border-crane text-crane rounded-lg transition-colors text-sm"
+								className="flex items-center justify-center gap-2 min-w-11 min-h-11 sm:px-3 sm:min-w-0 border border-crane-ink/40 hover:border-crane-ink text-crane-ink rounded-lg transition-colors text-sm"
 								title="Destroy all local data on this device (triple-tap Esc also triggers this)"
 								aria-label="Panic wipe"
 							>
@@ -1428,8 +1441,8 @@ export const Chat = () => {
 			</header>
 
 			{error && (
-				<div className="bg-graph-card border-b border-crane px-4 py-3">
-					<p className="text-sm text-crane">{error}</p>
+				<div className="bg-graph-card border-b border-crane-ink px-4 py-3">
+					<p className="text-sm text-crane-ink">{error}</p>
 				</div>
 			)}
 
@@ -1439,7 +1452,7 @@ export const Chat = () => {
 				<div
 					className={`${mobileView === 'conversation' ? 'hidden' : 'flex'} min-[900px]:flex w-full min-[900px]:w-80 min-[900px]:flex-shrink-0 min-h-0`}
 				>
-					{native && activeTab === 'contacts' ? (
+					{showContactsPane(chrome) ? (
 						<ContactsPane
 							contacts={contacts}
 							currentUsername={username ?? ''}
@@ -1550,7 +1563,7 @@ export const Chat = () => {
 													<button
 														onClick={() => void handleRemoveMember(activeGroup, m)}
 														aria-label={`Remove ${m}`}
-														className="text-crane hover:text-crane-dark"
+														className="text-crane-ink hover:opacity-80"
 													>
 														×
 													</button>
@@ -1606,7 +1619,7 @@ export const Chat = () => {
 										title={activeContactRecord.verified ? 'Safety number' : 'Verify'}
 										className={`flex items-center justify-center w-9 h-9 border rounded transition-colors ${
 											activeContactRecord.verified
-												? 'border-sax/50 text-sax hover:border-sax'
+												? 'border-sax/50 text-sax-ink hover:border-sax-ink'
 												: 'border-crease-line-bold text-graphite hover:border-crease'
 										}`}
 									>
@@ -1622,10 +1635,10 @@ export const Chat = () => {
 
 							{/* Non-dismissable-until-acknowledged key-change warning */}
 							{activeContactRecord.keyChangeUnacknowledged && (
-								<div className="bg-crane/10 border-b border-crane px-4 py-3 flex items-start gap-3 flex-shrink-0">
-									<ShieldAlert className="w-5 h-5 text-crane flex-shrink-0 mt-0.5" />
+								<div className="bg-crane/10 border-b border-crane-ink px-4 py-3 flex items-start gap-3 flex-shrink-0">
+									<ShieldAlert className="w-5 h-5 text-crane-ink flex-shrink-0 mt-0.5" />
 									<div className="flex-1">
-										<p className="text-sm text-crane font-medium">
+										<p className="text-sm text-crane-ink font-medium">
 											{activeContactRecord.username}&rsquo;s safety number has changed.
 										</p>
 										<p className="text-xs text-graphite-60 mt-0.5">
@@ -1635,7 +1648,7 @@ export const Chat = () => {
 										<div className="flex gap-3 mt-2">
 											<button
 												onClick={() => setVerifyDialogOpen(true)}
-												className="text-xs font-medium text-crane underline"
+												className="text-xs font-medium text-crane-ink underline"
 											>
 												Verify now
 											</button>
@@ -1679,7 +1692,7 @@ export const Chat = () => {
 			    detail (composer + keyboard) is never crowded by nav chrome. The
 			    Settings tab opens the existing settings modal for now; it becomes
 			    a full grouped screen (themes + About) in the themes step. */}
-			{native && mobileView === 'list' && !composeOpen && (
+			{showTabBar(chrome) && (
 				<TabBar
 					active={activeTab}
 					onChange={(t) => {

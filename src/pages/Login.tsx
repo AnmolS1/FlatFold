@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router';
 import { LoginForm } from '../components/auth/LoginForm';
 import { SignupForm } from '../components/auth/SignupForm';
 import { RecoverForm } from '../components/auth/RecoverForm';
@@ -97,7 +97,7 @@ export const Login = () => {
 							{activeTab === 'login' && (
 								<button
 									onClick={() => setRecovering(true)}
-									className="mt-4 w-full text-center text-sm text-crease hover:text-crane transition-colors"
+									className="mt-4 w-full text-center text-sm text-crease hover:text-crane-ink transition-colors"
 								>
 									Forgot your password?
 								</button>
@@ -111,7 +111,7 @@ export const Login = () => {
 					usernames, registration dates, and public keys only — nothing else.
 				</p>
 				<p className="text-center mt-2">
-					<Link to="/transparency" className="text-xs text-crease hover:text-crane transition-colors underline">
+					<Link to="/transparency" className="text-xs text-crease hover:text-crane-ink transition-colors underline">
 						See exactly what the server stores
 					</Link>
 				</p>

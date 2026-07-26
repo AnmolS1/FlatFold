@@ -4,7 +4,7 @@
 		"target": "ES2022",
 		"lib": ["ES2022", "DOM", "DOM.Iterable"],
 		"module": "ESNext",
-		"types": ["vite/client", "vitest/globals"],
+		"types": ["vite/client", "vitest/globals", "node"],
 		"jsx": "react-jsx",
 		"skipLibCheck": true,
 		"moduleResolution": "bundler",

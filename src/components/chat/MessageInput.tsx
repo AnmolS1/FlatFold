@@ -4,6 +4,7 @@ import type { MediaUploadInput } from '../../lib/media';
 import type { DisplayMessage } from '../../types';
 import { haptic } from '../../lib/haptics';
 import { replySnippet } from '../../lib/reply';
+import { isApplePlayable, pickRecordingMimeType } from '../../lib/audioFormat';
 
 interface MessageInputProps {
 	onSendMessage: (text: string) => Promise<void>;
@@ -90,13 +91,22 @@ const MessageInputComponent = ({
 		setError(null);
 		try {
 			const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-			const recorder = new MediaRecorder(stream);
+			// Pick the container explicitly. Left to the browser, Chrome picks WebM,
+			// which Safari and WKWebView cannot decode — so the note was unplayable on
+			// every Apple device, silently, on the RECEIVING end. See lib/audioFormat.
+			const mimeType = pickRecordingMimeType();
+			const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
 			const chunks: BlobPart[] = [];
 			recorder.ondataavailable = (ev) => ev.data.size > 0 && chunks.push(ev.data);
 			recorder.onstop = async () => {
 				stream.getTracks().forEach((t) => t.stop());
 				const durationMs = Date.now() - recordStartRef.current;
-				const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+				const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || 'audio/webm' });
+				// Firefox can only produce Opus, which Apple devices cannot play. Tell the
+				// SENDER here rather than letting it fail silently on someone else's phone.
+				if (!isApplePlayable(blob.type)) {
+					setError('Heads up: this browser records audio in a format Apple devices cannot play. The note will send, but iPhone and Mac recipients will not hear it.');
+				}
 				setSending(true);
 				try {
 					await onSendMedia({
@@ -183,14 +193,14 @@ const MessageInputComponent = ({
 		<div className="bg-graph-card border-t border-crease-line env-safe-bottom env-safe-x flex-shrink-0">
 			<div className="px-3 py-3 sm:p-4">
 				{error && (
-					<div className="mb-3 bg-graph-card border border-crane text-crane px-4 py-2 rounded-lg flex items-start gap-2">
+					<div className="mb-3 bg-graph-card border border-crane-ink text-crane-ink px-4 py-2 rounded-lg flex items-start gap-2">
 						<AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />
 						<span className="text-sm">{error}</span>
 					</div>
 				)}
 
 				{characterCount > MAX_LENGTH && (
-					<div className="mb-3 bg-graph-card border border-crane text-crane px-4 py-2 rounded-lg flex items-start gap-2">
+					<div className="mb-3 bg-graph-card border border-crane-ink text-crane-ink px-4 py-2 rounded-lg flex items-start gap-2">
 						<AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />
 						<span className="text-sm">Message exceeds maximum length of {MAX_LENGTH} characters</span>
 					</div>
@@ -320,7 +330,7 @@ const MessageInputComponent = ({
 							// focus is what actually keeps the mobile keyboard up.
 							onPointerDown={(e) => e.preventDefault()}
 							aria-label="Send message"
-							className="h-11 w-11 flex-shrink-0 flex items-center justify-center rounded-full bg-crane text-white hover:bg-crane-dark focus:outline-none focus:ring-2 focus:ring-crane focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+							className="h-11 w-11 flex-shrink-0 flex items-center justify-center rounded-full bg-crane text-white hover:bg-crane-dark focus:outline-none focus:ring-2 focus:ring-crane-ink focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
 						>
 							<Send className="w-5 h-5" />
 						</button>
@@ -332,7 +342,7 @@ const MessageInputComponent = ({
 							title={recording ? 'Stop recording' : 'Record a voice note'}
 							aria-label={recording ? 'Stop recording' : 'Record a voice note'}
 							className={`h-11 w-11 flex-shrink-0 flex items-center justify-center rounded-full border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-								recording ? 'border-crane text-crane animate-pulse' : 'border-crease-line-bold text-graphite hover:border-crease'
+								recording ? 'border-crane-ink text-crane-ink animate-pulse' : 'border-crease-line-bold text-graphite hover:border-crease'
 							}`}
 						>
 							{recording ? <Square className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
@@ -344,7 +354,7 @@ const MessageInputComponent = ({
 				    composer stays clean at rest. */}
 				{isNearLimit && (
 					<div className="flex justify-end mt-1.5 text-xs font-mono">
-						<p className={`font-medium ${characterCount > MAX_LENGTH || isAtLimit ? 'text-crane' : 'text-sax'}`}>
+						<p className={`font-medium ${characterCount > MAX_LENGTH || isAtLimit ? 'text-crane-ink' : 'text-sax-ink'}`}>
 							{characterCount} / {MAX_LENGTH}
 						</p>
 					</div>

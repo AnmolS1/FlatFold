@@ -73,7 +73,7 @@ export const CreateGroupDialog = ({ contacts, onClose, onCreate }: CreateGroupDi
 						)}
 					</div>
 
-					{error && <p className="text-sm text-crane">{error}</p>}
+					{error && <p className="text-sm text-crane-ink">{error}</p>}
 
 					<button
 						type="submit"

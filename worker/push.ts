@@ -254,7 +254,22 @@ export async function sendWakeupToUser(env: Env, username: string): Promise<void
 					await env.DB.prepare('DELETE FROM apns_subscriptions WHERE device_token = ?').bind(device_token).run();
 					break;
 				}
-				// Otherwise (e.g. 400 wrong-environment) fall through to the next candidate.
+				// Otherwise (e.g. 400 wrong-environment) fall through to the next
+				// candidate — but say so. A token rejected in BOTH environments used to
+				// vanish without a trace, which is precisely the macOS case: a Mac
+				// running an iPad app registers against a topic the send may not be
+				// authorised for, and the only symptom was "notifications don't work".
+				// `reason` is APNs's machine-readable cause (BadDeviceToken,
+				// TopicDisallowed, BadEnvironmentKeyInToken, ...). No token, no
+				// username, no payload — nothing identifying goes into a log line.
+				if (apnsEnv === candidates[candidates.length - 1]) {
+					const reason = await response
+						.clone()
+						.json()
+						.then((b) => (b as { reason?: string })?.reason ?? 'unknown')
+						.catch(() => 'unparseable');
+					console.warn(`apns: undelivered after trying ${candidates.join(' then ')} — last status ${response.status}, reason ${reason}`);
+				}
 			} catch {
 				// APNs unreachable (or local dev) — ignore; the client re-syncs on reconnect.
 				break;

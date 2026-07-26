@@ -11,6 +11,13 @@
 	// no *.workers.dev URL. Does NOT touch the separate `ponderance-dev`
 	// worker or the apex zone.
 	"routes": [{ "pattern": "flatfold.ponderance.dev", "custom_domain": true }],
+
+	// Without this the Worker emits nothing to the Observability API, which is how
+	// a macOS push failure came to be undiagnosable: the APNs send loop treats
+	// only 200 and 410 specially and swallows everything else, and there was no
+	// log to inspect either. Head-sampled at 100% — this Worker's traffic is tiny
+	// and the whole point is to catch rare failures.
+	"observability": { "enabled": true, "head_sampling_rate": 1 },
 	"workers_dev": false,
 
 	"assets": {

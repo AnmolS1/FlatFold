@@ -95,7 +95,7 @@ const ConfirmationDialogComponent = ({
 	if (!isOpen) return null;
 
 	const confirmButtonStyles =
-		confirmButtonVariant === 'danger' ? 'bg-crane hover:bg-crane-dark text-white' : 'bg-crease hover:opacity-90 text-white';
+		confirmButtonVariant === 'danger' ? 'bg-crane hover:bg-crane-dark text-white' : 'bg-crease hover:opacity-90 text-on-crease';
 
 	const dialog = (
 		<div

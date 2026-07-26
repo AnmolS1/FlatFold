@@ -15,7 +15,7 @@ import { SettingsDialog } from '../src/components/SettingsDialog';
 import { useModalDialog } from '../src/hooks/useModalDialog';
 import { AuthContext } from '../src/hooks/useAuth';
 import { ThemeProvider } from '../src/contexts/ThemeContext';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter } from 'react-router';
 import type { AuthContextType } from '../src/types';
 
 // SettingsDialog now reads changePassword from auth context — a minimal stub is

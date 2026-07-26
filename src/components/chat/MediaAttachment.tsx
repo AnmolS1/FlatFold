@@ -92,7 +92,18 @@ const MediaAttachmentComponent = ({ username, media, isOwnMessage }: MediaAttach
 				if (cancelled) return;
 				toUrl(bytes);
 			} catch (err) {
-				if (!cancelled) setError(err instanceof Error ? err.message : 'Attachment unavailable.');
+				// Name the stage. A bare `err.message` rendered as "Error", which is
+				// indistinguishable from a codec failure in the UI and sent us chasing
+				// the wrong bug. The single-fetch case is worth spelling out: the
+				// server copy is deleted once ANY device has fetched it, so a second
+				// device legitimately cannot get it.
+				if (cancelled) return;
+				const raw = err instanceof Error ? err.message : String(err);
+				setError(
+					/no longer available/i.test(raw)
+						? 'Attachment is gone from the server — it was already downloaded on another device.'
+						: raw || 'Attachment unavailable.'
+				);
 			}
 		})();
 
@@ -142,7 +153,7 @@ const MediaAttachmentComponent = ({ username, media, isOwnMessage }: MediaAttach
 	}
 
 	if (media.mediaKind === 'voice') {
-		return <VoiceNote url={objectUrl} durationMs={media.durationMs} own={isOwnMessage} />;
+		return <VoiceNote url={objectUrl} durationMs={media.durationMs} own={isOwnMessage} mimeType={media.mimeType} />;
 	}
 
 	// Generic file. Native: a button that opens the iOS share sheet (the

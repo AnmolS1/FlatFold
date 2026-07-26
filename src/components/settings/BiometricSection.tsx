@@ -67,11 +67,11 @@ export function BiometricSection({ username }: { username: string }) {
 						{!enrolled && ` iOS will ask to allow ${label} the first time you unlock.`}
 					</p>
 				</div>
-				<span className={`text-xs font-mono px-2 py-1 rounded ${enrolled ? 'bg-sax/20 text-sax' : 'bg-inset text-graphite-40'}`}>
+				<span className={`text-xs font-mono px-2 py-1 rounded ${enrolled ? 'bg-sax/20 text-sax-ink' : 'bg-inset text-graphite-40'}`}>
 					{enrolled ? 'ON' : 'OFF'}
 				</span>
 			</button>
-			{error && <p className="text-xs text-crane mt-2">{error}</p>}
+			{error && <p className="text-xs text-crane-ink mt-2">{error}</p>}
 		</section>
 	);
 }

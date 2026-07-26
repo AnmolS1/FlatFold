@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { Database, Scale, ShieldQuestion, ArrowLeft, EyeOff } from 'lucide-react';
 import { LEGAL_ANSWER, SEALED_SENDER, SERVER_STATE } from '../data/serverState';
 import { LogoHomeLink } from '../components/common/LogoHomeLink';
@@ -100,7 +100,7 @@ export const Transparency = () => {
 				{/* Web-client caveat */}
 				<section className="mb-10 bg-sax/10 border border-sax/40 rounded-xl p-5">
 					<h2 className="font-display text-lg font-semibold text-graphite mb-2 flex items-center gap-2">
-						<ShieldQuestion className="w-5 h-5 text-sax" /> The honest caveat: this is a web app
+						<ShieldQuestion className="w-5 h-5 text-sax-ink" /> The honest caveat: this is a web app
 					</h2>
 					<p className="text-sm text-graphite-60 mb-2">
 						Here is the part most apps won&rsquo;t tell you. A messenger that runs in your browser can&rsquo;t be
@@ -127,7 +127,7 @@ export const Transparency = () => {
 					</p>
 				</section>
 
-				<Link to="/chat" className="inline-flex items-center gap-2 text-sm text-crease hover:text-crane transition-colors">
+				<Link to="/chat" className="inline-flex items-center gap-2 text-sm text-crease hover:text-crane-ink transition-colors">
 					<ArrowLeft className="w-4 h-4" /> Back to FlatFold
 				</Link>
 			</div>

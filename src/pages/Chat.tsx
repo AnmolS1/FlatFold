@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router';
 import { ChevronLeft, LogOut, Search, Settings, ShieldAlert, ShieldCheck, ShieldOff, Users } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useToast } from '../hooks/useToast';
-import type { DisplayMessage, WsDeliveredFrame, WsGroupMessageFrame, WsMessageFrame, WsServerToClientFrame, X3dhHandshakeWire } from '../types';
+import type { DisplayMessage, WsDeliveredFrame, WsGroupMessageFrame, WsMessageFrame, X3dhHandshakeWire } from '../types';
 import * as keystore from '../keystore';
 import type { ContactRecord, GroupRecord, ConversationSummary } from '../keystore';
 import {
@@ -42,6 +42,7 @@ import { isBlocked, blockContact, unblockContact } from '../lib/blocklist';
 import { replyRefFrom } from '../lib/reply';
 import { orderedVisibleMessages } from '../lib/messageOrder';
 import { haptic } from '../lib/haptics';
+import { createSessionOpChain, routeInboundFrame, type SessionOpChain } from '../lib/inboundDispatch';
 import { useVisualViewportHeight } from '../hooks/useVisualViewport';
 import { ContactList } from '../components/chat/ContactList';
 import { DisappearingTimerMenu } from '../components/chat/DisappearingTimerMenu';
@@ -147,16 +148,10 @@ export const Chat = () => {
 	// server sees us offline and pushes, and we suppress auto-reconnect until the
 	// app returns to the foreground.
 	const backgroundedRef = useRef(false);
-	// Serializes every session-touching operation — inbound decrypt AND
-	// outbound encrypt — onto one chain. Both paths do
-	// loadSession→mutate→saveSession against IndexedDB, and saveSession
-	// rewrites the *whole* record, so any two overlapping ops (receive/receive
-	// during an offline-queue flush, OR a send crossing a receive when both
-	// people type at once) would clobber each other's ratchet state — benign
-	// within one chain, but permanently wedging across a DH-ratchet step.
-	// Chaining makes each op atomic and ordered. Mirrors the sender-side send
-	// chain in worker/mailbox.ts.
-	const sessionOpChain = useRef<Promise<unknown>>(Promise.resolve());
+	// Serializes every session-touching operation — inbound decrypt AND outbound
+	// encrypt — onto one chain, so an offline-queue flush can't clobber its own
+	// ratchet state. The why is in lib/inboundDispatch.ts, along with its tests.
+	const sessionOpChain = useRef<SessionOpChain>(createSessionOpChain());
 	// X3DH material to attach to the NEXT outgoing message per contact —
 	// only the first message of a new session carries it. Component state
 	// (not the keystore) since it only needs to survive until that next
@@ -169,18 +164,7 @@ export const Chat = () => {
 	// back to keystore.findMessageByRid.
 	const ridToLocationRef = useRef<Map<string, { contact: string; messageId: string }>>(new Map());
 
-	// Runs `task` after all previously-enqueued session ops settle. The chain
-	// tail never rejects (one failure must not poison later ops), but the
-	// returned promise does — so a failed send still surfaces its error to the
-	// message input.
-	const enqueueSessionOp = useCallback(<T,>(task: () => Promise<T>): Promise<T> => {
-		const result = sessionOpChain.current.then(task, task);
-		sessionOpChain.current = result.then(
-			() => {},
-			() => {}
-		);
-		return result;
-	}, []);
+	const enqueueSessionOp = useCallback(<T,>(task: () => Promise<T>): Promise<T> => sessionOpChain.current.enqueue(task), []);
 	const usernameRef = useRef(username);
 	usernameRef.current = username;
 	// Latest contacts, readable inside stable callbacks (e.g. the send path
@@ -804,22 +788,15 @@ export const Chat = () => {
 		};
 
 		ws.onmessage = (event) => {
-			let frame: WsServerToClientFrame;
-			try {
-				frame = JSON.parse(event.data as string) as WsServerToClientFrame;
-			} catch {
-				return; // ignore malformed frames rather than crash the chat view
-			}
-			// Enqueue on the shared session-op chain so frames process one at a
-			// time, in arrival order, and never overlap an outbound send.
-			const run =
-				frame.type === 'message'
-					? () => handleIncomingMessage(frame)
-					: frame.type === 'groupMessage'
-						? () => handleIncomingGroupMessage(frame)
-						: frame.type === 'delivered'
-							? () => handleDeliveredFrame(frame)
-							: null;
+			// routeInboundFrame returns null for anything malformed, non-object or
+			// of an unknown type — never throws, so nothing on the wire can take the
+			// chat view down. Then enqueue on the shared session-op chain so frames
+			// process one at a time, in arrival order, and never overlap a send.
+			const run = routeInboundFrame(event.data as string, {
+				onMessage: handleIncomingMessage,
+				onGroupMessage: handleIncomingGroupMessage,
+				onDelivered: handleDeliveredFrame,
+			});
 			if (run) {
 				enqueueSessionOp(run).catch((err) => console.error('Inbound frame handler failed:', err));
 			}

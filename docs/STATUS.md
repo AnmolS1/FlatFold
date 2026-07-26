@@ -1,10 +1,27 @@
-# FlatFold: current status, for a fresh reviewer
+# FlatFold: current status — START HERE
 
-Written 2026-07-25 for a Cowork review session. It covers where the project
-actually stands, which behaviours look like bugs but are deliberate, what has been
-verified and how, and what is genuinely still open. Read this before filing
-anything, because several of the most surprising behaviours in the app are
-intentional and already documented.
+**This file is the entry point. There are 26 docs; you do not need most of them,
+and several look current but are not.**
+
+Read in this order:
+
+| # | file | why |
+| --- | --- | --- |
+| 1 | **this file** | what is true today, and the "Deliberate behaviours" list — several of the most surprising behaviours in the app are intentional and already documented. Do not file them. |
+| 2 | `redesign/HANDOFF_2026-07-26.md` | **the current handoff.** What shipped last, what is open, and what has already been ruled out on each open bug. |
+| 3 | `redesign/HANDOFF_STEP6_CONTINUATION.md` | **authoritative for the hard constraints** (the frozen files). Otherwise historical — its status section is stale. |
+| 4 | whatever the task needs | the D1–D7 design specs, `FULL_AUDIT_2.md`, `NATIVE_MACOS_PLAN.md`, `DESKTOP_SHELL_OPTIONS.md`, `THREAT_MODEL.md` |
+
+Superseded, read only for history: `redesign/HANDOFF_TO_CLAUDE_CODE.md`,
+`redesign/NATIVE_BUILD_PROMPT.md`, `FULL_AUDIT.md` (superseded by `FULL_AUDIT_2.md`),
+and the demo-account section of `redesign/D5_appstore_copy.md` (superseded by
+`redesign/D5b_app_review_notes.md`).
+
+**Two things to check before debugging anything**, both in Settings → About:
+the **Build** id (a stale WKWebView bundle has already caused two misfiled bug
+reports) and the **Platform** line (`iPad app on Mac` vs `iOS/iPadOS`).
+
+Originally written 2026-07-25 for a Cowork review session; kept current.
 
 ## What FlatFold is
 
@@ -260,13 +277,6 @@ per-feature evidence is described in the commit messages and in
    could be removed; `--color-orbit-ink` is defined in every theme block and used
    nowhere; and eslint's `brace-expansion` advisory is open, fixable only by an
    eslint 10 major.
-
-## Latest handoff
-
-`docs/redesign/HANDOFF_2026-07-26.md` — the FULL_AUDIT_2 response, the Mac
-testing round, and what is still open (the ghost row with three failed fixes and
-their ruled-out hypotheses, the microphone, and the macOS decision).
-`docs/DESKTOP_SHELL_OPTIONS.md` is the Tauri-vs-Catalyst-vs-descope paper.
 
 ## Where things live
 

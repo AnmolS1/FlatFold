@@ -43,6 +43,8 @@ import { replyRefFrom } from '../lib/reply';
 import { orderedVisibleMessages } from '../lib/messageOrder';
 import { haptic } from '../lib/haptics';
 import { createSessionOpChain, routeInboundFrame, type SessionOpChain } from '../lib/inboundDispatch';
+import { showContactsPane, showHeaderSettings, showTabBar, type ChatChromeState } from '../lib/chatChrome';
+import { useIsWideViewport } from '../hooks/useIsWideViewport';
 import { useVisualViewportHeight } from '../hooks/useVisualViewport';
 import { ContactList } from '../components/chat/ContactList';
 import { DisappearingTimerMenu } from '../components/chat/DisappearingTimerMenu';
@@ -103,6 +105,11 @@ export const Chat = () => {
 	// full-screen over the Chats tab (mobileView==='conversation'), which hides
 	// the tab bar, so nav never fights the composer/keyboard.
 	const native = isNativePlatform();
+	// Both panes render side by side above this width, which changes what chrome
+	// makes sense. Every visibility decision below goes through lib/chatChrome, so
+	// the "you can always reach Settings" invariant is checkable across the whole
+	// state space — it was not, and a dead end shipped. See that file.
+	const wide = useIsWideViewport();
 	const [activeTab, setActiveTab] = useState<NativeTab>('chats');
 	// True while the Chats list's "New message" compose bar is open. Hides the
 	// tab bar so the add-username input is the bottom-most element above the
@@ -141,6 +148,8 @@ export const Chat = () => {
 	);
 	// Keyboard-aware shell height (see the hook): keeps the composer above the
 	// on-screen keyboard on iOS. Falls back to the h-dvh class until it resolves.
+	const chrome: ChatChromeState = { native, wide, mobileView, composeOpen, activeTab };
+
 	const viewportHeight = useVisualViewportHeight();
 
 	const wsRef = useRef<WebSocket | null>(null);
@@ -1365,9 +1374,11 @@ export const Chat = () => {
 								<Search className="w-4 h-4" />
 								<span className="hidden sm:inline">Search</span>
 							</button>
-							{/* On native, Settings is a bottom-tab, not a header button
-							    (D2 §2: cap header actions). Web keeps the header glyph. */}
-							{!native && (
+							{/* Phones put Settings in the bottom tab bar (D2 §2: cap header
+							    actions); the web and any wide window keep the header glyph.
+							    Wide native NEEDS it: the tab bar is gone there, and without it
+							    the screen had no route to Settings at all. */}
+							{showHeaderSettings(chrome) && (
 								<button
 									onClick={() => setSettingsOpen(true)}
 									className="flex items-center justify-center min-w-11 min-h-11 border border-crease-line-bold hover:border-crease text-graphite rounded-lg transition-colors text-sm"
@@ -1416,7 +1427,7 @@ export const Chat = () => {
 				<div
 					className={`${mobileView === 'conversation' ? 'hidden' : 'flex'} min-[900px]:flex w-full min-[900px]:w-80 min-[900px]:flex-shrink-0 min-h-0`}
 				>
-					{native && activeTab === 'contacts' ? (
+					{showContactsPane(chrome) ? (
 						<ContactsPane
 							contacts={contacts}
 							currentUsername={username ?? ''}
@@ -1656,7 +1667,7 @@ export const Chat = () => {
 			    detail (composer + keyboard) is never crowded by nav chrome. The
 			    Settings tab opens the existing settings modal for now; it becomes
 			    a full grouped screen (themes + About) in the themes step. */}
-			{native && mobileView === 'list' && !composeOpen && (
+			{showTabBar(chrome) && (
 				<TabBar
 					active={activeTab}
 					onChange={(t) => {

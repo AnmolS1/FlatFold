@@ -12,6 +12,7 @@ class MainViewController: CAPBridgeViewController {
     override open func capacitorDidLoad() {
         bridge?.registerPluginInstance(FlatFoldBiometricPlugin())
         bridge?.registerPluginInstance(FlatFoldAppIconPlugin())
+        bridge?.registerPluginInstance(FlatFoldAudioPlugin())
 
         // Tell the web layer whether this is the iPad app running on a Mac.
         //

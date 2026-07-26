@@ -23,6 +23,7 @@
 		7FEB12A521FCF86199AC40FE /* AppIcon-Vellum@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = 4CB44D810A878BA123663F72 /* AppIcon-Vellum@3x.png */; };
 		8302A2A19907738D1F8A7A47 /* FlatFoldBiometricPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4738881198B3CB49ED3D1D4 /* FlatFoldBiometricPlugin.swift */; };
 		907AA455139B286A146EC448 /* FlatFoldAppIconPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72964A5BE3AC0C57EF337A1D /* FlatFoldAppIconPlugin.swift */; };
+		FB24DB867EEAE3A434B6E92E /* FlatFoldAudioPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AF74C73FEDCC76DC87C9CD0 /* FlatFoldAudioPlugin.swift */; };
 		C45E121A56BAC0BC20BAB95F /* FlatFoldFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94A17C7A37620B868DDD3CD5 /* FlatFoldFlowUITests.swift */; };
 		D4BE40E86ED97DC21E9C2847 /* AppIcon-Midnight@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = E179FE4512E8218E14D4BA96 /* AppIcon-Midnight@2x.png */; };
 		E12079C2411F2405EBF88D7B /* AppIcon-Vellum@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = A5936FE4AF6A0E6B12B289CA /* AppIcon-Vellum@2x.png */; };
@@ -57,6 +58,7 @@
 		5EAFCBAA61D515F46C8CC02D /* AppIcon-Graphite@2x.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; name = "AppIcon-Graphite@2x.png"; path = "AltIcons/AppIcon-Graphite@2x.png"; sourceTree = "<group>"; };
 		6FFE2F4D873352777D54E7A7 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		72964A5BE3AC0C57EF337A1D /* FlatFoldAppIconPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FlatFoldAppIconPlugin.swift; sourceTree = "<group>"; };
+		6AF74C73FEDCC76DC87C9CD0 /* FlatFoldAudioPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FlatFoldAudioPlugin.swift; sourceTree = "<group>"; };
 		94A17C7A37620B868DDD3CD5 /* FlatFoldFlowUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FlatFoldFlowUITests.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 		A5936FE4AF6A0E6B12B289CA /* AppIcon-Vellum@2x.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; name = "AppIcon-Vellum@2x.png"; path = "AltIcons/AppIcon-Vellum@2x.png"; sourceTree = "<group>"; };
@@ -139,6 +141,7 @@
 				09349178F6F52136FFB785A5 /* MainViewController.swift */,
 				C129D914F0C754C4E37FE05B /* AltIcons */,
 				72964A5BE3AC0C57EF337A1D /* FlatFoldAppIconPlugin.swift */,
+				6AF74C73FEDCC76DC87C9CD0 /* FlatFoldAudioPlugin.swift */,
 				A89901378AD9AEDA07CCA03E /* App.debug.entitlements */,
 			);
 			path = App;
@@ -292,6 +295,7 @@
 				8302A2A19907738D1F8A7A47 /* FlatFoldBiometricPlugin.swift in Sources */,
 				2185EFB4E0F5881BBC490CE1 /* MainViewController.swift in Sources */,
 				907AA455139B286A146EC448 /* FlatFoldAppIconPlugin.swift in Sources */,
+				FB24DB867EEAE3A434B6E92E /* FlatFoldAudioPlugin.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

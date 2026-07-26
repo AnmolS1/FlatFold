@@ -309,14 +309,17 @@ per-feature evidence is described in the commit messages and in
    usernames. Low risk, because username-based identity is enumerable by design
    here, but it is a decision rather than an oversight. Remember git history is not
    undoable: once `9ce31a1` is pushed, this is settled.
-7. **The Mac ("Designed for iPad") round left two things open.** Full detail, with
-   what has already been ruled out on each, is in `redesign/HANDOFF_2026-07-26.md`
-   — read that before touching either. In short: (a) the **ghost row** over the
-   composer on focus, which alone cost four wrong fixes, was an empty
-   iPadOS input accessory bar, not anything in the web layer; the fix is `9ce31a1`
-   and it **compiles but is unverified on device**. (b) The **microphone** never
-   prompts, and the likely fix is a Catalyst-only sandbox entitlement, so it is
-   blocked behind item 2. Recommendation was to park it rather than keep digging.
+7. ~~The ghost row on "Designed for iPad".~~ **Fixed and verified on device
+   2026-07-26** (`2b42785`). It is `UIInputSetHostView` in `UITextEffectsWindow`,
+   hidden outright on Mac. Six attempts, because the first five went after the
+   wrong object — the ruled-out list in `MainViewController.installMacInputBarHide`
+   is worth more than the fix and is all measured, not reasoned. Short version:
+   not the web layer, not `inputAccessoryView` (it was already nil while the bar
+   was on screen), not `inputAssistantItem` (cleared on both the webview and the
+   content view; the bar did not move), and not the keyboard height (the software
+   keyboard in that view is already 0pt on a Mac). **The microphone** is still
+   open: it never prompts, the likely fix is a Catalyst-only sandbox entitlement,
+   so it is blocked behind item 2 and was parked rather than dug into further.
 8. **Smaller follow-ups:** the native push title is a fixed generic rather than the
    user's custom decoy label (the setting's help text now says so explicitly);
    `@capacitor/local-notifications` and `initNativePushDisplay` are now inert and

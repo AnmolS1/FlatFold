@@ -311,8 +311,8 @@ per-feature evidence is described in the commit messages and in
    undoable: once `9ce31a1` is pushed, this is settled.
 7. **The Mac ("Designed for iPad") round left two things open.** Full detail, with
    what has already been ruled out on each, is in `redesign/HANDOFF_2026-07-26.md`
-   — read that before touching either, because between them they cost four wrong
-   fixes. In short: (a) the **ghost row** over the composer on focus was an empty
+   — read that before touching either. In short: (a) the **ghost row** over the
+   composer on focus, which alone cost four wrong fixes, was an empty
    iPadOS input accessory bar, not anything in the web layer; the fix is `9ce31a1`
    and it **compiles but is unverified on device**. (b) The **microphone** never
    prompts, and the likely fix is a Catalyst-only sandbox entitlement, so it is

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Play, Pause } from 'lucide-react';
+import { getSharedAudioContext } from '../../lib/audioContext';
+import { describeVoiceNotePlaybackError } from '../../lib/mediaErrors';
 
 interface VoiceNoteProps {
 	url: string; // blob: object URL of the decrypted audio
@@ -58,12 +60,15 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 	// native player rather than throwing.
 	useEffect(() => {
 		let cancelled = false;
-		let ctx: AudioContext | null = null;
 		(async () => {
 			try {
-				const AC = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-				if (!AC) throw new Error('no AudioContext');
-				ctx = new AC();
+				// ONE context for the whole app. A per-note context is what made
+				// voice notes fail at random and recover on restart: WebKit caps
+				// concurrent AudioContexts, this closed them fire-and-forget, and
+				// once the cap was hit every later note fell through to the native
+				// player and reported a codec error for a codec that was fine.
+				const ctx = getSharedAudioContext();
+				if (!ctx) throw new Error('no AudioContext');
 				const buf = await (await fetch(url)).arrayBuffer();
 				const decoded = await ctx.decodeAudioData(buf);
 				if (cancelled) return;
@@ -71,9 +76,8 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 				if (!durationMs) setDuration(decoded.duration);
 			} catch {
 				if (!cancelled) setDecodeFailed(true);
-			} finally {
-				void ctx?.close();
 			}
+			// No close(): the context is shared and outlives this component.
 		})();
 		return () => {
 			cancelled = true;
@@ -99,14 +103,7 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 					controls
 					className="h-8 max-w-full"
 					onError={() => {
-						const code = audioRef.current?.error?.code;
-						const why =
-							code === 4
-								? 'this device cannot decode the format'
-								: code === 2
-									? 'the audio could not be loaded'
-									: 'playback failed';
-						setPlaybackError(`Can’t play this voice note — ${why}${mimeType ? ` (${mimeType})` : ''}.`);
+						setPlaybackError(describeVoiceNotePlaybackError(audioRef.current?.error?.code, mimeType));
 					}}
 					ref={audioRef}
 				/>

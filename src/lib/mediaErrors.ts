@@ -14,6 +14,38 @@
 //
 // Same principle as the voice-note failure text: say WHY, and name the thing.
 
+import { isApplePlayable } from './audioFormat';
+
+/**
+ * Why a voice note would not play, without blaming the codec for a failure the
+ * codec cannot explain.
+ *
+ * `MEDIA_ERR_SRC_NOT_SUPPORTED` (code 4) is ambiguous: it is what WebKit reports
+ * for a genuinely undecodable format AND what surfaces when the audio system has
+ * run out of resources. The old text always read it the first way, so exhausting
+ * WebKit's AudioContext cap produced "this device cannot decode the format
+ * (audio/mp4;codecs=mp4a.40.2)" — naming the exact format we chose BECAUSE Apple
+ * decodes it, while other notes in the same conversation played.
+ *
+ * So: if the format is on the Apple-playable list, the device can decode it by
+ * definition, and code 4 means something else. Say that instead.
+ */
+export function describeVoiceNotePlaybackError(code: number | undefined, mimeType: string | undefined): string {
+	const named = mimeType ? ` (${mimeType})` : '';
+
+	if (code === 2) {
+		return `Can’t play this voice note — the audio could not be loaded${named}.`;
+	}
+	if (code === 4) {
+		// isApplePlayable is the same list the recorder picks from.
+		if (mimeType && isApplePlayable(mimeType)) {
+			return 'Can’t play this voice note right now — the audio system is out of resources. Reopening the app clears it.';
+		}
+		return `Can’t play this voice note — this device cannot decode the format${named}.`;
+	}
+	return `Can’t play this voice note — playback failed${named}.`;
+}
+
 /** What the page can actually see of the media-capture API. */
 export interface MediaEnvironment {
 	isSecureContext: boolean;

@@ -30,23 +30,21 @@ class MainViewController: CAPBridgeViewController {
         )
         bridge?.webView?.configuration.userContentController.addUserScript(script)
 
-        // Kill the empty input-accessory bar on Mac.
+        // Kill the two bars iPadOS docks at the bottom of the webview on a Mac.
         //
-        // THIS is the "ghost row": focusing any text field made iPadOS dock an
-        // input accessory bar at the bottom of the webview, drawn over the real
-        // bottom row and empty because a Mac has no software keyboard. Three
-        // CSS-side fixes failed because it was never in the web layer at all.
+        // The "ghost row" is `suppressInputAssistantBar()` — see the evidence in
+        // its doc comment. `suppressInputAccessoryView()` below is the belt to
+        // its braces: a runtime dump showed `inputAccessoryView` was ALREADY nil
+        // while the ghost row was on screen, so it is not what was drawing the
+        // bar. It is kept because it costs nothing and covers the case where a
+        // responder other than WKWebView supplies a real accessory view, but it
+        // should not be mistaken for the fix. Four attempts were spent on it.
         //
-        // @capacitor/keyboard already suppresses this — but by swizzling
-        // `inputAccessoryView` on classes looked up by HARDCODED name
-        // ("UIWebBrowserView", "WKContentView"). On a Mac those do not resolve,
-        // `class_getInstanceMethod(nil, ...)` returns NULL, and the swizzle
-        // silently no-ops. Hence: iPhone and iPad fine, Mac not.
-        //
-        // Fixed by finding the content view at RUNTIME and reclassing that one
-        // instance, rather than guessing a name or mutating a shared class.
-        // Scoped to isiOSAppOnMac so iOS behaviour is untouched.
-        if isOnMac { suppressInputAccessoryView() }
+        // Both are scoped to isiOSAppOnMac, so iOS behaviour is untouched.
+        if isOnMac {
+            suppressInputAccessoryView()
+            suppressInputAssistantBar()
+        }
 
         #if DEBUG
         // Attempt 4 failed, so the CAUSE is now suspect, not just the fix.
@@ -54,6 +52,51 @@ class MainViewController: CAPBridgeViewController {
         // row is understood — see `ghostRowDiagnostics()`.
         if isOnMac { installGhostRowDiagnostics() }
         #endif
+    }
+
+    /// Kill the iPad shortcuts bar on Mac. THIS is the ghost row.
+    ///
+    /// Four fixes missed it because they all targeted `inputAccessoryView`, and
+    /// a runtime dump of every window finally showed why that could never work:
+    ///
+    ///     firstResponder = WKWebView
+    ///       .inputAccessoryView = nil        <- already nil, bar still on screen
+    ///
+    ///     UITextEffectsWindow (level 1, NOT the app's window)
+    ///       UIInputSetHostView   {0,951},{1272,44}   <- the ghost row
+    ///         UIKBInputBackdropView {1272,44}        <- its backdrop
+    ///         UIInputView {0,44},{1272,0}            <- software keyboard, 0pt, correct
+    ///         UIInputView {0, 0},{1272,44}           <- 44pt, and not the keyboard
+    ///           _UIInputViewContent {0,  0,636,44}   <- leading bar button group
+    ///           _UIInputViewContent {636,0,636,44}   <- trailing bar button group
+    ///
+    /// Two 636-wide halves of a 44pt bar are the leading/trailing groups of
+    /// `inputAssistantItem` — the SYSTEM shortcuts bar, which is a different API
+    /// from `inputAccessoryView` and is unaffected by nilling it. iPadOS shows it
+    /// whenever a HARDWARE keyboard is attached, and a Mac always has one; that
+    /// is the whole reason this is Mac-only. Note the software keyboard beside it
+    /// is already 0pt tall, so keyboard suppression was working the entire time.
+    ///
+    /// Emptying both groups is the supported way to remove it.
+    private func suppressInputAssistantBar() {
+        guard let webView = bridge?.webView else { return }
+
+        // The dump named WKWebView as first responder, but WKContentView is the
+        // usual text-input responder and `inputAssistantItem` is per-responder,
+        // so clear it on both rather than betting on which one UIKit asks.
+        var responders: [UIResponder] = [webView]
+        responders.append(contentsOf: webView.scrollView.subviews)
+
+        for responder in responders {
+            let item = responder.inputAssistantItem
+            #if DEBUG
+            NSLog("[ghostrow] clearing assistant bar on %@ (leading=%d trailing=%d)",
+                  NSStringFromClass(type(of: responder)),
+                  item.leadingBarButtonGroups.count, item.trailingBarButtonGroups.count)
+            #endif
+            item.leadingBarButtonGroups = []
+            item.trailingBarButtonGroups = []
+        }
     }
 
     private func suppressInputAccessoryView() {

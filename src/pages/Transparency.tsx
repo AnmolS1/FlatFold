@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { Database, Scale, ShieldQuestion, ArrowLeft, EyeOff } from 'lucide-react';
 import { LEGAL_ANSWER, SEALED_SENDER, SERVER_STATE } from '../data/serverState';
 import { LogoHomeLink } from '../components/common/LogoHomeLink';

@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { LogoWordmark } from './Brand';
 import { useAuth } from '../../hooks/useAuth';
 

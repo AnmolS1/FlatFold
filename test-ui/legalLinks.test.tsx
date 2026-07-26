@@ -7,7 +7,7 @@
 // server stores" link, so the disclosure lives in one place.
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter } from 'react-router';
 
 // Login sits under AuthProvider, which calls GET /api/auth/me on mount. Stub the
 // network boundary only — the component under test is otherwise real.

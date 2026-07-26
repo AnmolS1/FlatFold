@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { Info, ExternalLink, ShieldCheck, Mail } from 'lucide-react';
 import { APP_VERSION } from '../../version';
 

@@ -1,4 +1,4 @@
-import { Navigate } from 'react-router-dom';
+import { Navigate } from 'react-router';
 import { LogoMark } from './common/Brand';
 import { KeystoreUnlockGate } from './KeystoreUnlockGate';
 import { PanicWipe } from './PanicWipe';

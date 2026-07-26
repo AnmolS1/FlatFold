@@ -1,5 +1,5 @@
 import { useState, useEffect, type FormEvent, type ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { Fingerprint } from 'lucide-react';
 import { LogoMark } from './common/Brand';
 import { useAuth } from '../hooks/useAuth';

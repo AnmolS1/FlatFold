@@ -4,6 +4,7 @@ import type { MediaUploadInput } from '../../lib/media';
 import type { DisplayMessage } from '../../types';
 import { haptic } from '../../lib/haptics';
 import { replySnippet } from '../../lib/reply';
+import { isApplePlayable, pickRecordingMimeType } from '../../lib/audioFormat';
 
 interface MessageInputProps {
 	onSendMessage: (text: string) => Promise<void>;
@@ -90,13 +91,22 @@ const MessageInputComponent = ({
 		setError(null);
 		try {
 			const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-			const recorder = new MediaRecorder(stream);
+			// Pick the container explicitly. Left to the browser, Chrome picks WebM,
+			// which Safari and WKWebView cannot decode — so the note was unplayable on
+			// every Apple device, silently, on the RECEIVING end. See lib/audioFormat.
+			const mimeType = pickRecordingMimeType();
+			const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
 			const chunks: BlobPart[] = [];
 			recorder.ondataavailable = (ev) => ev.data.size > 0 && chunks.push(ev.data);
 			recorder.onstop = async () => {
 				stream.getTracks().forEach((t) => t.stop());
 				const durationMs = Date.now() - recordStartRef.current;
-				const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+				const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || 'audio/webm' });
+				// Firefox can only produce Opus, which Apple devices cannot play. Tell the
+				// SENDER here rather than letting it fail silently on someone else's phone.
+				if (!isApplePlayable(blob.type)) {
+					setError('Heads up: this browser records audio in a format Apple devices cannot play. The note will send, but iPhone and Mac recipients will not hear it.');
+				}
 				setSending(true);
 				try {
 					await onSendMedia({

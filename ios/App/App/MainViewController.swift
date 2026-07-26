@@ -41,7 +41,10 @@ class MainViewController: CAPBridgeViewController {
         // should not be mistaken for the fix. Four attempts were spent on it.
         //
         // Both are scoped to isiOSAppOnMac, so iOS behaviour is untouched.
-        if isOnMac { beginMacInputSuppression() }
+        if isOnMac {
+            beginMacInputSuppression()
+            installMacInputBarHide()
+        }
 
         #if DEBUG
         // Attempt 4 failed, so the CAUSE is now suspect, not just the fix.
@@ -77,12 +80,66 @@ class MainViewController: CAPBridgeViewController {
         }
     }
 
+    /// Belt-and-braces: hide the input host view outright, on Mac only.
+    ///
+    /// This is deliberately blunt, and it is here because the polite APIs have now
+    /// had five attempts. What we know from the logs:
+    ///
+    ///   - `inputAccessoryView` is already nil while the bar is on screen, so it
+    ///     is not drawing it.
+    ///   - `webView.inputAssistantItem` was cleared in 7f61245 (that path had no
+    ///     predicate and the webview always exists at load) and the bar survived.
+    ///
+    /// So the remaining untested lever is the assistant item on WKContentView,
+    /// which `applyMacInputSuppression()` now reaches. If that works, this hide is
+    /// redundant and should be deleted. If it does not, this is what keeps the
+    /// composer usable.
+    ///
+    /// Safe here specifically because the dump shows the software keyboard inside
+    /// this host view is already 0pt on a Mac — there is no real keyboard UI to
+    /// lose. Scoped to isiOSAppOnMac, so iPhone and iPad are untouched. Re-applied
+    /// on every keyboard notification because UIKit rebuilds this view per session.
+    private func installMacInputBarHide() {
+        for note in [UIResponder.keyboardWillShowNotification, UIResponder.keyboardDidShowNotification] {
+            NotificationCenter.default.addObserver(forName: note, object: nil, queue: .main) { [weak self] _ in
+                self?.hideMacInputHostView()
+            }
+        }
+    }
+
+    private func hideMacInputHostView() {
+        for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+            for window in scene.windows where NSStringFromClass(type(of: window)) == "UITextEffectsWindow" {
+                for container in window.subviews {
+                    for host in container.subviews
+                    where NSStringFromClass(type(of: host)) == "UIInputSetHostView" && !host.isHidden {
+                        NSLog("[ghostrow] FALLBACK hiding %@ frame=%@",
+                              NSStringFromClass(type(of: host)), NSCoder.string(for: host.frame))
+                        host.isHidden = true
+                    }
+                }
+            }
+        }
+    }
+
     /// Returns true once the content view was found and suppression applied.
     @discardableResult
     private func applyMacInputSuppression() -> Bool {
         guard let webView = bridge?.webView else { return false }
-        guard let contentView = webView.scrollView.subviews.first(where: { $0.canBecomeFirstResponder }) else {
-            return false
+
+        // Select by CLASS NAME, not `canBecomeFirstResponder`.
+        //
+        // The predicate was the previous attempt's defect: WKContentView reports
+        // canBecomeFirstResponder == false here, so `first(where:)` never matched
+        // and the retry burned all 40 attempts without applying anything. The log
+        // corroborates it — the first responder is the WKWebView, not the content
+        // view. Matching on the class name is what the hierarchy dump actually
+        // shows, so it cannot silently miss in the same way.
+        let subviews = webView.scrollView.subviews
+        guard let contentView = subviews.first(where: {
+            NSStringFromClass(type(of: $0)).contains("ContentView")
+        }) ?? subviews.first else {
+            return false // web content not loaded yet; caller retries
         }
 
         // Two DIFFERENT mechanisms can draw a bar, and they need separate fixes.

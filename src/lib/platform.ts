@@ -20,6 +20,20 @@ export function isNativePlatform(): boolean {
 	return !!bridge?.isNativePlatform?.();
 }
 
+// True when this is the iPad app running on a Mac ("Designed for iPad"), set
+// natively from `ProcessInfo.isiOSAppOnMac` (MainViewController injects it at
+// document start).
+//
+// Worth having as its own signal rather than inferring: iPadOS lies to the web
+// layer there. It fires keyboardWillShow with a height for a keyboard it never
+// draws, so anything that resizes to accommodate a keyboard must not. Guessing
+// from `navigator.maxTouchPoints` was the first attempt and is a heuristic about
+// touchscreens, which is a different question.
+export function isIOSAppOnMac(): boolean {
+	if (typeof window === 'undefined') return false;
+	return (window as unknown as { __flatfoldIsIOSAppOnMac?: boolean }).__flatfoldIsIOSAppOnMac === true;
+}
+
 // The absolute API origin for native, empty (same-origin/relative) for web.
 // VITE_API_ORIGIN lets a native preview build point at the preview worker.
 export function apiOrigin(): string {

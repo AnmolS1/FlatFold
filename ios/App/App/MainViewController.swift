@@ -1,5 +1,6 @@
 import UIKit
 import Capacitor
+import WebKit
 
 // Capacitor 8 instantiates plugins from the generated `packageClassList`, which
 // `cap sync` builds from installed plugin PACKAGES only. Our biometric plugin is
@@ -10,6 +11,24 @@ class MainViewController: CAPBridgeViewController {
     override open func capacitorDidLoad() {
         bridge?.registerPluginInstance(FlatFoldBiometricPlugin())
         bridge?.registerPluginInstance(FlatFoldAppIconPlugin())
+
+        // Tell the web layer whether this is the iPad app running on a Mac.
+        //
+        // It needs to know because iPadOS still fires keyboardWillShow, with a
+        // height, for a keyboard it never draws there — the web layer subtracts
+        // it, the shell resizes, and WKWebView leaves a stale painted copy of the
+        // bottom row. `ProcessInfo.isiOSAppOnMac` is the API that actually
+        // answers this; the first attempt guessed from navigator.maxTouchPoints,
+        // which is a heuristic about touchscreens, not about this.
+        //
+        // Injected at documentStart so it is set before any app code reads it.
+        let isOnMac = ProcessInfo.processInfo.isiOSAppOnMac
+        let script = WKUserScript(
+            source: "window.__flatfoldIsIOSAppOnMac = \(isOnMac);",
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        )
+        bridge?.webView?.configuration.userContentController.addUserScript(script)
 
         // Hardening (build-order step 7): a shipped build must never expose the
         // WKWebView to the Safari Web Inspector — decrypted message content and the

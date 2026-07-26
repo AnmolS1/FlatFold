@@ -2,6 +2,7 @@ import { Link } from 'react-router';
 import { Info, ExternalLink, ShieldCheck, Mail } from 'lucide-react';
 import { APP_VERSION } from '../../version';
 import { BUILD_ID, BUILT_AT } from '../../buildInfo';
+import { isIOSAppOnMac, isNativePlatform } from '../../lib/platform';
 
 const SOURCE_URL = 'https://github.com/AnmolS1/FlatFold';
 const SECURITY_EMAIL = 'security@flatfold.ponderance.dev';
@@ -24,6 +25,19 @@ export function AboutSection() {
 				    force-quit keeps the OLD JavaScript, and the web shell is pinned by
 				    a service worker — so "still broken" is ambiguous without this.
 				    Quote it in bug reports. */}
+				{/* Platform detection, shown because getting it WRONG is invisible and
+				    has already cost two debugging rounds: the iPad app on a Mac reports
+				    a phantom keyboard, and the app has to know it is there. If a
+				    keyboard-related layout bug reappears, this line says immediately
+				    whether detection or the fix is at fault. */}
+				{isNativePlatform() && (
+					<div className="flex items-center justify-between">
+						<span className="text-xs text-graphite-40">Platform</span>
+						<span className="font-mono text-xs text-graphite-40 selectable-text">
+							{isIOSAppOnMac() ? 'iPad app on Mac' : 'iOS/iPadOS'} · touch {typeof navigator !== 'undefined' ? navigator.maxTouchPoints : '?'}
+						</span>
+					</div>
+				)}
 				<div className="flex items-center justify-between">
 					<span className="text-xs text-graphite-40">Build</span>
 					<span className="font-mono text-xs text-graphite-40 selectable-text">

@@ -188,6 +188,12 @@ const PAIRINGS: Pairing[] = [
 	{ where: 'MessageInput:186 + every error line', fg: 'crane-ink', bg: ['graph-card'], bar: TEXT },
 	{ where: 'MessageInput:186 error-box border', fg: 'crane-ink', bg: ['graph-card'], bar: GRAPHIC },
 	{ where: 'ContactList:207 key-change shield', fg: 'crane-ink', bg: ['graph-card'], bar: GRAPHIC },
+	// crane as a small GRAPHIC on the card, not a fill behind white text. Darkening
+	// --color-crane so it could carry white text pushed these the wrong way: the
+	// unread dot fell to 2.91 in Ink. They take crane-ink, same call as the sax dot.
+	{ where: 'ContactList:212 unread dot', fg: 'crane-ink', bg: ['graph-card'], bar: GRAPHIC },
+	{ where: 'TabBar:64 unread badge', fg: 'crane-ink', bg: ['graph-card'], bar: GRAPHIC },
+	{ where: 'Chat:1372 disconnected dot', fg: 'crane-ink', bg: ['graph-card'], bar: GRAPHIC },
 
 	// --- sax as a fill with text on it --------------------------------------
 	{ where: 'SettingsDialog:386 recovery-code button', fg: 'on-sax', bg: ['sax'], bar: TEXT },
@@ -276,7 +282,21 @@ describe('theme contrast', () => {
 			expect(offenders).toEqual([]);
 		});
 
+		it('no bare `bg-crane` status dot — a dot is a graphic on the card, so crane-ink', () => {
+			// `bg-crane` behind white text is the fill role and stays. A dot has no
+			// text on it: it is a graphic sitting ON the card, and crane was darkened
+			// for the fill role, which took the Ink dot to 2.91.
+			const offenders = SOURCES.flatMap(([path, body]) =>
+				(body.match(/'[^']*\bbg-crane\b(?![-/])[^']*'|"[^"]*\bbg-crane\b(?![-/])[^"]*"/g) ?? [])
+					.filter((cls) => !/\btext-/.test(cls))
+					.map((cls) => `${path}: ${cls.slice(0, 60)}`)
+			);
+			expect(offenders).toEqual([]);
+		});
+
 		it('no `text-crane` — crane is a fill; foregrounds on card take crane-ink', () => {
+			// `bg-crane` is exempt — that IS the fill role — except as a bare status
+			// dot, which is a graphic on the card and belongs to crane-ink.
 			const offenders = SOURCES.filter(([, body]) => /\b(text|border|ring)-crane(?![-\w])/.test(body)).map(([path]) => path);
 			expect(offenders).toEqual([]);
 		});

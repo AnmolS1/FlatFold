@@ -209,7 +209,7 @@ const ContactListComponent = ({
 												<ShieldCheck className="w-4 h-4 text-sax-ink" aria-label="Verified" />
 											) : null}
 											{row.isGroup && <Users className="w-3.5 h-3.5 text-graphite-40" aria-hidden="true" />}
-											{unread && <span className="w-2 h-2 rounded-full bg-crane" aria-label="Unread" />}
+											{unread && <span className="w-2 h-2 rounded-full bg-crane-ink" aria-label="Unread" />}
 										</span>
 									</div>
 								</div>

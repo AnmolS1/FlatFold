@@ -61,7 +61,7 @@ const TabBarComponent = ({ active, onChange, chatsUnread = false }: TabBarProps)
 							<Icon className="w-6 h-6" strokeWidth={selected ? 2.4 : 2} aria-hidden="true" />
 							{id === 'chats' && chatsUnread && (
 								<span
-									className="absolute -top-0.5 -right-1 w-2 h-2 rounded-full bg-crane ring-2 ring-graph-card"
+									className="absolute -top-0.5 -right-1 w-2 h-2 rounded-full bg-crane-ink ring-2 ring-graph-card"
 									aria-label="Unread messages"
 								/>
 							)}

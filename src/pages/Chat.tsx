@@ -1346,7 +1346,7 @@ export const Chat = () => {
 								<h1 className="font-display text-xl font-bold text-graphite leading-tight">FlatFold</h1>
 								<p className="text-xs text-graphite-60 font-mono flex items-center gap-1.5 truncate">
 									<span
-										className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${connected ? 'bg-sax-ink' : 'bg-crane'}`}
+										className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${connected ? 'bg-sax-ink' : 'bg-crane-ink'}`}
 										aria-hidden="true"
 									/>
 									<span className={`truncate ${connected ? '' : 'text-crane-ink font-semibold'}`}>

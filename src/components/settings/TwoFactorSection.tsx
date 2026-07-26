@@ -183,7 +183,7 @@ export function TwoFactorSection({ username, initialEnabled }: { username: strin
 					<input type="text" inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value)} placeholder="6-digit code from your app" aria-label="Authenticator code" className={`${inputCls} font-mono`} />
 					{error && <p className="text-xs text-crane-ink">{error}</p>}
 					<div className="flex gap-2">
-						<button onClick={() => void confirmEnable()} disabled={busy || !password || !code || !savedBackup} className="flex-1 bg-crease text-white rounded-lg py-1.5 text-sm hover:opacity-90 disabled:opacity-50 transition-opacity">
+						<button onClick={() => void confirmEnable()} disabled={busy || !password || !code || !savedBackup} className="flex-1 bg-crease text-on-crease rounded-lg py-1.5 text-sm hover:opacity-90 disabled:opacity-50 transition-opacity">
 							{busy ? 'Turning on…' : 'Turn on two-factor'}
 						</button>
 						<button onClick={() => setDraft(null)} className="px-3 py-1.5 border border-crease-line-bold text-graphite rounded-lg text-sm hover:border-crease transition-colors">

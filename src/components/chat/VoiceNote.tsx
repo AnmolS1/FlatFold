@@ -85,8 +85,8 @@ export const VoiceNote = ({ url, durationMs, own }: VoiceNoteProps) => {
 		return <audio src={url} controls className="h-8 max-w-full" />;
 	}
 
-	const accent = own ? 'bg-white' : 'bg-crease';
-	const dim = own ? 'bg-white/35' : 'bg-crease/30';
+	const accent = own ? 'bg-on-crease' : 'bg-crease';
+	const dim = own ? 'bg-on-crease/35' : 'bg-crease/30';
 
 	return (
 		<div className="flex items-center gap-3 min-w-[12rem]">
@@ -111,7 +111,7 @@ export const VoiceNote = ({ url, durationMs, own }: VoiceNoteProps) => {
 			<button
 				onClick={toggle}
 				aria-label={playing ? 'Pause voice note' : 'Play voice note'}
-				className={`flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center ${own ? 'bg-white/20 text-white' : 'bg-crease/15 text-crease'}`}
+				className={`flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center ${own ? 'bg-on-crease/20 text-on-crease' : 'bg-crease/15 text-crease'}`}
 			>
 				{playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 translate-x-[1px]" />}
 			</button>
@@ -124,7 +124,7 @@ export const VoiceNote = ({ url, durationMs, own }: VoiceNoteProps) => {
 				})}
 			</div>
 
-			<span className={`flex-shrink-0 font-mono text-xs ${own ? 'text-white/70' : 'text-graphite-40'}`}>{formatDuration(duration)}</span>
+			<span className={`flex-shrink-0 font-mono text-xs ${own ? 'text-on-crease/80' : 'text-graphite-40'}`}>{formatDuration(duration)}</span>
 		</div>
 	);
 };

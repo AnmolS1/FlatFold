@@ -240,6 +240,18 @@ right tool. The `/transparency` page says this to users directly.
     endpoint already is. So an attacker can still
     force the *authenticated-fallback* path down to no-OTP X3DH within a refill
     window, which is the accepted part; what is closed is the permanent version.
+    **The residual, stated precisely (FULL_AUDIT_2 S3, 2026-07-25):** replenishment
+    is client-driven, so it only runs while the target's client is online, and it
+    holds a 30-minute cooldown between checks. Bundle lookups are throttled to 30
+    per minute per requester, which is faster than that refill. A determined
+    attacker can therefore keep a *specific* user's pool drained across a refill
+    window and hold the authenticated-fallback path at no-OTP for its duration.
+    This is inherent to client-driven replenishment — a server-side refill would
+    need the server to mint prekeys, and it cannot, because it never holds the
+    secret halves. Accepted at Low on the same reasoning as above: the sealed path
+    is tried first and consumes nothing, so ordinary first contact is unaffected,
+    and what is lost in the window is first-message break-in recovery on the rare
+    fallback path, not confidentiality.
 15. **Username enumeration is intentional and unavoidable given contact-by-
     username.** Signup answers 409 for a taken name (`worker/index.ts`), and the
     *authenticated* bundle endpoint distinguishes 404 (no such user) from 409

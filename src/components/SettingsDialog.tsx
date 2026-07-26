@@ -364,7 +364,7 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 								<button
 									onClick={() => void submitChangePassword()}
 									disabled={changeBusy || !currentPassword || !newPassword || !confirmPassword}
-									className="flex-1 bg-crease text-white rounded-lg py-1.5 text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
+									className="flex-1 bg-crease text-on-crease rounded-lg py-1.5 text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
 								>
 									{changeBusy ? 'Changing…' : 'Change password'}
 								</button>
@@ -432,7 +432,7 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 								<button
 									onClick={() => void startRecoverySetup()}
 									disabled={recoveryBusy || !recoveryPassword}
-									className="flex-1 bg-crease text-white rounded-lg py-1.5 text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
+									className="flex-1 bg-crease text-on-crease rounded-lg py-1.5 text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
 								>
 									{recoveryBusy ? 'Generating…' : 'Generate code'}
 								</button>
@@ -496,13 +496,25 @@ export const SettingsDialog = ({ username, onClose, onSignOut }: SettingsDialogP
 										placeholder={DEFAULT_DECOY_LABEL}
 										className="flex-1 rounded-lg border border-crease-line-bold bg-inset text-graphite placeholder-graphite-40 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-crease"
 									/>
-									<button onClick={() => void saveDecoy()} className="px-3 py-1.5 bg-crease text-white rounded-lg text-sm hover:opacity-90 transition-opacity">
+									<button onClick={() => void saveDecoy()} className="px-3 py-1.5 bg-crease text-on-crease rounded-lg text-sm hover:opacity-90 transition-opacity">
 										Save
 									</button>
 								</div>
 								<p className="text-xs text-graphite-40 mt-1">
 									Notifications show this label (e.g. &ldquo;Calendar&rdquo;, &ldquo;News update&rdquo;) instead of
 									anything identifying FlatFold. Current user: {username}.
+								</p>
+								{/* FULL_AUDIT_2 U1. The label is stored on this device, and the iOS
+								    push title is composed by the server, which never sees it — so
+								    the two surfaces genuinely differ and a user who set a decoy
+								    would otherwise be surprised by their phone. Say so rather than
+								    let them assume it applies everywhere. Both are content-free
+								    either way; only the wording differs. */}
+								<p className="text-xs text-graphite-40 mt-1">
+									This applies to notifications from this browser or installed web app. iOS push notifications
+									say &ldquo;New activity&rdquo; instead — the label is stored only on this device, and the
+									server that sends the push never learns it. Neither one names a sender or shows any message
+									text.
 								</p>
 							</div>
 						</>

@@ -158,7 +158,17 @@ const PAIRINGS: Pairing[] = [
 	// Not in the audit's table, but the same defect as A2 in a different hue —
 	// `bg-crane text-white` was 3.86:1 in three of five themes.
 	{ where: 'LoginForm:141 / SignupForm:108 / 16 more', fg: 'white', bg: ['crane'], bar: TEXT },
-	{ where: 'ConfirmationDialog:98 non-danger confirm', fg: 'on-crease', bg: ['crease'], bar: TEXT },
+	{ where: 'ConfirmationDialog:98 + 4 more crease buttons', fg: 'on-crease', bg: ['crease'], bar: TEXT },
+	// Own-message bubbles are bg-crease. The most-rendered text in the app, and
+	// `text-white` on crease was 2.47:1 in both dark themes.
+	{ where: 'MessageItem:106 own bubble body', fg: 'on-crease', bg: ['crease'], bar: TEXT },
+	{ where: 'MessageItem:119/122/129/143 own-bubble meta', fg: 'on-crease/80', bg: ['crease'], bar: TEXT },
+	{ where: 'MessageItem:116 own-bubble reply rule', fg: 'on-crease/60', bg: ['crease'], bar: GRAPHIC },
+	{ where: 'VoiceNote:88 own waveform accent', fg: 'on-crease', bg: ['crease'], bar: GRAPHIC },
+	// GRAPHIC, not TEXT: it is a play/pause glyph in a button that carries its own
+	// aria-label, so nothing here is read as text. The 20% chip behind it lightens
+	// toward the glyph's own colour, which is what costs the ratio.
+	{ where: 'VoiceNote:114 own play button glyph', fg: 'on-crease', bg: ['crease', 'on-crease/20'], bar: GRAPHIC },
 	{ where: 'MessageInput:186 + every error line', fg: 'crane-ink', bg: ['graph-card'], bar: TEXT },
 	{ where: 'MessageInput:186 error-box border', fg: 'crane-ink', bg: ['graph-card'], bar: GRAPHIC },
 	{ where: 'ContactList:207 key-change shield', fg: 'crane-ink', bg: ['graph-card'], bar: GRAPHIC },
@@ -230,6 +240,13 @@ describe('theme contrast', () => {
 
 		it('no white or orbit foreground on a sax fill — sax fills take on-sax', () => {
 			const offenders = SOURCES.filter(([, body]) => /\bbg-sax\b[^"'`]*\btext-(white|orbit)\b/.test(body)).map(([path]) => path);
+			expect(offenders).toEqual([]);
+		});
+
+		it('no white foreground on a crease fill — crease fills take on-crease', () => {
+			// crease is a LIGHT blue/apricot in the dark themes, so white on it is
+			// 2.47:1 there. Own-message bubbles are the biggest instance.
+			const offenders = SOURCES.filter(([, body]) => /\bbg-crease\b[^"'`]*\btext-white\b/.test(body)).map(([path]) => path);
 			expect(offenders).toEqual([]);
 		});
 

@@ -14,6 +14,51 @@
 //
 // Same principle as the voice-note failure text: say WHY, and name the thing.
 
+/** What the page can actually see of the media-capture API. */
+export interface MediaEnvironment {
+	isSecureContext: boolean;
+	hasMediaDevices: boolean;
+	hasGetUserMedia: boolean;
+	protocol: string;
+}
+
+/** Read the capture-related capabilities without touching anything that throws. */
+export function readMediaEnvironment(nav: Navigator, win: Window): MediaEnvironment {
+	const mediaDevices = (nav as Navigator | undefined)?.mediaDevices;
+	return {
+		isSecureContext: win?.isSecureContext === true,
+		hasMediaDevices: !!mediaDevices,
+		hasGetUserMedia: typeof mediaDevices?.getUserMedia === 'function',
+		protocol: win?.location?.protocol ?? '',
+	};
+}
+
+/**
+ * Why the microphone cannot be used at all, or null if it can.
+ *
+ * This is a CAPABILITY check, deliberately separate from the permission path.
+ * Conflating the two is what sent the Mac investigation after sandbox
+ * entitlements: `navigator.mediaDevices` was simply absent, so
+ * `navigator.mediaDevices.getUserMedia(...)` threw a bare `TypeError` long
+ * before any permission was ever consulted.
+ *
+ * `mediaDevices` is exposed only in a SECURE CONTEXT, so the scheme is included
+ * in the message — it is the fact that usually explains the whole thing.
+ */
+export function microphoneUnavailableReason(env: MediaEnvironment): string | null {
+	if (env.hasMediaDevices && env.hasGetUserMedia) return null;
+
+	const where = `(context: ${env.protocol || 'unknown'}, secure: ${env.isSecureContext ? 'yes' : 'no'})`;
+
+	if (!env.isSecureContext) {
+		return `Recording needs a secure context, and this page is not one, so the microphone API was never exposed. ${where}`;
+	}
+	if (!env.hasMediaDevices) {
+		return `This app build has no navigator.mediaDevices, so recording is unavailable here. ${where}`;
+	}
+	return `This app build has navigator.mediaDevices but no getUserMedia, so recording is unavailable here. ${where}`;
+}
+
 /**
  * A human-readable, actionable description of a getUserMedia failure.
  *

@@ -5,7 +5,7 @@ import type { DisplayMessage } from '../../types';
 import { haptic } from '../../lib/haptics';
 import { replySnippet } from '../../lib/reply';
 import { isApplePlayable, pickRecordingMimeType } from '../../lib/audioFormat';
-import { describeMicrophoneError } from '../../lib/mediaErrors';
+import { describeMicrophoneError, microphoneUnavailableReason, readMediaEnvironment } from '../../lib/mediaErrors';
 import { isIOSAppOnMac } from '../../lib/platform';
 
 interface MessageInputProps {
@@ -91,6 +91,16 @@ const MessageInputComponent = ({
 
 	const startRecording = useCallback(async () => {
 		setError(null);
+		// Capability BEFORE permission. On the Mac build `navigator.mediaDevices`
+		// is absent entirely, so the old code threw a bare TypeError here and the
+		// failure looked like a permission problem for several rounds. See
+		// lib/mediaErrors; SafetyNumberDialog has guarded its camera path this way
+		// all along.
+		const unavailable = microphoneUnavailableReason(readMediaEnvironment(navigator, window));
+		if (unavailable) {
+			setError(unavailable);
+			return;
+		}
 		try {
 			const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 			// Pick the container explicitly. Left to the browser, Chrome picks WebM,

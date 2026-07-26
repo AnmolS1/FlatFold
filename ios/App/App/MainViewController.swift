@@ -47,6 +47,13 @@ class MainViewController: CAPBridgeViewController {
         // instance, rather than guessing a name or mutating a shared class.
         // Scoped to isiOSAppOnMac so iOS behaviour is untouched.
         if isOnMac { suppressInputAccessoryView() }
+
+        #if DEBUG
+        // Attempt 4 failed, so the CAUSE is now suspect, not just the fix.
+        // Gather evidence before touching anything else. Removed once the ghost
+        // row is understood — see `ghostRowDiagnostics()`.
+        if isOnMac { installGhostRowDiagnostics() }
+        #endif
     }
 
     private func suppressInputAccessoryView() {
@@ -90,3 +97,103 @@ class MainViewController: CAPBridgeViewController {
         #endif
     }
 }
+
+#if DEBUG
+/// Holder for the first-responder probe below (Swift has no stored statics in
+/// extensions).
+private enum GhostRowFirstResponder {
+    static weak var found: UIResponder?
+}
+
+private extension UIResponder {
+    @objc func flatfold_ghostRowCapture() { GhostRowFirstResponder.found = self }
+}
+
+/// Diagnostics for the ghost row. DEBUG-only and temporary.
+///
+/// Four fixes have failed, which means the CAUSE is suspect and not merely the
+/// fix. Two hypotheses survive and cannot be told apart by reading source:
+///
+///   H1  "WKContentView" / "UIWebBrowserView" do not resolve on a Mac, so
+///       @capacitor/keyboard's swizzle (Keyboard.m:378, by hardcoded name)
+///       no-ops — and our own runtime reclass then failed for its own reason.
+///   H2  Those classes DO resolve, the swizzle works, and the ghost row is not
+///       an input accessory view at all — in which case every fix so far has
+///       been aimed at the wrong object.
+///
+/// So this logs the discriminating facts rather than changing behaviour. The
+/// load-time block settles H1 outright. The focus-time dump names the ghost row:
+/// note that an input accessory lives in a SEPARATE UITextEffectsWindow /
+/// UIRemoteKeyboardWindow, so a dump that walked only the app's own window would
+/// miss it and read as a false negative. Hence every window, every scene.
+extension MainViewController {
+    func installGhostRowDiagnostics() {
+        // H1, settled directly: does Capacitor's swizzle have a target here?
+        for name in ["WKContentView", "UIWebBrowserView", "UITextInputTraits"] {
+            let resolved = NSClassFromString(name).map { NSStringFromClass($0) } ?? "NULL — swizzle no-ops"
+            NSLog("[ghostrow] NSClassFromString(\"%@\") -> %@", name, resolved)
+        }
+
+        // What our own lookup saw, and whether the reclass actually stuck.
+        if let webView = bridge?.webView {
+            let subs = webView.scrollView.subviews
+            NSLog("[ghostrow] scrollView has %d subview(s) at capacitorDidLoad", subs.count)
+            for (i, v) in subs.enumerated() {
+                NSLog("[ghostrow]   [%d] %@ canBecomeFirstResponder=%@ frame=%@",
+                      i, NSStringFromClass(object_getClass(v) ?? type(of: v)),
+                      v.canBecomeFirstResponder ? "YES" : "NO",
+                      NSCoder.string(for: v.frame))
+            }
+            if subs.isEmpty {
+                NSLog("[ghostrow] EMPTY at load — the reclass had nothing to find, so the fix never applied")
+            }
+        }
+
+        // iPadOS fires the keyboard notifications on a Mac even though it draws
+        // no keyboard (that is what the phantom-height bug was), so these are a
+        // reliable trigger for "the ghost row is on screen right now".
+        for note in [UIResponder.keyboardDidShowNotification, UIResponder.keyboardWillShowNotification] {
+            NotificationCenter.default.addObserver(forName: note, object: nil, queue: .main) { [weak self] _ in
+                self?.dumpGhostRow(label: note.rawValue)
+            }
+        }
+    }
+
+    private func dumpGhostRow(label: String) {
+        NSLog("[ghostrow] ===================== %@ =====================", label)
+
+        GhostRowFirstResponder.found = nil
+        UIApplication.shared.sendAction(#selector(UIResponder.flatfold_ghostRowCapture), to: nil, from: nil, for: nil)
+        if let fr = GhostRowFirstResponder.found {
+            NSLog("[ghostrow] firstResponder = %@", NSStringFromClass(object_getClass(fr) ?? type(of: fr)))
+            if let v = fr as? UIView {
+                let accessory = v.inputAccessoryView.map { NSStringFromClass(type(of: $0)) } ?? "nil (suppressed)"
+                NSLog("[ghostrow]   .inputAccessoryView = %@", accessory)
+            }
+        } else {
+            NSLog("[ghostrow] firstResponder = none found")
+        }
+
+        for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+            for win in scene.windows {
+                NSLog("[ghostrow] WINDOW %@ level=%.0f hidden=%@ frame=%@",
+                      NSStringFromClass(type(of: win)), win.windowLevel.rawValue,
+                      win.isHidden ? "YES" : "NO", NSCoder.string(for: win.frame))
+                dumpTree(win, depth: 1)
+            }
+        }
+        NSLog("[ghostrow] ===================== end =====================")
+    }
+
+    private func dumpTree(_ view: UIView, depth: Int) {
+        guard depth < 10 else { return }
+        let pad = String(repeating: "  ", count: depth)
+        for sub in view.subviews {
+            NSLog("[ghostrow] %@%@ frame=%@ hidden=%@ alpha=%.2f",
+                  pad, NSStringFromClass(object_getClass(sub) ?? type(of: sub)),
+                  NSCoder.string(for: sub.frame), sub.isHidden ? "YES" : "NO", sub.alpha)
+            dumpTree(sub, depth: depth + 1)
+        }
+    }
+}
+#endif

@@ -7,6 +7,9 @@ PODS:
   - CapacitorApp (8.1.1):
     - Capacitor
   - CapacitorCordova (8.4.2)
+  - CapacitorFilesystem (8.1.2):
+    - Capacitor
+    - IONFilesystemLib (~> 1.1.1)
   - CapacitorHaptics (8.0.2):
     - Capacitor
   - CapacitorKeyboard (8.0.5):
@@ -17,6 +20,7 @@ PODS:
     - Capacitor
   - CapacitorShare (8.0.1):
     - Capacitor
+  - IONFilesystemLib (1.1.2)
   - KeychainSwift (21.0.0)
 
 DEPENDENCIES:
@@ -24,6 +28,7 @@ DEPENDENCIES:
   - "Capacitor (from `../../node_modules/@capacitor/ios`)"
   - "CapacitorApp (from `../../node_modules/@capacitor/app`)"
   - "CapacitorCordova (from `../../node_modules/@capacitor/ios`)"
+  - "CapacitorFilesystem (from `../../node_modules/@capacitor/filesystem`)"
   - "CapacitorHaptics (from `../../node_modules/@capacitor/haptics`)"
   - "CapacitorKeyboard (from `../../node_modules/@capacitor/keyboard`)"
   - "CapacitorLocalNotifications (from `../../node_modules/@capacitor/local-notifications`)"
@@ -32,6 +37,7 @@ DEPENDENCIES:
 
 SPEC REPOS:
   trunk:
+    - IONFilesystemLib
     - KeychainSwift
 
 EXTERNAL SOURCES:
@@ -43,6 +49,8 @@ EXTERNAL SOURCES:
     :path: "../../node_modules/@capacitor/app"
   CapacitorCordova:
     :path: "../../node_modules/@capacitor/ios"
+  CapacitorFilesystem:
+    :path: "../../node_modules/@capacitor/filesystem"
   CapacitorHaptics:
     :path: "../../node_modules/@capacitor/haptics"
   CapacitorKeyboard:
@@ -59,13 +67,15 @@ SPEC CHECKSUMS:
   Capacitor: 52f999235b8bd6a7d01694753f4f4d54d182e3a3
   CapacitorApp: 305bd13c44f6f9d164e2ee66a4faa956ed8c0e06
   CapacitorCordova: 345eacdc4c8282415446aea4acd8c77d82480bd4
+  CapacitorFilesystem: 2db285a1ac6e475cc27cae2e1bea999000f9e2be
   CapacitorHaptics: 296f771ecd89c7a1bd92a7b6826a7d268e2e70f5
   CapacitorKeyboard: b6b0744890cdb1d9a96e2cafcc9253fdcc55de3b
   CapacitorLocalNotifications: 908a69a3cf7ae345426de3223d4980befb0103c6
   CapacitorPushNotifications: 32a7f840815f319fd9ba1c1c9b0b914be9d95237
   CapacitorShare: 0c58305114538568059bfc07111f22dcb9cb2a82
+  IONFilesystemLib: 21a63377696b2d8fab5632ecfb7d2ac67bddb68a
   KeychainSwift: 4a71a45c802fd9e73906457c2dcbdbdc06c9419d
 
-PODFILE CHECKSUM: 2878ff38038add96a7f5a87688bcbc5a1943ae79
+PODFILE CHECKSUM: 1e11f9e56f6d63857d19e082ce5d1d039c89fce9
 
 COCOAPODS: 1.16.2

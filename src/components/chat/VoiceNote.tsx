@@ -1,6 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { Play, Pause } from 'lucide-react';
 import { getSharedAudioContext, decodeAudioLimited } from '../../lib/audioContext';
+import {
+	sharedPlayerState,
+	subscribeSharedPlayer,
+	toggleSharedPlayback,
+	releaseSharedPlayback,
+} from '../../lib/audioPlayer';
 import { describeVoiceNotePlaybackError } from '../../lib/mediaErrors';
 
 interface VoiceNoteProps {
@@ -40,134 +46,90 @@ function peaksFrom(channel: Float32Array): number[] {
 	return peaks.map((p) => (max > 0 ? Math.max(0.06, p / max) : 0.06));
 }
 
-// A voice note rendered as a hand-rolled waveform (Web Audio decode → bars) with
-// a play/pause button and a mono duration. Falls back to the native <audio>
-// player if decoding fails (e.g. Safari + opus), so playback always works.
+// A voice note: a hand-rolled waveform (Web Audio decode → bars), a play/pause
+// button, and a duration.
+//
+// It renders no media element of its own, and that is the point. Every note
+// owning one exhausted WebKit's media-resource pool in a busy conversation, and
+// the failure surfaced as MEDIA_ERR_SRC_NOT_SUPPORTED — a codec error that was
+// never a codec problem. Capping decodes and preloading metadata only each
+// helped and neither was enough, because the cost scaled with how many notes
+// were RENDERED rather than how many were played.
+//
+// Playback goes through the single shared element in lib/audioPlayer. Only one
+// voice note can play at a time, so more than one element was never needed.
 export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) => {
-	const audioRef = useRef<HTMLAudioElement>(null);
 	const [bars, setBars] = useState<number[] | null>(null);
-	const [decodeFailed, setDecodeFailed] = useState(false);
-	// Why it failed, not just that it did. The old fallback assumed the native
-	// player would always cope ("so playback always works" — it does not on
-	// Apple for Opus), so a total failure showed the browser's bare "Error" with
-	// no way to tell a codec problem from a download problem.
-	const [playbackError, setPlaybackError] = useState<string | null>(null);
-	const [playing, setPlaying] = useState(false);
-	const [progress, setProgress] = useState(0); // 0..1
-	const [duration, setDuration] = useState(durationMs ? durationMs / 1000 : 0);
+	const [decodedDuration, setDecodedDuration] = useState(0);
 
-	// Decode the audio to a waveform once. Guarded: any failure degrades to the
-	// native player rather than throwing.
+	const player = useSyncExternalStore(subscribeSharedPlayer, sharedPlayerState, sharedPlayerState);
+	const isCurrent = player.url === url;
+	const playing = isCurrent && player.playing;
+	const progress = isCurrent && player.duration > 0 ? player.currentTime / player.duration : 0;
+
+	// Duration, best source first: what the sender recorded, then what we decoded
+	// for the waveform, then whatever the player learned once it loaded this note.
+	// Never depends on a media element existing, which is why it no longer reads
+	// 00:00 for notes that have not been played.
+	const duration = durationMs ? durationMs / 1000 : decodedDuration || (isCurrent ? player.duration : 0);
+
+	const playbackError =
+		isCurrent && player.errorCode !== undefined ? describeVoiceNotePlaybackError(player.errorCode, mimeType) : null;
+
+	// Decode once for the waveform. Any failure degrades to flat bars and is
+	// deliberately NOT allowed to affect playback: the old code swapped in a
+	// second media element on decode failure, which doubled the resource cost
+	// at exactly the moment resources were already short.
 	useEffect(() => {
 		let cancelled = false;
 		(async () => {
 			try {
-				// ONE context for the whole app. A per-note context is what made
-				// voice notes fail at random and recover on restart: WebKit caps
-				// concurrent AudioContexts, this closed them fire-and-forget, and
-				// once the cap was hit every later note fell through to the native
-				// player and reported a codec error for a codec that was fine.
 				const ctx = getSharedAudioContext();
-				if (!ctx) throw new Error('no AudioContext');
-				// Capped: N notes decoding at once is a memory spike and a pile
-				// of simultaneous decoder work. See lib/audioContext.
+				if (!ctx) return;
 				const decoded = await decodeAudioLimited(async () => {
 					const buf = await (await fetch(url)).arrayBuffer();
 					return ctx.decodeAudioData(buf);
 				});
 				if (cancelled) return;
 				setBars(peaksFrom(decoded.getChannelData(0)));
-				if (!durationMs) setDuration(decoded.duration);
+				setDecodedDuration(decoded.duration);
 			} catch {
-				if (!cancelled) setDecodeFailed(true);
+				// Flat bars; still playable.
 			}
-			// No close(): the context is shared and outlives this component.
 		})();
 		return () => {
 			cancelled = true;
 		};
-	}, [url, durationMs]);
+	}, [url]);
 
-	// Preloading metadata only (see the audio elements below) is what keeps this
-	// cheap: the browser reads just enough to know the duration and does NOT
-	// decode the audio until play.
-	//
-	// An earlier attempt went further and withheld the src entirely until the
-	// first play. That broke two things: with no src, onLoadedMetadata never
-	// fires, so every note displayed 00:00; and assigning .src imperatively while
-	// simultaneously setting state raced React's re-render of the same element, so
-	// play() hung. Preload is the supported lever here — the src is not the
-	// problem.
-	const toggle = () => {
-		const el = audioRef.current;
-		if (!el) return;
-		if (el.paused) void el.play();
-		else el.pause();
-	};
-
-	// Decoding for the waveform failed — fall back to the native player, which
-	// handles formats Web Audio will not. If THAT fails too the note is genuinely
-	// unplayable here, so say what and why instead of leaving the browser's bare
-	// "Error" glyph, which is indistinguishable from a download failure.
-	if (decodeFailed) {
-		return (
-			<div className="flex flex-col gap-1 min-w-[12rem]">
-				<audio
-					src={url}
-					preload="metadata"
-					controls
-					className="h-8 max-w-full"
-					onError={() => {
-						setPlaybackError(describeVoiceNotePlaybackError(audioRef.current?.error?.code, mimeType));
-					}}
-					ref={audioRef}
-				/>
-				{playbackError && <p className="text-xs italic opacity-70">{playbackError}</p>}
-			</div>
-		);
-	}
+	// Hand the shared element back if this note unmounts while holding it.
+	useEffect(() => () => releaseSharedPlayback(url), [url]);
 
 	const accent = own ? 'bg-on-crease' : 'bg-crease';
 	const dim = own ? 'bg-on-crease/35' : 'bg-crease/30';
 
 	return (
-		<div className="flex items-center gap-3 min-w-[12rem]">
-			<audio
-				ref={audioRef}
-				src={url}
-				preload="metadata"
-				onPlay={() => setPlaying(true)}
-				onPause={() => setPlaying(false)}
-				onEnded={() => {
-					setPlaying(false);
-					setProgress(0);
-				}}
-				onTimeUpdate={(e) => {
-					const el = e.currentTarget;
-					if (el.duration) setProgress(el.currentTime / el.duration);
-				}}
-				onLoadedMetadata={(e) => {
-					if (!durationMs && isFinite(e.currentTarget.duration)) setDuration(e.currentTarget.duration);
-				}}
-				className="hidden"
-			/>
-			<button
-				onClick={toggle}
-				aria-label={playing ? 'Pause voice note' : 'Play voice note'}
-				className={`flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center ${own ? 'bg-on-crease/20 text-on-crease' : 'bg-crease/15 text-crease'}`}
-			>
-				{playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 translate-x-[1px]" />}
-			</button>
+		<div className="flex flex-col gap-1 min-w-[12rem]">
+			<div className="flex items-center gap-3">
+				<button
+					onClick={() => void toggleSharedPlayback(url)}
+					aria-label={playing ? 'Pause voice note' : 'Play voice note'}
+					className={`flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center ${own ? 'bg-on-crease/20 text-on-crease' : 'bg-crease/15 text-crease'}`}
+				>
+					{playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 translate-x-[1px]" />}
+				</button>
 
-			{/* Waveform: bars filled up to the play cursor. */}
-			<div className="flex items-center gap-[2px] h-8 flex-1" aria-hidden="true">
-				{(bars ?? Array.from({ length: BAR_COUNT }, () => 0.3)).map((h, i) => {
-					const filled = i / BAR_COUNT <= progress;
-					return <span key={i} className={`w-[2px] rounded-full ${filled ? accent : dim}`} style={{ height: `${Math.round(h * 100)}%` }} />;
-				})}
+				{/* Waveform: bars filled up to the play cursor. */}
+				<div className="flex items-center gap-[2px] h-8 flex-1" aria-hidden="true">
+					{(bars ?? Array.from({ length: BAR_COUNT }, () => 0.3)).map((h, i) => {
+						const filled = i / BAR_COUNT <= progress;
+						return <span key={i} className={`w-[2px] rounded-full ${filled ? accent : dim}`} style={{ height: `${Math.round(h * 100)}%` }} />;
+					})}
+				</div>
+
+				<span className={`flex-shrink-0 font-mono text-xs ${own ? 'text-on-crease-dim' : 'text-graphite-40'}`}>{formatDuration(duration)}</span>
 			</div>
-
-			<span className={`flex-shrink-0 font-mono text-xs ${own ? 'text-on-crease-dim' : 'text-graphite-40'}`}>{formatDuration(duration)}</span>
+			{playbackError && <p className="text-xs italic opacity-70">{playbackError}</p>}
 		</div>
 	);
 };

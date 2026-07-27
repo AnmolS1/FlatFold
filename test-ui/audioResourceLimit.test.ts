@@ -64,24 +64,23 @@ describe('decodeAudioLimited', () => {
 	});
 });
 
-describe('VoiceNote defers decoding without breaking playback', () => {
-	it('preloads metadata only, and keeps a src on both players', async () => {
+describe('VoiceNote owns no media element of its own', () => {
+	it('plays through the shared element instead of rendering <audio>', async () => {
 		const { readFileSync } = await import('node:fs');
 		const { resolve } = await import('node:path');
 		const src = readFileSync(resolve(process.cwd(), 'src/components/chat/VoiceNote.tsx'), 'utf8');
 
-		// Preloading metadata only is the supported lever: the browser reads
-		// enough for a duration and decodes nothing until play. Both players
-		// carry it. (Written without the literal attribute, so this comment does
-		// not itself match the count below — it did, twice.)
-		expect(src.match(/preload="metadata"/g) ?? []).toHaveLength(2);
-		// Both players MUST keep a src. Withholding it was a regression: with no
-		// src, onLoadedMetadata never fires and every note rendered 00:00, and
-		// assigning .src imperatively alongside a state update raced React's
-		// re-render so play() hung.
-		expect(src.match(/src=\{url\}/g) ?? []).toHaveLength(2);
-		expect(src).not.toContain('el.src = url');
-		// Waveform decoding must go through the concurrency cap.
+		// The exhaustion scaled with how many notes were RENDERED. One element
+		// per note is the thing that must not come back.
+		//
+		// Matched as JSX (a tag followed by whitespace/newline then an attribute
+		// or close) rather than the bare string: three times now, a comment
+		// explaining the rule has matched the rule and failed its own test.
+		expect(src).not.toMatch(/<audio[\s/>]/);
+		expect(src).toContain('toggleSharedPlayback');
+		// And it must hand the element back when it goes away.
+		expect(src).toContain('releaseSharedPlayback');
+		// Waveform decoding still goes through the concurrency cap.
 		expect(src).toContain('decodeAudioLimited');
 	});
 });

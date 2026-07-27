@@ -121,3 +121,18 @@ describe('an unfinalized recording must never be sent', () => {
 		await expect(session.stop()).rejects.toThrow(/could not be finished|try again/i);
 	});
 });
+
+describe('a file that will not parse must never be sent', () => {
+	// Byte count turned out to be a poor proxy for "playable": the file was
+	// full-size (62,699 bytes, -17.3 dB peak) and still unusable because the
+	// container was incomplete. The plugin now parses it with AVAudioFile — the
+	// same way a player must — before handing it over.
+	it('surfaces an unplayable recording rather than uploading it', async () => {
+		withPlugin({
+			startRecording: async () => ({ mimeType: 'audio/mp4;codecs=mp4a.40.2' }),
+			stopRecording: async () => { throw Object.assign(new Error('bad'), { code: 'UNPLAYABLE' }); },
+		});
+		const session = await recordNatively.start();
+		await expect(session.stop()).rejects.toThrow(/unplayable|try again/i);
+	});
+});

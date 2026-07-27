@@ -227,6 +227,32 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDe
                 call.reject("the microphone produced no audio — the input device did not start", "NO_INPUT")
                 return
             }
+
+            // Parse it before shipping it.
+            //
+            // Byte count proved to be a poor proxy for "playable": a file can be
+            // full-size and still unusable if the container index is missing or
+            // malformed, which is exactly what happened — 62,699 bytes at a
+            // -17.3 dB peak, and every receiving device showed --:-- and a
+            // spinner. Size checks the payload; this checks the artifact.
+            //
+            // AVAudioFile reads the container the same way a player must, so if
+            // it cannot open the file or finds no frames, nothing downstream will
+            // play it either. Far better to fail here, where we can say so, than
+            // to encrypt and upload something unplayable.
+            do {
+                let probe = try AVAudioFile(forReading: url)
+                guard probe.length > 0 else {
+                    call.reject("the recording contains no audio frames", "UNPLAYABLE")
+                    return
+                }
+                #if DEBUG
+                NSLog("[mic] probe ok: %lld frames @ %.0f Hz", probe.length, probe.fileFormat.sampleRate)
+                #endif
+            } catch {
+                call.reject("the recording is not a playable audio file: \(error.localizedDescription)", "UNPLAYABLE")
+                return
+            }
             call.resolve([
                 "base64": data.base64EncodedString(),
                 "mimeType": Self.mimeType,

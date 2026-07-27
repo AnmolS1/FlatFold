@@ -37,6 +37,16 @@ let unavailable = false;
  */
 export const DECODE_CONCURRENCY = 2;
 
+/**
+ * How long to wait for one decode before giving up on it.
+ *
+ * Generous — a long note on a slow machine is legitimately slow — but finite,
+ * because an unbounded wait combined with the cap above turns one stuck decode
+ * into every subsequent note being stuck. Timing out degrades that note to flat
+ * bars and the native player, which is a far better outcome than a frozen list.
+ */
+export const DECODE_TIMEOUT_MS = 8000;
+
 let active = 0;
 const waiting: Array<() => void> = [];
 
@@ -52,9 +62,22 @@ export async function decodeAudioLimited<T>(task: () => Promise<T>): Promise<T> 
 		await new Promise<void>((resolve) => waiting.push(resolve));
 	}
 	active++;
+	let timer: ReturnType<typeof setTimeout> | undefined;
 	try {
-		return await task();
+		// `decodeAudioData` is not guaranteed to settle. A WebKit AudioContext
+		// under resource pressure can leave it pending forever, and combined with
+		// a concurrency cap that is WORSE than having no cap at all: two hung
+		// decodes hold both slots and every note behind them waits on a promise
+		// that will never resolve. The symptom is "all voice notes are broken",
+		// which is indistinguishable from a codec or download failure.
+		return await Promise.race([
+			task(),
+			new Promise<never>((_, reject) => {
+				timer = setTimeout(() => reject(new Error('audio decode timed out')), DECODE_TIMEOUT_MS);
+			}),
+		]);
 	} finally {
+		if (timer) clearTimeout(timer);
 		active--;
 		waiting.shift()?.();
 	}

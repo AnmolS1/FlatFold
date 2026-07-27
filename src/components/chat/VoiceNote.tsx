@@ -88,26 +88,19 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 		};
 	}, [url, durationMs]);
 
-	// Take the media resource only on the first play.
+	// Preloading metadata only (see the audio elements below) is what keeps this
+	// cheap: the browser reads just enough to know the duration and does NOT
+	// decode the audio until play.
 	//
-	// Every note used to hand its audio element the blob URL at mount time, so
-	// WebKit held a decoder per note — including every note nobody ever touched.
-	// That was the remaining exhaustion after the shared-AudioContext fix: notes
-	// failed 3-in-7 in a busy conversation and recovered on restart. Assigning the
-	// source on demand means an untouched note costs nothing at all.
-	const [activated, setActivated] = useState(false);
-
+	// An earlier attempt went further and withheld the src entirely until the
+	// first play. That broke two things: with no src, onLoadedMetadata never
+	// fires, so every note displayed 00:00; and assigning .src imperatively while
+	// simultaneously setting state raced React's re-render of the same element, so
+	// play() hung. Preload is the supported lever here — the src is not the
+	// problem.
 	const toggle = () => {
 		const el = audioRef.current;
 		if (!el) return;
-		if (!activated) {
-			// Assign src and play inside the same user gesture, or autoplay
-			// policies reject the play().
-			el.src = url;
-			setActivated(true);
-			void el.play();
-			return;
-		}
 		if (el.paused) void el.play();
 		else el.pause();
 	};
@@ -120,13 +113,8 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 		return (
 			<div className="flex flex-col gap-1 min-w-[12rem]">
 				<audio
-					// This one KEEPS a source: it is the native `controls` player,
-					// and the user drives it directly, so there is no gesture of ours
-					// to hang a lazy assignment on. Preloading is disabled instead,
-					// which is what stops it opening a decoder — the browser fetches
-					// only once play is pressed. Same saving, working control.
 					src={url}
-					preload="none"
+					preload="metadata"
 					controls
 					className="h-8 max-w-full"
 					onError={() => {
@@ -146,7 +134,8 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 		<div className="flex items-center gap-3 min-w-[12rem]">
 			<audio
 				ref={audioRef}
-				preload="none"
+				src={url}
+				preload="metadata"
 				onPlay={() => setPlaying(true)}
 				onPause={() => setPlaying(false)}
 				onEnded={() => {

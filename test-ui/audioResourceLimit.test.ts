@@ -7,8 +7,13 @@
 //   2. every note fetched + decodeAudioData'd on mount to draw its waveform, so
 //      N notes decoded at once on the one shared context.
 //
-// Fix, per Anmol's suggestion: take the audio resource only when the user
-// actually hits play, and cap how many waveform decodes run at once.
+// The first attempt at the fix over-reached: it withheld the audio element's
+// source until the first play. That regressed BOTH visible behaviours — with no
+// source, onLoadedMetadata never fires so every note rendered 00:00, and
+// assigning .src imperatively alongside a state update raced React's re-render
+// of the same element so play() hung. Preloading is the supported lever; the
+// source is not the problem. What survives: preload metadata only, cap the
+// concurrent decodes, and bound each decode so one hang cannot wedge the rest.
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 beforeEach(() => vi.resetModules());
@@ -59,20 +64,44 @@ describe('decodeAudioLimited', () => {
 	});
 });
 
-describe('VoiceNote takes the audio resource lazily', () => {
-	it('does not hand the <audio> element a src until the user plays', async () => {
+describe('VoiceNote defers decoding without breaking playback', () => {
+	it('preloads metadata only, and keeps a src on both players', async () => {
 		const { readFileSync } = await import('node:fs');
 		const { resolve } = await import('node:path');
 		const src = readFileSync(resolve(process.cwd(), 'src/components/chat/VoiceNote.tsx'), 'utf8');
 
-		// preload="none" is the instruction to WebKit not to open a decoder.
-		// Both players carry it: the hidden one we drive, and the native
-		// `controls` fallback (which must keep a src, since the user drives it
-		// directly and there is no gesture of ours to defer the assignment to).
-		expect(src.match(/preload="none"/g) ?? []).toHaveLength(2);
-		// The player WE drive must take its source only inside the play gesture.
-		expect(src).toContain('el.src = url');
+		// Preloading metadata only is the supported lever: the browser reads
+		// enough for a duration and decodes nothing until play. Both players
+		// carry it. (Written without the literal attribute, so this comment does
+		// not itself match the count below — it did, twice.)
+		expect(src.match(/preload="metadata"/g) ?? []).toHaveLength(2);
+		// Both players MUST keep a src. Withholding it was a regression: with no
+		// src, onLoadedMetadata never fires and every note rendered 00:00, and
+		// assigning .src imperatively alongside a state update raced React's
+		// re-render so play() hung.
+		expect(src.match(/src=\{url\}/g) ?? []).toHaveLength(2);
+		expect(src).not.toContain('el.src = url');
 		// Waveform decoding must go through the concurrency cap.
 		expect(src).toContain('decodeAudioLimited');
 	});
+});
+
+describe('a hung decode cannot wedge every note behind it', () => {
+	// decodeAudioData is not guaranteed to settle — a WebKit AudioContext under
+	// resource pressure can leave it pending forever. With a concurrency cap that
+	// is worse than no cap: two hung decodes hold both slots and every later note
+	// waits on a promise that will never resolve, which looks exactly like "all
+	// voice notes are broken".
+	it('times out, releases its slot, and lets the next note through', async () => {
+		const { decodeAudioLimited, DECODE_TIMEOUT_MS } = await import('../src/lib/audioContext');
+		expect(DECODE_TIMEOUT_MS).toBeGreaterThan(0);
+
+		const hung = Array.from({ length: 2 }, () =>
+			decodeAudioLimited(() => new Promise(() => {})).catch((e) => (e as Error).message)
+		);
+		// A third note queued behind two hangs must still complete.
+		const after = decodeAudioLimited(async () => 'made it');
+		await expect(after).resolves.toBe('made it');
+		for (const h of hung) expect(await h).toMatch(/timed out|timeout/i);
+	}, 20000);
 });

@@ -62,12 +62,22 @@ Catalyst the real macOS WKWebView should handle `<a download>` directly, which
 would make the plugin unnecessary there — unconfirmed, and the reason the
 exclusion is an explicit switch rather than a silent omission.
 
-## Required build setting
+## Required build setting — already set in the project
 
-`ENABLE_USER_SCRIPT_SANDBOXING = NO`. Without it the compile succeeds and then
-the sandbox denies CocoaPods' own `Pods-App-frameworks.sh`:
+`ENABLE_USER_SCRIPT_SANDBOXING = NO`, on the App target, both configurations.
+Nothing to do; recorded because it is not obvious and it is easy to lose.
+
+CocoaPods' `[CP] Embed Pods Frameworks` phase rsyncs frameworks into the bundle,
+which the script sandbox forbids. It surfaces in two different disguises
+depending on where it trips:
 
     Sandbox: bash(...) deny(1) file-read-data .../Pods-App-frameworks.sh
+
+    rsync: AparajitaCapacitorSecureStorage.framework/...: utimensat (2):
+    Operation not permitted
+
+Neither says "sandbox setting". If a wall of rsync `Operation not permitted`
+lines appears after a change to build settings, this is the first thing to check.
 
 ## Vendor header warnings
 

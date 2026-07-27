@@ -8,6 +8,7 @@ import {
 	releaseSharedPlayback,
 } from '../../lib/audioPlayer';
 import { describeVoiceNotePlaybackError } from '../../lib/mediaErrors';
+import { nativeLog, timed } from '../../lib/nativeLog';
 
 interface VoiceNoteProps {
 	url: string; // blob: object URL of the decrypted audio
@@ -87,14 +88,14 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 				const ctx = getSharedAudioContext();
 				if (!ctx) return;
 				const decoded = await decodeAudioLimited(async () => {
-					const buf = await (await fetch(url)).arrayBuffer();
-					return ctx.decodeAudioData(buf);
+					const buf = await timed('waveform fetch', async () => (await fetch(url)).arrayBuffer());
+					return timed('decodeAudioData', () => ctx.decodeAudioData(buf));
 				});
 				if (cancelled) return;
 				setBars(peaksFrom(decoded.getChannelData(0)));
 				setDecodedDuration(decoded.duration);
-			} catch {
-				// Flat bars; still playable.
+			} catch (err) {
+				nativeLog(`waveform decode failed: ${err instanceof Error ? err.message : String(err)}`);
 			}
 		})();
 		return () => {

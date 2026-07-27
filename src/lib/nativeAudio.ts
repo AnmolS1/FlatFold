@@ -13,6 +13,8 @@
 // the path. It needs no native surface and no extra permission plumbing, so this
 // module deliberately reports unsupported there.
 
+import { timed } from './nativeLog';
+
 /** What the native recorder hands back, shaped like the browser path's output. */
 export interface NativeRecording {
 	bytes: Uint8Array;
@@ -161,7 +163,7 @@ export const recordNatively = {
 				const path = res.path ?? '';
 				if (!path) throw new Error('The recording could not be located.');
 				try {
-					const bytes = await readRecordingFile(path);
+					const bytes = await timed('read file', () => readRecordingFile(path));
 					// The plugin reports what it wrote. A short read means the file
 					// was truncated or still being written, and sending it would
 					// produce a note that plays as a fragment.

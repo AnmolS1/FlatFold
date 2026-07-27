@@ -27,6 +27,7 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDe
         CAPPluginMethod(name: "startRecording", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stopRecording", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "discardRecording", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "debugLog", returnType: CAPPluginReturnPromise),
     ]
 
     /// The MIME type the recorded bytes actually are. Kept in one place so it
@@ -289,6 +290,23 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDe
             cleanUp()
             call.reject("could not read the recording: \(error.localizedDescription)", "READ_FAILED")
         }
+    }
+
+    /// A route for the web layer to reach os_log.
+    ///
+    /// `console.log` from WKWebView does NOT appear in the Xcode console, which
+    /// is why every measurement in this round has been native and the JavaScript
+    /// side went unmeasured for several rebuilds — while the evidence
+    /// (`WebProcessProxy::didBecomeUnresponsive`, a WEB main-thread watchdog) was
+    /// pointing squarely at JavaScript the whole time.
+    ///
+    /// DEBUG only: it exists to time things during development, and message text
+    /// from the web layer must never reach a shipped build's system log.
+    @objc func debugLog(_ call: CAPPluginCall) {
+        #if DEBUG
+        NSLog("[web] %@", call.getString("message") ?? "")
+        #endif
+        call.resolve()
     }
 
     /// Delete a finished recording once the web layer has read it.

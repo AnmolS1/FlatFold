@@ -7,6 +7,7 @@ import { replySnippet } from '../../lib/reply';
 import { isApplePlayable, pickRecordingMimeType } from '../../lib/audioFormat';
 import { describeMicrophoneError, microphoneUnavailableReason, readMediaEnvironment } from '../../lib/mediaErrors';
 import { nativeRecordingSupported, recordNatively } from '../../lib/nativeAudio';
+import { nativeLog, timed } from '../../lib/nativeLog';
 import { isIOSAppOnMac } from '../../lib/platform';
 
 interface MessageInputProps {
@@ -174,13 +175,16 @@ const MessageInputComponent = ({
 			void (async () => {
 				setSending(true);
 				try {
-					const rec = await session.stop();
-					await onSendMedia({
-						bytes: rec.bytes,
-						mimeType: rec.mimeType,
-						mediaKind: 'voice',
-						durationMs: rec.durationMs || Date.now() - recordStartRef.current,
-					});
+					const rec = await timed('session.stop', () => session.stop());
+					nativeLog(`got ${rec.bytes.length} bytes`);
+					await timed('onSendMedia', () =>
+						onSendMedia({
+							bytes: rec.bytes,
+							mimeType: rec.mimeType,
+							mediaKind: 'voice',
+							durationMs: rec.durationMs || Date.now() - recordStartRef.current,
+						})
+					);
 				} catch (err) {
 					setError(err instanceof Error ? err.message : 'Failed to send voice note');
 				} finally {

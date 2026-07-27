@@ -26,6 +26,7 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDe
         CAPPluginMethod(name: "requestPermission", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "startRecording", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stopRecording", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "discardRecording", returnType: CAPPluginReturnPromise),
     ]
 
     /// The MIME type the recorded bytes actually are. Kept in one place so it
@@ -109,7 +110,12 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDe
         // device reconfiguration that made the input queue fail to start
         // ("Abandoning I/O cycle because reconfig pending").
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers, .allowBluetooth])
+        // No `.allowBluetooth`: it is deprecated (renamed to allowBluetoothHFP,
+        // which needs a newer availability floor than this target has) and it
+        // buys nothing here. This path only ever runs on a Mac, where the input
+        // device is chosen in System Settings and macOS does the routing —
+        // Bluetooth HFP routing is an iOS concept.
+        try session.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers])
         try session.setActive(true)
 
         let url = FileManager.default.temporaryDirectory
@@ -199,9 +205,12 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDe
             call.reject("recording file is missing", "READ_FAILED")
             return
         }
-        defer { cleanUp() }
-
+        // NOTE: no `defer { cleanUp() }` here. cleanUp() deletes the temp file,
+        // and the web layer has not read it yet. Every failure path below calls
+        // cleanUp() explicitly; the success path leaves the file for
+        // discardRecording().
         guard flag else {
+            cleanUp()
             call.reject("the recording did not finish cleanly", "FINALIZE_FAILED")
             return
         }
@@ -224,6 +233,7 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDe
             // reports a duration, so `isEmpty` never fires — the note sends and
             // plays as silence, which looks like a codec bug on the far side.
             guard data.count >= 2048 else {
+                cleanUp()
                 call.reject("the microphone produced no audio — the input device did not start", "NO_INPUT")
                 return
             }
@@ -243,6 +253,7 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDe
             do {
                 let probe = try AVAudioFile(forReading: url)
                 guard probe.length > 0 else {
+                    cleanUp()
                     call.reject("the recording contains no audio frames", "UNPLAYABLE")
                     return
                 }
@@ -250,17 +261,54 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDe
                 NSLog("[mic] probe ok: %lld frames @ %.0f Hz", probe.length, probe.fileFormat.sampleRate)
                 #endif
             } catch {
+                cleanUp()
                 call.reject("the recording is not a playable audio file: \(error.localizedDescription)", "UNPLAYABLE")
                 return
             }
+            // Hand back a PATH, never the bytes.
+            //
+            // Capacitor delivers plugin results by evaluating JavaScript with the
+            // payload embedded as source. ~104 KB of base64 for a 4-second note
+            // wedged the WebContent process outright — the device log went
+            // straight from a healthy `probe ok` to
+            // `WebProcessProxy::didBecomeUnresponsive`. The recording was never
+            // the problem; the transport was.
+            //
+            // The web layer fetches this through Capacitor's file scheme instead,
+            // which streams through WKWebView's URL handler and never becomes JS
+            // source. It must call discardRecording() when done — this file is
+            // PLAINTEXT audio of a message about to be sent end-to-end encrypted,
+            // so it must not outlive the send.
             call.resolve([
-                "base64": data.base64EncodedString(),
+                "path": url.path,
+                "byteLength": data.count,
                 "mimeType": Self.mimeType,
                 "durationMs": pendingDurationMs,
             ])
         } catch {
+            cleanUp()
             call.reject("could not read the recording: \(error.localizedDescription)", "READ_FAILED")
         }
+    }
+
+    /// Delete a finished recording once the web layer has read it.
+    ///
+    /// Not optional housekeeping: the file is PLAINTEXT audio of a message being
+    /// sent end-to-end encrypted, so leaving it in tmp/ would be a decrypted copy
+    /// on disk outside the keystore's protection.
+    @objc func discardRecording(_ call: CAPPluginCall) {
+        let path = call.getString("path") ?? ""
+        // Only ever delete our own recordings: a path from the web layer is not
+        // trusted to name an arbitrary file for deletion.
+        let tmp = FileManager.default.temporaryDirectory.path
+        let name = (path as NSString).lastPathComponent
+        guard path.hasPrefix(tmp), name.hasPrefix("flatfold-voice-"), name.hasSuffix(".m4a") else {
+            call.reject("refusing to delete a path outside our own recordings", "BAD_PATH")
+            return
+        }
+        try? FileManager.default.removeItem(atPath: path)
+        if fileURL?.path == path { fileURL = nil }
+        call.resolve()
     }
 
     /// Always remove the temp file. It holds decrypted audio of a message the

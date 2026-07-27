@@ -54,22 +54,51 @@ describe('nativeRecordingSupported', () => {
 });
 
 describe('recordNatively', () => {
-	it('returns bytes and the pinned Apple-playable mime type', async () => {
+	it('reads bytes via the file scheme, not the bridge, and discards the file', async () => {
 		const bytes = new Uint8Array([1, 2, 3]);
-		withPlugin({
-			startRecording: async () => ({ mimeType: 'audio/mp4;codecs=mp4a.40.2' }),
-			stopRecording: async () => ({
-				base64: btoa(String.fromCharCode(...bytes)),
-				mimeType: 'audio/mp4;codecs=mp4a.40.2',
-				durationMs: 1500,
-			}),
+		const discarded: string[] = [];
+		vi.stubGlobal('fetch', async () => ({ ok: true, arrayBuffer: async () => bytes.buffer }));
+		vi.stubGlobal('Capacitor', {
+			convertFileSrc: (p: string) => `capacitor://localhost/_capacitor_file_${p}`,
+			Plugins: {
+				FlatFoldAudio: {
+					startRecording: async () => ({ mimeType: 'audio/mp4;codecs=mp4a.40.2' }),
+					stopRecording: async () => ({
+						path: '/tmp/flatfold-voice-x.m4a',
+						byteLength: 3,
+						mimeType: 'audio/mp4;codecs=mp4a.40.2',
+						durationMs: 1500,
+					}),
+					discardRecording: async ({ path }: { path: string }) => { discarded.push(path); },
+				},
+			},
 		});
 		const session = await recordNatively.start();
 		const result = await session.stop();
 		expect(Array.from(result.bytes)).toEqual([1, 2, 3]);
 		expect(result.durationMs).toBe(1500);
-		// Must match what audioFormat.ts requires, or Apple devices can't play it.
 		expect(result.mimeType).toBe('audio/mp4;codecs=mp4a.40.2');
+		// Plaintext audio of an E2E-encrypted message must not outlive the send.
+		expect(discarded).toEqual(['/tmp/flatfold-voice-x.m4a']);
+	});
+
+	it('rejects a short read rather than sending a truncated note', async () => {
+		vi.stubGlobal('fetch', async () => ({ ok: true, arrayBuffer: async () => new Uint8Array([1]).buffer }));
+		const discarded: string[] = [];
+		vi.stubGlobal('Capacitor', {
+			convertFileSrc: (p: string) => p,
+			Plugins: {
+				FlatFoldAudio: {
+					startRecording: async () => ({ mimeType: 'audio/mp4;codecs=mp4a.40.2' }),
+					stopRecording: async () => ({ path: '/tmp/flatfold-voice-y.m4a', byteLength: 999 }),
+					discardRecording: async ({ path }: { path: string }) => { discarded.push(path); },
+				},
+			},
+		});
+		const session = await recordNatively.start();
+		await expect(session.stop()).rejects.toThrow(/incomplete/i);
+		// Still cleaned up, even on failure.
+		expect(discarded).toEqual(['/tmp/flatfold-voice-y.m4a']);
 	});
 
 	// The path a reviewer hits on first run if they decline the prompt.

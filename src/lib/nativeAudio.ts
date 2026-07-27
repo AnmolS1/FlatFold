@@ -24,12 +24,42 @@ interface AudioPlugin {
 	isSupported?: () => Promise<{ supported?: boolean; mimeType?: string }>;
 	requestPermission?: () => Promise<{ granted?: boolean }>;
 	startRecording?: () => Promise<{ mimeType?: string }>;
-	stopRecording?: () => Promise<{ base64?: string; mimeType?: string; durationMs?: number }>;
+	stopRecording?: () => Promise<{ path?: string; byteLength?: number; mimeType?: string; durationMs?: number }>;
+	discardRecording?: (opts: { path: string }) => Promise<void>;
+}
+
+interface CapacitorGlobal {
+	Plugins?: Record<string, unknown>;
+	convertFileSrc?: (path: string) => string;
+}
+
+function capacitor(): CapacitorGlobal | undefined {
+	return (globalThis as unknown as { Capacitor?: CapacitorGlobal }).Capacitor;
 }
 
 function plugin(): AudioPlugin | null {
-	const cap = (globalThis as unknown as { Capacitor?: { Plugins?: Record<string, unknown> } }).Capacitor;
-	return (cap?.Plugins?.FlatFoldAudio as AudioPlugin | undefined) ?? null;
+	return (capacitor()?.Plugins?.FlatFoldAudio as AudioPlugin | undefined) ?? null;
+}
+
+/**
+ * Read the finished recording through Capacitor's file scheme.
+ *
+ * NOT over the bridge. Capacitor delivers plugin results by evaluating
+ * JavaScript with the payload embedded as SOURCE, and ~104 KB of base64 for a
+ * four-second note wedged the WebContent process outright — the device log went
+ * from a healthy native probe straight to
+ * `WebProcessProxy::didBecomeUnresponsive`. The recording had been fine for
+ * several rounds; the transport was the bug.
+ *
+ * `convertFileSrc` maps the path to a URL WKWebView's own handler serves, so the
+ * bytes stream in and never become JS source.
+ */
+export async function readRecordingFile(path: string): Promise<Uint8Array> {
+	const convert = capacitor()?.convertFileSrc;
+	const src = convert ? convert(path) : path;
+	const res = await fetch(src);
+	if (!res.ok) throw new Error(`could not read the recording (${res.status})`);
+	return new Uint8Array(await res.arrayBuffer());
 }
 
 /** Decode the base64 the plugin sends across Capacitor's JSON bridge. */
@@ -110,17 +140,34 @@ export const recordNatively = {
 		return {
 			async stop(): Promise<NativeRecording> {
 				if (!p.stopRecording) throw new Error('Native recording is unavailable in this build.');
+				let res;
 				try {
-					const res = await p.stopRecording();
+					res = await p.stopRecording();
+				} catch (err) {
+					throw describe(err, 'Could not finish the recording.');
+				}
+
+				const path = res.path ?? '';
+				if (!path) throw new Error('The recording could not be located.');
+				try {
+					const bytes = await readRecordingFile(path);
+					// The plugin reports what it wrote. A short read means the file
+					// was truncated or still being written, and sending it would
+					// produce a note that plays as a fragment.
+					if (typeof res.byteLength === 'number' && bytes.length !== res.byteLength) {
+						throw new Error('The recording was incomplete. Please try again.');
+					}
 					return {
-						bytes: base64ToBytes(res.base64 ?? ''),
+						bytes,
 						// Pinned by the plugin to match APPLE_PLAYABLE[0]; the
 						// fallback keeps the contract if the field ever goes missing.
 						mimeType: res.mimeType ?? 'audio/mp4;codecs=mp4a.40.2',
 						durationMs: res.durationMs ?? 0,
 					};
-				} catch (err) {
-					throw describe(err, 'Could not finish the recording.');
+				} finally {
+					// Always: the file is plaintext audio of an E2E-encrypted
+					// message and must not outlive the send, even on failure.
+					await p.discardRecording?.({ path }).catch(() => {});
 				}
 			},
 		};

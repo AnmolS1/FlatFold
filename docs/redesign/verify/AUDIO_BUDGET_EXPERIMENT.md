@@ -186,3 +186,77 @@ not. The element-on-play fix was tested against a fresh pool and made it worse
   from `.env` at run time, never echoed) made unattended runs possible.
 - Never full-screen screenshot this machine while testing — an editor had a live
   credential on screen. Capture the app window region only.
+
+---
+
+# Round 4 — the first batch with real n. The count ceiling is dead.
+
+2026-07-27, 15 planned trials, interleaved, 15-minute enforced cooldown, probe
+unlocking from the DOM. 42 rows on file, 19 kept, 23 discarded for no baseline.
+
+## MEASURED — every added element failed, at every level of headroom
+
+| condition | app baseline | added loaded |
+| --- | --- | --- |
+| click3 | 8/40 | **0/3** |
+| click3 | 12/40 | **0/3** |
+| batch10 | 15/40 | **0/10** |
+| batch10 | 17/40 | **0/10** |
+| batch10 | 27/40 | 0/10 |
+| batch10 | 29/40 | 0/10 |
+| click3 | 29/40 | 0/3 |
+| click3 | 30/40 | 0/3 |
+| click3 | 31/40 | 0/3 |
+| click3 | 31/40 | 0/3 |
+| batch10 | 38/40 | 0/10 |
+| batch10 | 38/40 | 0/10 |
+
+Medians: `click3` 0/3 (range 0–0, n=6), `batch10` 0/10 (range 0–0, n=6),
+`control` baseline 29 (n=7).
+
+## THE COUNT-CEILING MODEL IS REFUTED, this time properly
+
+The earlier refutation rested on one uncooled run and was itself suspect. This
+does not:
+
+- With a baseline of **8 of 40**, a ceiling anywhere near 31 leaves ~20 free
+  slots. Three added elements still loaded **zero**.
+- The result is identical at baseline 38, where a ceiling model predicts
+  starvation, and at baseline 8, where it predicts success.
+- 12 trials, two conditions, zero variance.
+
+**Control drift does not weaken this — it strengthens it.** The control series
+(29, 31, 15, 29, 29, 30, 30) drifted enough that the analyzer voids the batch
+for comparing conditions to each other, and that verdict stands for any
+between-condition claim. But the finding here is *within* trials: at every one
+of a 4.75x range of pool availability, added elements loaded 0. Drift varied
+the thing a ceiling model says should matter, and the outcome never moved.
+
+`batch10` vs `click3` also shows no difference, so **batch is not the variable
+either**.
+
+## What survives
+
+The discriminator is not how many elements exist, and not when the load starts
+in wall-clock terms. It is **how the element came to be**: elements React
+creates during a render/commit load; elements added afterwards with
+`document.createElement` + `appendChild` never do, however much capacity exists.
+
+## UNCONTROLLED VARIABLE — name it before building on this
+
+The probe appends to `document.body`. The app's own elements live **inside the
+React tree**, within the scrolling message container. That difference has never
+been isolated, and it is at least as plausible as "React vs imperative":
+
+1. append into the message container instead of `document.body`
+2. have REACT render an extra element (a debug component), not the probe
+3. take an element the app already rendered, clone it, and insert the clone
+
+If (1) loads, the answer is DOM position/containment, not provenance — and the
+whole framing changes again. Run those three before any fix.
+
+## Harness note
+
+23 of 42 rows discarded for no baseline, so the DOM unlock still fails roughly
+half the time. It fails SAFELY — discarded, not silently wrong — but it halves
+throughput and should be made reliable before the next batch.

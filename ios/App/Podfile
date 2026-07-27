@@ -1,0 +1,55 @@
+require_relative '../../node_modules/@capacitor/ios/scripts/pods_helpers'
+
+platform :ios, '15.0'
+use_frameworks!
+
+# Capacitor's own recommendation for its generated projects.
+install! 'cocoapods', :disable_input_output_paths => true
+
+def capacitor_pods
+  pod 'Capacitor', :path => '../../node_modules/@capacitor/ios'
+  pod 'CapacitorCordova', :path => '../../node_modules/@capacitor/ios'
+  pod 'AparajitaCapacitorSecureStorage', :path => '../../node_modules/@aparajita/capacitor-secure-storage'
+  pod 'CapacitorApp', :path => '../../node_modules/@capacitor/app'
+  # THE ONE CATALYST BLOCKER. Comment this line out and a Mac Catalyst build
+  # succeeds; leave it in and it fails with:
+  #   IONFilesystemLib.xcframework: Unable to find matching slice in
+  #   'ios-arm64 ios-arm64_x86_64-simulator' ... platform (-maccatalyst)
+  #
+  # Same root cause as Capacitor's own SwiftPM problem: a PREBUILT binary
+  # (`vendored_frameworks: IONFilesystemLib.xcframework`) with no Catalyst
+  # slice. Capacitor itself was fixable by building from source; this is a
+  # third-party dependency of @capacitor/filesystem and is not.
+  #
+  # It is used in exactly ONE place — MediaAttachment's native file save —
+  # and on Catalyst the real macOS WKWebView may well handle `<a download>`
+  # directly, making the plugin unnecessary there. Left IN so iOS keeps working.
+  pod 'CapacitorFilesystem', :path => '../../node_modules/@capacitor/filesystem'
+  pod 'CapacitorHaptics', :path => '../../node_modules/@capacitor/haptics'
+  pod 'CapacitorKeyboard', :path => '../../node_modules/@capacitor/keyboard'
+  pod 'CapacitorLocalNotifications', :path => '../../node_modules/@capacitor/local-notifications'
+  pod 'CapacitorPushNotifications', :path => '../../node_modules/@capacitor/push-notifications'
+  pod 'CapacitorShare', :path => '../../node_modules/@capacitor/share'
+end
+
+target 'App' do
+  capacitor_pods
+end
+
+post_install do |installer|
+  assertDeploymentTarget(installer)
+
+  # THE POINT OF THIS MIGRATION.
+  #
+  # SwiftPM ships Capacitor as a prebuilt xcframework with only `ios-arm64` and
+  # `ios-arm64_x86_64-simulator` slices, so a Catalyst build cannot link. Pods
+  # compile from SOURCE, and that source was measured to typecheck for
+  # arm64-apple-ios-macabi with a delta of ZERO against plain iOS across
+  # Capacitor core and every plugin. See docs/DESKTOP_SHELL_OPTIONS.md.
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      config.build_settings['SUPPORTS_MACCATALYST'] = 'YES'
+      config.build_settings['DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER'] = 'NO'
+    end
+  end
+end

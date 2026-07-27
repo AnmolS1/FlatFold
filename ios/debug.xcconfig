@@ -1,1 +1,6 @@
+// The project keeps its own base configuration, so CocoaPods cannot set one.
+// Including the generated Pods config by hand is what CocoaPods asks for in that
+// case, and without it the pods are built but never linked.
+#include "App/Pods/Target Support Files/Pods-App/Pods-App.debug.xcconfig"
+
 CAPACITOR_DEBUG = true

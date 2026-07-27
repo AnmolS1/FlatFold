@@ -1,3 +1,5 @@
+import { nativeLog } from './nativeLog';
+
 // ONE <audio> element for the whole app.
 //
 // Every VoiceNote used to own its own media element. WebKit caps concurrent
@@ -34,6 +36,16 @@ function ensure(): HTMLAudioElement | null {
 	for (const ev of ['play', 'pause', 'ended', 'timeupdate', 'loadedmetadata', 'error']) {
 		el.addEventListener(ev, notify);
 	}
+	// Playback failures were invisible: the element's `error` event only updates
+	// a snapshot field, and the play() rejection below was discarded by the
+	// caller's `void`. Both are now reported.
+	el.addEventListener('error', () => {
+		const e = el?.error;
+		nativeLog(`audio element error code=${e?.code ?? '?'} message=${e?.message ?? ''}`);
+	});
+	el.addEventListener('loadedmetadata', () => {
+		nativeLog(`audio loadedmetadata duration=${el?.duration ?? '?'}`);
+	});
 	return el;
 }
 
@@ -115,7 +127,15 @@ export async function toggleSharedPlayback(url: string): Promise<void> {
 	currentUrl = url;
 	a.src = url;
 	notify();
-	await a.play();
+	try {
+		await a.play();
+	} catch (err) {
+		// A rejected play() was silently swallowed by the caller. That is the one
+		// signal that says "the browser refused to play this", and losing it is
+		// why playback failures produced no message at all.
+		nativeLog(`play() rejected: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`);
+		throw err;
+	}
 }
 
 /** Release the element if the note holding it is going away. */

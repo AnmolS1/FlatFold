@@ -23,7 +23,14 @@ const CSP = [
 	"img-src 'self' data: blob:",
 	"media-src 'self' blob:",
 	"font-src 'self'",
-	`connect-src 'self' ${API} ${WS}`,
+	// `blob:` is REQUIRED, and its absence was a real bug rather than tightness.
+	// img-src and media-src both allow blob:, so images and <audio> worked, but
+	// fetch() on a blob: URL is governed by connect-src — so the voice-note
+	// waveform decode (`fetch(objectUrl)` -> decodeAudioData) failed instantly
+	// with "Load failed" on every note, on every platform, and a bare catch hid
+	// it. Safe: blob: URLs are same-origin, minted by this app, and cannot reach
+	// the network.
+	`connect-src 'self' blob: ${API} ${WS}`,
 	"manifest-src 'self'",
 	"frame-ancestors 'none'",
 	"base-uri 'none'",

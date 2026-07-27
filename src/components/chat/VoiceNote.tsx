@@ -113,7 +113,10 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 		<div className="flex flex-col gap-1 min-w-[12rem]">
 			<div className="flex items-center gap-3">
 				<button
-					onClick={() => void toggleSharedPlayback(url)}
+					onClick={() => {
+						nativeLog('play tapped');
+						void toggleSharedPlayback(url).catch(() => {});
+					}}
 					aria-label={playing ? 'Pause voice note' : 'Play voice note'}
 					className={`flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center ${own ? 'bg-on-crease/20 text-on-crease' : 'bg-crease/15 text-crease'}`}
 				>

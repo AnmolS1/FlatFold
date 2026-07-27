@@ -67,6 +67,15 @@ post_install do |installer|
     target.build_configurations.each do |config|
       config.build_settings['SUPPORTS_MACCATALYST'] = 'YES'
       config.build_settings['DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER'] = 'NO'
+
+      # CapacitorCordova's public headers use double-quoted includes
+      # (`#include "CDVPlugin.h"`), which is fine in a static library and warns
+      # in a FRAMEWORK — and `use_frameworks!` makes every pod a framework. The
+      # SwiftPM setup did not build them this way, so these warnings are new to
+      # the migration and not new to the code. They are vendor headers we do not
+      # control, and there are ~22 of them on every build, which buries anything
+      # that actually matters.
+      config.build_settings['CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER'] = 'NO'
     end
   end
 end

@@ -47,12 +47,27 @@ the sandbox denies CocoaPods' own `Pods-App-frameworks.sh`:
 
     Sandbox: bash(...) deny(1) file-read-data .../Pods-App-frameworks.sh
 
+## Vendor header warnings
+
+`use_frameworks!` builds every pod as a framework, and CapacitorCordova's public
+headers use double-quoted includes (`#include "CDVPlugin.h"`), which warns in a
+framework but not in a static library. SwiftPM did not build them as frameworks,
+so ~22 of these warnings are NEW to this migration and not new to the code.
+
+They are vendor headers we do not control, and that volume buries anything that
+matters, so `CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = NO` is set on the
+pod targets in `post_install`. It is scoped to pods — FlatFold's own code keeps
+the warning.
+
 ## Verified 2026-07-26
 
-| target | result |
-| --- | --- |
-| Mac Catalyst (9 pods, filesystem excluded) | BUILD SUCCEEDED, `platform MACCATALYST` |
-| iOS (10 pods, filesystem included) | BUILD SUCCEEDED |
+| target | pods | warnings | result |
+| --- | --- | --- | --- |
+| Mac Catalyst (filesystem excluded) | 9 | 0 | BUILD SUCCEEDED, `platform MACCATALYST` |
+| iOS (filesystem included) | 10 | 0 | BUILD SUCCEEDED |
+
+Pod counts are part of the assertion: removing dependencies makes a build MORE
+likely to succeed, so `BUILD SUCCEEDED` alone means little on a migration.
 
 `Pods/` and `App.xcworkspace/` are gitignored; `pod install` regenerates both.
 

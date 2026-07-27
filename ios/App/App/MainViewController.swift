@@ -269,14 +269,21 @@ class MainViewController: CAPBridgeViewController {
         const srcOf = () => good ? good.src : null;
 
         const mine = [];
-        const mk = (src) => {
+        // `host` is the uncontrolled variable from round 4: the probe appended
+        // to document.body while the app's own elements live INSIDE the React
+        // tree, in the scrolling message container. Containment was never
+        // isolated from provenance, and it is just as plausible an explanation
+        // for "added elements never load".
+        const mk = (src, host) => {
           const a = document.createElement('audio');
           a.preload = 'metadata'; a.playsInline = true;
           if (src) a.src = src;
-          document.body.appendChild(a);
+          (host || document.body).appendChild(a);
           mine.push(a);
           return a;
         };
+        // The container the app's own working notes actually live in.
+        const noteHost = () => (good && good.parentNode) ? good.parentNode : document.body;
 
         let note = '';
         if (condition === 'control') {
@@ -303,6 +310,25 @@ class MainViewController: CAPBridgeViewController {
           // Same as click3 but created OUTSIDE any user-activation window.
           await wait(2000);
           for (let i = 0; i < 3; i++) { mk(srcOf()); await wait(1500); }
+          await wait(9000);
+        } else if (condition === 'container3') {
+          // Same as click3, but inserted into the container that holds the
+          // app's own loaded notes. If THESE load and click3's do not, the
+          // answer is DOM containment, not how the element was created.
+          for (let i = 0; i < 3; i++) { mk(srcOf(), noteHost()); await wait(1500); }
+          await wait(9000);
+        } else if (condition === 'clone3') {
+          // Clone elements the app itself rendered and reinsert the clones
+          // beside the originals. Closest possible copy of a working element:
+          // same attributes, same source, same parent — differing only in that
+          // React did not create it.
+          for (let i = 0; i < 3; i++) {
+            if (!good) break;
+            const c = good.cloneNode(true);
+            good.parentNode.appendChild(c);
+            mine.push(c);
+            await wait(1500);
+          }
           await wait(9000);
         } else if (condition === 'fixture3') {
           // 3 elements from the generated fixture rather than a real note, to

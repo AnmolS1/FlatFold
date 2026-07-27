@@ -18,6 +18,10 @@ let currentUrl: string | null = null;
 const listeners = new Set<() => void>();
 
 function notify() {
+	// Only wake subscribers when the snapshot actually moved. Notifying on an
+	// unchanged snapshot is harmless for correctness but wasteful, and during
+	// timeupdate it fires several times a second per note.
+	if (!recompute()) return;
 	for (const l of listeners) l();
 }
 
@@ -41,14 +45,48 @@ export interface SharedPlayerState {
 	errorCode: number | undefined;
 }
 
-export function sharedPlayerState(): SharedPlayerState {
-	return {
+// The snapshot MUST be cached.
+//
+// `useSyncExternalStore` compares snapshots with Object.is to decide whether the
+// store changed. A getSnapshot that builds a fresh object each call therefore
+// reports "changed" on every single render — React re-renders forever, and the
+// whole chat lands in the ErrorBoundary. That shipped, and it took the app out
+// entirely: "Something broke", no chat, and a reload could not help because the
+// loop restarts on the next render.
+//
+// So: recompute only when something really moved, and hand out the same object
+// until then.
+let snapshot: SharedPlayerState = {
+	url: null,
+	playing: false,
+	currentTime: 0,
+	duration: 0,
+	errorCode: undefined,
+};
+
+function recompute(): boolean {
+	const next: SharedPlayerState = {
 		url: currentUrl,
 		playing: !!el && !el.paused && !el.ended,
 		currentTime: el?.currentTime ?? 0,
 		duration: el && isFinite(el.duration) ? el.duration : 0,
 		errorCode: el?.error?.code,
 	};
+	if (
+		next.url === snapshot.url &&
+		next.playing === snapshot.playing &&
+		next.currentTime === snapshot.currentTime &&
+		next.duration === snapshot.duration &&
+		next.errorCode === snapshot.errorCode
+	) {
+		return false;
+	}
+	snapshot = next;
+	return true;
+}
+
+export function sharedPlayerState(): SharedPlayerState {
+	return snapshot;
 }
 
 export function subscribeSharedPlayer(fn: () => void): () => void {

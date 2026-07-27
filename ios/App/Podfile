@@ -99,6 +99,14 @@ post_install do |installer|
       # control, and there are ~22 of them on every build, which buries anything
       # that actually matters.
       config.build_settings['CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER'] = 'NO'
+
+      # And the module verifier, which is a SEPARATE compile with its own flags.
+      # It ignores the setting above and re-reports the same vendor-header issues
+      # as hard errors — but only on builds where it runs (signing turned it on
+      # here), so an unsigned build passes and a signed one fails on code that
+      # did not change. Capacitor's own headers also use `@import` in a framework
+      # header, which the verifier rejects outright.
+      config.build_settings['ENABLE_MODULE_VERIFIER'] = 'NO'
     end
   end
 end

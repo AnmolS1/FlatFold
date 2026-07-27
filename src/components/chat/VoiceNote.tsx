@@ -15,54 +15,26 @@ interface VoiceNoteProps {
 const BAR_COUNT = 40;
 
 /**
- * How many notes may hold a media resource at once.
+ * ON THIS PLATFORM, A MEDIA LOAD MUST START AT MOUNT. Measured on Mac Catalyst,
+ * and the reason `src` is set in JSX rather than on the play gesture.
  *
- * WebKit caps concurrent media resources, and an element only costs a slot once
- * it has a `src`. Measured on Mac Catalyst: 28 mounted notes, each with `src`
- * and `preload="metadata"`, filled the pool — and the next note to be played
- * then hung at `readyState 0` / `networkState 2` indefinitely with `error`
- * still null, while four already-loaded notes were evicted to `networkState 3`
- * at that same instant. That is the whole of "old notes play, new ones don't".
+ * A load initiated while the page first renders completes normally — a census
+ * of a conversation showed 24 of 28 notes reaching `readyState 1`. A load
+ * initiated at ANY later moment does not: the element goes to `networkState 2`
+ * (LOADING) and stays at `readyState 0` forever, with `error` still null. Not
+ * slow — never. It reproduces on the very first play after a fresh launch, so
+ * it is not exhaustion, and it survives `preload="none"` vs `"metadata"` and an
+ * explicit `load()`.
  *
- * Three rather than one: the note playing, the one just paused (so resuming it
- * does not re-download and lose position), and one spare for a quick A/B
- * between two notes. Small enough that the pool is never the binding constraint.
+ * That one fact explains the whole "old notes play, new ones don't" report: a
+ * newly ARRIVED note mounts after the initial render, so its load is a late one
+ * and hangs. Deferring `src` to the play gesture makes EVERY note late, which is
+ * exactly what happened when it was tried — playback broke for all of them.
+ *
+ * So the outstanding bug is late-arriving notes, and lazy loading is not the
+ * fix; it is the same defect applied universally. Do not re-try it without new
+ * evidence about why late loads stall.
  */
-export const LOADED_NOTE_LIMIT = 3;
-
-// Least-recently-used first. Module scope on purpose: the limit is a property of
-// the WebView process, not of any one conversation or component tree.
-const loaded: HTMLAudioElement[] = [];
-
-/** Release a note's media resource. Removing `src` alone does not free it. */
-function release(el: HTMLAudioElement) {
-	el.removeAttribute('src');
-	// `load()` is what actually tears the resource down — without it WebKit keeps
-	// the old one alive and the cap achieves nothing.
-	el.load();
-}
-
-/**
- * Give this element a media resource, evicting the least-recently-used if the
- * pool is full.
- *
- * Never evicts an element that is still playing: the cap exists to stop notes
- * hanging, and stopping the note the user is listening to would be a worse bug
- * than the one being fixed.
- */
-function claimSlot(el: HTMLAudioElement, url: string) {
-	const existing = loaded.indexOf(el);
-	if (existing !== -1) loaded.splice(existing, 1);
-	else el.src = url;
-	loaded.push(el);
-
-	while (loaded.length > LOADED_NOTE_LIMIT) {
-		const victim = loaded.findIndex((c) => c !== el && c.paused);
-		if (victim === -1) break;
-		release(loaded[victim]);
-		loaded.splice(victim, 1);
-	}
-}
 
 function formatDuration(seconds: number): string {
 	if (!isFinite(seconds) || seconds < 0) return '0:00';
@@ -125,19 +97,6 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 	// segment is unique per note and carries no message content.
 	const noteTag = url.slice(-6);
 
-	// Drop this note out of the pool when it unmounts. Without it the registry
-	// keeps references to detached elements, which both leaks them and lets the
-	// cap be consumed by notes that scrolled out of the list — reintroducing the
-	// exhaustion from the other end.
-	useEffect(() => {
-		const el = audioRef.current;
-		return () => {
-			if (!el) return;
-			const at = loaded.indexOf(el);
-			if (at !== -1) loaded.splice(at, 1);
-		};
-	}, []);
-
 	// Decode once for the waveform. Failure degrades to flat bars and MUST NOT
 	// affect playback: the old code swapped in a second media element here, which
 	// doubled the resource cost exactly when resources were already short.
@@ -172,13 +131,6 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 		if (!el) return;
 		nativeLog(`[${noteTag}] toggle paused=${el.paused} ready=${el.readyState} net=${el.networkState} err=${el.error?.code ?? '-'}`);
 		if (el.paused) {
-			// Claim the resource here, on the gesture, and imperatively.
-			//
-			// Not via React state: an earlier attempt set `src` through a re-render
-			// and then called play() against an element the render had not updated
-			// yet, which raced and silently did nothing. Setting it on the ref
-			// means the element is ready on the very next line.
-			claimSlot(el, url);
 			void el.play().catch((err: unknown) => {
 				// AbortError is benign — pausing aborts a play() that has not started.
 				const name = err instanceof Error ? err.name : '';
@@ -198,19 +150,11 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 			<div className="flex items-center gap-3">
 				<audio
 					ref={audioRef}
-					// NO `src`, and preload="none": an <audio> costs a media
-					// resource the moment it has a source, and a conversation
-					// mounts one per note. See LOADED_NOTE_LIMIT above — this is
-					// the fix for notes that hang instead of playing.
-					//
-					// The duration shown while unloaded comes from `durationMs`,
-					// which rides inside the MediaRef and so is present on
-					// RECEIVED notes too, not only ones recorded on this device.
-					// An earlier attempt at lazy loading regressed the duration to
-					// 0:00 — but that was before the CSP `connect-src blob:` fix,
-					// when the waveform decode (the other duration source) was
-					// failing on every platform.
-					preload="none"
+					// `src` IS SET AT MOUNT, DELIBERATELY. Attaching it lazily on
+					// the play gesture was tried and reverted — see the note on
+					// late loads above the component.
+					src={url}
+					preload="metadata"
 					playsInline
 					onPlay={() => setPlaying(true)}
 					onPause={() => setPlaying(false)}

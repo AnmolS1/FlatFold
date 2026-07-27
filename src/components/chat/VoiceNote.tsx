@@ -15,26 +15,44 @@ interface VoiceNoteProps {
 const BAR_COUNT = 40;
 
 /**
- * ON THIS PLATFORM, A MEDIA LOAD MUST START AT MOUNT. Measured on Mac Catalyst,
- * and the reason `src` is set in JSX rather than on the play gesture.
+ * How many notes may have a live `<audio>` ELEMENT at once.
  *
- * A load initiated while the page first renders completes normally — a census
- * of a conversation showed 24 of 28 notes reaching `readyState 1`. A load
- * initiated at ANY later moment does not: the element goes to `networkState 2`
- * (LOADING) and stays at `readyState 0` forever, with `error` still null. Not
- * slow — never. It reproduces on the very first play after a fresh launch, so
- * it is not exhaustion, and it survives `preload="none"` vs `"metadata"` and an
- * explicit `load()`.
+ * The budget WebKit enforces appears to be on media elements themselves, not on
+ * how many of them have loaded. Measured on Mac Catalyst: a conversation with 37
+ * voice notes rendered 37 `<audio>` elements; 31 reached `readyState 1` and the
+ * last 6 sat at `networkState 2` / `readyState 0` indefinitely with `error`
+ * still null — never loading, and never failing either.
  *
- * That one fact explains the whole "old notes play, new ones don't" report: a
- * newly ARRIVED note mounts after the initial render, so its load is a late one
- * and hangs. Deferring `src` to the play gesture makes EVERY note late, which is
- * exactly what happened when it was tried — playback broke for all of them.
+ * That ceiling explains all three symptoms that were chased separately:
+ *   - the tail of a long conversation is dead (elements past the limit)
+ *   - a newly ARRIVED note never plays (it is element 38)
+ *   - withholding `src` from all 37 elements changed nothing, because the
+ *     elements had already spent the budget. That attempt was reverted.
  *
- * So the outstanding bug is late-arriving notes, and lazy loading is not the
- * fix; it is the same defect applied universally. Do not re-try it without new
- * evidence about why late loads stall.
+ * So the element must not EXIST until the note is played, and old ones must be
+ * torn down to make room. Six is far below the observed ceiling while still
+ * covering the note playing, the one just paused, and a few recently visited.
  */
+export const LIVE_NOTE_LIMIT = 6;
+
+// Notes with a live element, least-recently-used first. Module scope because the
+// budget belongs to the WebView process, not to a conversation or a subtree.
+const live: Array<() => void> = [];
+
+/**
+ * Register this note as live, retiring the least-recently-used past the limit.
+ *
+ * Takes a teardown callback rather than an element: unmounting is what frees the
+ * budget here, and only the component can do that.
+ */
+function goLive(retire: () => void): () => void {
+	live.push(retire);
+	while (live.length > LIVE_NOTE_LIMIT) live.shift()?.();
+	return () => {
+		const at = live.indexOf(retire);
+		if (at !== -1) live.splice(at, 1);
+	};
+}
 
 function formatDuration(seconds: number): string {
 	if (!isFinite(seconds) || seconds < 0) return '0:00';
@@ -65,26 +83,23 @@ function peaksFrom(channel: Float32Array): number[] {
 
 // A voice note: a waveform, a play/pause button, and a duration.
 //
-// THE MEDIA ELEMENT IS RENDERED IN JSX, PER NOTE, DELIBERATELY — but it carries
-// no `src` until the note is played. Those are two separate decisions and both
-// were paid for.
+// THE MEDIA ELEMENT IS CREATED ON THE PLAY GESTURE, NOT AT MOUNT. See
+// LIVE_NOTE_LIMIT — a conversation renders one of these per note, and beyond a
+// ceiling of about 31 they simply never load.
 //
-// The ELEMENT stays in JSX because a single shared element, constructed
-// imperatively at module scope, was tried and reverted: it never lived in the
-// document, and WebKit does not load a DETACHED media element. No fetch, no
-// `loadedmetadata`, no `error`, and a play() that neither resolved nor rejected.
-// Appending it to document.body afterwards did not revive it.
+// When it does exist it is rendered in JSX, so it is attached to the document by
+// construction. That part is not incidental: a single shared element built
+// imperatively at module scope was tried and reverted, because WebKit does not
+// load a DETACHED media element at all — no fetch, no `loadedmetadata`, no
+// `error`, and a play() that neither resolved nor rejected. Appending it to
+// document.body afterwards did not revive it.
 //
-// The SOURCE is attached lazily because an element with a `src` holds a media
-// resource, and WebKit's pool of those is small. See LOADED_NOTE_LIMIT.
-//
-// Worth knowing how this failure presents, because it wasted two debugging
-// rounds: the note that cannot get a slot HANGS — readyState 0, networkState 2,
+// Worth knowing how the ceiling PRESENTS, because it cost two debugging rounds:
+// the note that cannot get a slot HANGS silently — readyState 0, networkState 2,
 // `error` null — while OTHER, already-loaded notes are evicted and report
 // MEDIA_ERR_SRC_NOT_SUPPORTED (code 4). So the visible error belongs to a
-// different note than the broken one, and code 4 reads as a codec problem when
-// nothing is wrong with the codec. Always attribute a media error to a specific
-// note before believing it.
+// different note than the broken one, and code 4 reads as a codec fault when the
+// codec is fine. Always attribute a media error to a specific note first.
 export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) => {
 	const audioRef = useRef<HTMLAudioElement>(null);
 	const [bars, setBars] = useState<number[] | null>(null);
@@ -92,10 +107,38 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 	const [progress, setProgress] = useState(0); // 0..1
 	const [duration, setDuration] = useState(durationMs ? durationMs / 1000 : 0);
 	const [playbackError, setPlaybackError] = useState<string | null>(null);
+	// Whether this note has a media element at all. False until first played.
+	const [liveEl, setLiveEl] = useState(false);
+	// Set when the element is created BY a play gesture, so the effect below
+	// knows to start playback as soon as the element exists.
+	const playOnMount = useRef(false);
+	const unregister = useRef<(() => void) | null>(null);
 
 	// A short, stable label for this note in the debug log. The blob URL's last
 	// segment is unique per note and carries no message content.
 	const noteTag = url.slice(-6);
+
+	// Start playback once the element exists.
+	//
+	// This runs in the commit for the click that set `liveEl`, so the user
+	// activation that WebKit requires for play() is still in force. Doing it here
+	// rather than in the handler is what makes create-then-play work at all: in
+	// the handler there is no element yet.
+	useEffect(() => {
+		if (!liveEl || !playOnMount.current) return;
+		playOnMount.current = false;
+		const el = audioRef.current;
+		if (!el) return;
+		nativeLog(`[${noteTag}] element created, playing`);
+		void el.play().catch((err: unknown) => {
+			const name = err instanceof Error ? err.name : '';
+			if (name === 'AbortError') return;
+			nativeLog(`[${noteTag}] play() rejected: ${name}`);
+		});
+	}, [liveEl, noteTag]);
+
+	// Give the budget back when this note leaves the list.
+	useEffect(() => () => unregister.current?.(), []);
 
 	// Decode once for the waveform. Failure degrades to flat bars and MUST NOT
 	// affect playback: the old code swapped in a second media element here, which
@@ -128,14 +171,27 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 
 	const toggle = () => {
 		const el = audioRef.current;
-		if (!el) return;
+
+		// First play: there is no element yet. Create one, claim a slot in the
+		// budget, and let the effect above start it once React has committed.
+		if (!el) {
+			nativeLog(`[${noteTag}] arming (live=${live.length})`);
+			playOnMount.current = true;
+			unregister.current = goLive(() => {
+				unregister.current = null;
+				setLiveEl(false);
+			});
+			setLiveEl(true);
+			return;
+		}
+
 		nativeLog(`[${noteTag}] toggle paused=${el.paused} ready=${el.readyState} net=${el.networkState} err=${el.error?.code ?? '-'}`);
 		if (el.paused) {
 			void el.play().catch((err: unknown) => {
 				// AbortError is benign — pausing aborts a play() that has not started.
 				const name = err instanceof Error ? err.name : '';
 				if (name === 'AbortError') return;
-				nativeLog(`play() rejected: ${name}`);
+				nativeLog(`[${noteTag}] play() rejected: ${name}`);
 			});
 		} else {
 			el.pause();
@@ -148,11 +204,12 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 	return (
 		<div className="flex flex-col gap-1 min-w-[12rem]">
 			<div className="flex items-center gap-3">
+				{/* Only once played, and torn down again when the budget needs
+				    the slot. An element that does not exist cannot consume the
+				    ceiling that stops other notes loading. */}
+				{liveEl && (
 				<audio
 					ref={audioRef}
-					// `src` IS SET AT MOUNT, DELIBERATELY. Attaching it lazily on
-					// the play gesture was tried and reverted — see the note on
-					// late loads above the component.
 					src={url}
 					preload="metadata"
 					playsInline
@@ -181,6 +238,7 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 					}}
 					className="hidden"
 				/>
+				)}
 				<button
 					onClick={toggle}
 					aria-label={playing ? 'Pause voice note' : 'Play voice note'}

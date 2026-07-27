@@ -165,3 +165,24 @@ describe('a file that will not parse must never be sent', () => {
 		await expect(session.stop()).rejects.toThrow(/unplayable|try again/i);
 	});
 });
+
+describe('the file-scheme read does not trust HTTP status', () => {
+	// WKWebView's custom scheme handler may reply with a plain URLResponse rather
+	// than an HTTPURLResponse. JS then sees status === 0 and ok === false on a
+	// perfectly successful read — which is exactly what shipped as
+	// "could not read the recording (0)". The BODY is the evidence, not the code.
+	it('accepts a status-0 response that carries the bytes', async () => {
+		const bytes = new Uint8Array([9, 8, 7]);
+		vi.stubGlobal('fetch', async () => ({ ok: false, status: 0, arrayBuffer: async () => bytes.buffer }));
+		vi.stubGlobal('Capacitor', { convertFileSrc: (p: string) => p, Plugins: {} });
+		const { readRecordingFile } = await import('../src/lib/nativeAudio');
+		expect(Array.from(await readRecordingFile('/tmp/flatfold-voice-z.m4a'))).toEqual([9, 8, 7]);
+	});
+
+	it('still fails when the read genuinely yields nothing', async () => {
+		vi.stubGlobal('fetch', async () => ({ ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) }));
+		vi.stubGlobal('Capacitor', { convertFileSrc: (p: string) => p, Plugins: {} });
+		const { readRecordingFile } = await import('../src/lib/nativeAudio');
+		await expect(readRecordingFile('/tmp/flatfold-voice-z.m4a')).rejects.toThrow(/empty|could not read/i);
+	});
+});

@@ -58,8 +58,19 @@ export async function readRecordingFile(path: string): Promise<Uint8Array> {
 	const convert = capacitor()?.convertFileSrc;
 	const src = convert ? convert(path) : path;
 	const res = await fetch(src);
-	if (!res.ok) throw new Error(`could not read the recording (${res.status})`);
-	return new Uint8Array(await res.arrayBuffer());
+
+	// Deliberately NOT gated on `res.ok` / `res.status`.
+	//
+	// WKWebView's custom scheme handler can reply with a plain URLResponse rather
+	// than an HTTPURLResponse, and JS then sees `status === 0` and `ok === false`
+	// on a completely successful read. Checking the status rejected a response
+	// whose body was perfectly fine — it shipped as "could not read the
+	// recording (0)". The BODY is the evidence here; the status line is not.
+	const buf = await res.arrayBuffer();
+	if (buf.byteLength === 0) {
+		throw new Error(`could not read the recording — it came back empty (status ${res.status})`);
+	}
+	return new Uint8Array(buf);
 }
 
 /** Decode the base64 the plugin sends across Capacitor's JSON bridge. */

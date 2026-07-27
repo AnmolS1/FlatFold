@@ -30,6 +30,11 @@ fi
 # off one screenshot; the desktop then changed and they addressed a different
 # window entirely. Coordinates are a snapshot of a moment, the element tree is
 # what is actually stable.
+# The credential sits on the clipboard only for the moment it takes to paste,
+# and is overwritten immediately afterwards. Never echoed, never logged.
+printf '%s' "$PW" | pbcopy
+trap 'printf "" | pbcopy' EXIT
+
 osascript - "$PW" <<'APPLESCRIPT'
 on run argv
   tell application "System Events"
@@ -40,15 +45,40 @@ on run argv
       set {wx, wy} to position of window 1
       set {ww, wh} to size of window 1
 
+      -- FIND THE FIELD IN THE ACCESSIBILITY TREE, then click where it actually
+      -- is. Fractions of the window were the previous approach and they are the
+      -- wrong abstraction: 0.386 of the height landed between the password box
+      -- and the Unlock button, so a polling loop clicked *Unlock* twenty times
+      -- against an empty field and reported "field never appeared".
+      --
+      -- Polling also handles boot time: the app comes up through Argon2 and
+      -- WASM, so at any fixed delay after launch it may still be loading.
+      set fld to missing value
+      repeat 20 times
+        try
+          set fld to first text field of entire contents of window 1
+          exit repeat
+        end try
+        delay 2
+      end repeat
+      if fld is missing value then error "password field never appeared"
+
+      set {fx, fy} to position of fld
+      set {fw, fh} to size of fld
+      click at {fx + (fw / 2), fy + (fh / 2)}
+
       -- CLICK THE FIELD BEFORE TYPING. It renders as focused, but keystrokes
       -- sent without a click go nowhere — that alone cost an overnight batch.
       -- Positions are FRACTIONS of the live window, so they survive the window
       -- being moved, resized, or switching between the wide two-pane layout and
       -- the narrow one-pane layout with a bottom tab bar.
-      click at {wx + (ww * 0.5), wy + (wh * 0.386)}
+      -- PASTE, don't keystroke. `keystroke` landed the click on the field and
+      -- then typed nothing — the field stayed visibly empty — and per-character
+      -- synthesis is fragile with punctuation besides. One paste event is also
+      -- what a password manager does, so the web layer handles it normally.
       delay 0.8
-      keystroke (item 1 of argv)
-      delay 0.3
+      keystroke "v" using command down
+      delay 0.5
       key code 36 -- Return
       delay 8
 

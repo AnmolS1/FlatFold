@@ -73,6 +73,11 @@ function describe(err: unknown, fallback: string): Error {
 			return new Error('The microphone did not start. Check the input device in System Settings → Sound, then try again.');
 		case 'NOT_RECORDING':
 			return new Error('Recording had already stopped.');
+		case 'FINALIZE_FAILED':
+			// The container index was never written, so the file would be
+			// unplayable. Better to say so than to send something that shows a
+			// spinner forever on every device that receives it.
+			return new Error('The recording could not be finished. Please try again.');
 		default:
 			return new Error(fallback);
 	}

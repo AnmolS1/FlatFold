@@ -18,7 +18,7 @@ import AVFoundation
 // unplayable on every Apple device, on the RECEIVING end. Nothing downstream has
 // to special-case a Mac-recorded note, because the bytes are the same shape.
 @objc(FlatFoldAudioPlugin)
-public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin {
+public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDelegate {
     public let identifier = "FlatFoldAudioPlugin"
     public let jsName = "FlatFoldAudio"
     public let pluginMethods: [CAPPluginMethod] = [
@@ -34,6 +34,12 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin {
 
     private var recorder: AVAudioRecorder?
     private var fileURL: URL?
+
+    // stopRecording cannot answer synchronously — see the delegate below.
+    private var pendingStop: CAPPluginCall?
+    private var pendingDurationMs = 0
+    private var pendingPeakDb: Float = 0
+    private var stopWatchdog: DispatchWorkItem?
 
     /// Only offered where the WebView route is missing. Everywhere else
     /// `getUserMedia` works and is the better path — it needs no native surface
@@ -119,6 +125,7 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         ]
 
         let rec = try AVAudioRecorder(url: url, settings: settings)
+        rec.delegate = self
         // Metering is how we find out whether the microphone actually delivered
         // anything. `record()` returning true is NOT that guarantee: the first
         // build on Mac returned true while CoreAudio logged "client stopping
@@ -138,54 +145,92 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         fileURL = url
     }
 
+    /// Stop, and answer only once the file is actually finalized.
+    ///
+    /// `AVAudioRecorder.stop()` is ASYNCHRONOUS, and reading the file on the next
+    /// line is the bug that made every natively-recorded note unplayable while
+    /// looking perfectly healthy from here.
+    ///
+    /// An MPEG-4 file keeps its index — the `moov` atom — written at finalize
+    /// time. Reading immediately yielded all the audio samples (62,699 bytes at a
+    /// -17.3 dB peak, which is why size and metering both looked right) but NO
+    /// container index. A player then cannot determine the duration and cannot
+    /// begin decoding, which presented as `--:--` and a spinner that never
+    /// resolved. Notes recorded in the browser were unaffected, so it read as
+    /// "new notes are broken" rather than as a container problem.
+    ///
+    /// So: hold the call, and answer from audioRecorderDidFinishRecording.
     @objc func stopRecording(_ call: CAPPluginCall) {
-        guard let rec = recorder, let url = fileURL else {
+        guard let rec = recorder, fileURL != nil else {
             call.reject("not recording", "NOT_RECORDING")
             return
         }
-        let durationMs = Int(rec.currentTime * 1000)
-        // Read the meter BEFORE stopping — afterwards there is nothing to sample.
+        // Capture these BEFORE stopping — afterwards there is nothing to sample.
+        pendingDurationMs = Int(rec.currentTime * 1000)
         rec.updateMeters()
-        let peakDb = rec.peakPower(forChannel: 0)
+        pendingPeakDb = rec.peakPower(forChannel: 0)
+        pendingStop = call
+
+        // If the delegate never fires we must not strand the JS promise, which
+        // would leave the composer stuck in its recording state with no way out.
+        let watchdog = DispatchWorkItem { [weak self] in
+            self?.finishStop(successfully: true, note: "watchdog")
+        }
+        stopWatchdog = watchdog
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: watchdog)
+
         rec.stop()
+    }
+
+    public func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
+        finishStop(successfully: flag, note: "delegate")
+    }
+
+    private func finishStop(successfully flag: Bool, note: String) {
+        // Whichever of delegate/watchdog arrives first wins; the other no-ops.
+        guard let call = pendingStop else { return }
+        pendingStop = nil
+        stopWatchdog?.cancel()
+        stopWatchdog = nil
         recorder = nil
 
+        guard let url = fileURL else {
+            cleanUp()
+            call.reject("recording file is missing", "READ_FAILED")
+            return
+        }
         defer { cleanUp() }
+
+        guard flag else {
+            call.reject("the recording did not finish cleanly", "FINALIZE_FAILED")
+            return
+        }
+
         do {
             let data = try Data(contentsOf: url)
             // DEBUG only, deliberately. Size, duration and loudness are metadata
             // about a private message: anyone with Console access could see when
             // this user records voice notes and for how long. Content-free, but
             // this app already refuses that trade elsewhere — notifications say
-            // "New activity" and the app-switcher snapshot is covered — so it
-            // must not leak here either.
+            // "New activity", the app-switcher snapshot is covered — so it must
+            // not leak here either.
             #if DEBUG
-            NSLog("[mic] recorded %d bytes, %d ms, peak %.1f dB", data.count, durationMs, peakDb)
-            #else
-            _ = peakDb
+            NSLog("[mic] finalized (%@) %d bytes, %d ms, peak %.1f dB",
+                  note, data.count, pendingDurationMs, pendingPeakDb)
             #endif
 
             // A header-only M4A is the failure this catches. When the input queue
             // fails to start, AVAudioRecorder still writes ftyp+moov and still
             // reports a duration, so `isEmpty` never fires — the note sends and
             // plays as silence, which looks like a codec bug on the far side.
-            // A real AAC recording runs several KB per second; anything under
-            // this is structurally a file with no samples in it.
             guard data.count >= 2048 else {
                 call.reject("the microphone produced no audio — the input device did not start", "NO_INPUT")
                 return
             }
-            guard !data.isEmpty else {
-                call.reject("recording was empty", "EMPTY")
-                return
-            }
-            // Base64 across the bridge: Capacitor's JSON channel cannot carry raw
-            // bytes, and the web layer decodes straight into the same Uint8Array
-            // the browser path produces.
             call.resolve([
                 "base64": data.base64EncodedString(),
                 "mimeType": Self.mimeType,
-                "durationMs": durationMs,
+                "durationMs": pendingDurationMs,
             ])
         } catch {
             call.reject("could not read the recording: \(error.localizedDescription)", "READ_FAILED")

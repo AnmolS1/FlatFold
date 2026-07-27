@@ -105,3 +105,19 @@ describe('a recording with no samples must never be sent', () => {
 		await expect(session.stop()).rejects.toThrow(/did not start|System Settings/i);
 	});
 });
+
+describe('an unfinalized recording must never be sent', () => {
+	// AVAudioRecorder.stop() is asynchronous. Reading the file on the next line
+	// yielded every audio sample but no `moov` atom — the MPEG-4 index, written
+	// at finalize. Size and metering both looked healthy (62,699 bytes, -17.3 dB
+	// peak), so nothing native suggested a problem, while every receiving device
+	// showed `--:--` and a spinner that never resolved.
+	it('surfaces a failed finalize instead of an unplayable note', async () => {
+		withPlugin({
+			startRecording: async () => ({ mimeType: 'audio/mp4;codecs=mp4a.40.2' }),
+			stopRecording: async () => { throw Object.assign(new Error('nope'), { code: 'FINALIZE_FAILED' }); },
+		});
+		const session = await recordNatively.start();
+		await expect(session.stop()).rejects.toThrow(/could not be finished|try again/i);
+	});
+});

@@ -31,8 +31,13 @@ class MainViewController: CAPBridgeViewController {
         #else
         let isDebug = false
         #endif
+        // `--no-sw`: run with the service worker provably absent, to test whether
+        // it is what stops late media loads. Injected at documentStart so the
+        // flag is set before main.tsx reads it — the SW re-registers on every
+        // launch, so unregistering at runtime cannot answer the question.
+        let noSW = ProcessInfo.processInfo.arguments.contains("--no-sw")
         let script = WKUserScript(
-            source: "window.__flatfoldIsIOSAppOnMac = \(isOnMac); window.__flatfoldDebug = \(isDebug);",
+            source: "window.__flatfoldIsIOSAppOnMac = \(isOnMac); window.__flatfoldDebug = \(isDebug); window.__flatfoldNoSW = \(noSW);",
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true
         )
@@ -89,6 +94,24 @@ class MainViewController: CAPBridgeViewController {
         // Injecting into the real page keeps the origin, the CSP, the bridge and
         // whatever else index.html establishes, so the only variable is the one
         // being tested.
+        // `--no-sw` also tears down anything already installed. Registration is
+        // suppressed by the injected flag above, but a PREVIOUS launch's worker
+        // survives in the profile and would still control this page.
+        if ProcessInfo.processInfo.arguments.contains("--no-sw") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+                let js = """
+                const regs = await navigator.serviceWorker.getRegistrations();
+                for (const r of regs) await r.unregister();
+                for (const k of await caches.keys()) await caches.delete(k);
+                return `SW regs=${regs.length} unregistered, caches cleared, ` +
+                       `controlled=${!!navigator.serviceWorker.controller}`;
+                """
+                self?.bridge?.webView?.callAsyncJavaScript(js, arguments: [:], in: nil, in: .page) { r in
+                    probe.notice("\(String(describing: r), privacy: .public)")
+                }
+            }
+        }
+
         if ProcessInfo.processInfo.arguments.contains("--audio-experiment") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in
                 self?.runAudioExperiment(probe)
@@ -138,37 +161,65 @@ class MainViewController: CAPBridgeViewController {
     /// is the ceiling the fix in `347944c` assumes exists, and its real value.
     private func runAudioExperiment(_ probe: os.Logger) {
         #if DEBUG
+        // SINGLETON ONLY, and deliberately frugal.
+        //
+        // The resource this measures is system-wide and is NOT returned when the
+        // process exits — only a reboot restores it (measured: 0/39 elements
+        // loaded before a reboot, 28/39 after, on identical code). So a fresh
+        // machine is a consumable, and the earlier 1→80 element sweep spent the
+        // whole thing and then reported "there is no ceiling" from an exhausted
+        // pool. One element, reused, is the only question worth that budget.
+        //
+        // It answers: can ONE element serve many notes by swapping `src`, and
+        // does each swap RELEASE the previous pipeline or leak it? A leak shows
+        // up as a failure partway through, at roughly the remaining headroom.
+        // THE CONTROL THAT WAS MISSING ALL ALONG.
+        //
+        // Every previous experiment used a fixture generated with `say` +
+        // `afconvert`, and NONE of them ever checked that fixture against a
+        // source known to work in this app. A source WebKit will not open
+        // stalls exactly like an exhausted pool — networkState 2, readyState 0,
+        // `error` null — so a bad fixture is indistinguishable from the bug
+        // being investigated, and would make every result look like a resource
+        // failure. That is very likely what happened.
+        //
+        // So: wait for the app's own notes to render, take the blob URL of one
+        // that PROVABLY loaded, and build a fresh element around that exact
+        // URL. Then the only variable is programmatic-vs-React creation.
         let js = """
-        const before = document.querySelectorAll('audio').length;
-        const buf = await (await fetch('/fixture.m4a')).arrayBuffer();
-        const mk = () => {
-          const a = document.createElement('audio');
-          a.preload = 'metadata'; a.playsInline = true;
-          // src BEFORE insertion, matching what React does for the app's own
-          // elements — the ordering is a variable and must not drift.
-          a.src = URL.createObjectURL(new Blob([buf.slice(0)], {type:'audio/mp4'}));
-          document.body.appendChild(a);
-          return a;
-        };
         const wait = (ms) => new Promise(r => setTimeout(r, ms));
-        const out = [];
-        const mine = [];
-        // Add in batches and report after each, so the ceiling shows up as the
-        // batch where `ready` stops climbing rather than as a single number.
-        for (const batch of [1, 4, 5, 10, 20, 40]) {
-          for (let i = 0; i < batch; i++) mine.push(mk());
-          await wait(6000);
-          out.push(`+${batch} total=${mine.length} ready=${mine.filter(a=>a.readyState>=1).length} stuck=${mine.filter(a=>a.networkState===2&&a.readyState===0).length}`);
+        // Wait for a conversation with at least one LOADED note.
+        let good = null;
+        for (let t = 0; t < 60 && !good; t++) {
+          good = [...document.querySelectorAll('audio')].find(e => e.readyState >= 1) || null;
+          if (!good) await wait(1000);
         }
-        // Give it all back, then check whether the budget returns.
-        mine.forEach(a => { URL.revokeObjectURL(a.src); a.removeAttribute('src'); a.load(); a.remove(); });
-        await wait(4000);
-        const after = [];
-        for (let i = 0; i < 5; i++) after.push(mk());
-        await wait(6000);
-        out.push(`afterTeardown ready=${after.filter(a=>a.readyState>=1).length}/5`);
-        after.forEach(a => { URL.revokeObjectURL(a.src); a.remove(); });
-        return `EXPERIMENT appAudioEls=${before} | ` + out.join(' | ');
+        if (!good) return 'CONTROL no loaded note found — open a conversation';
+
+        const els = [...document.querySelectorAll('audio')];
+        const appState = `appReady=${els.filter(e=>e.readyState>=1).length}/${els.length}`;
+
+        // DOES SWAPPING `src` REUSE THE PIPELINE, OR ASK FOR A NEW ONE?
+        //
+        // This is the question the singleton design turns on, and it can be
+        // answered without a free pool: take an element that ALREADY HAS a
+        // pipeline (readyState >= 1) and repoint it at a note that is stalled
+        // for want of one. If it loads, swapping reuses — one element can serve
+        // every note and the fix is a singleton. If it stalls, a swap requests a
+        // fresh pipeline and a singleton buys nothing.
+        const stalled = [...document.querySelectorAll('audio')]
+          .find(e => e.readyState === 0 && e.networkState === 2);
+        if (!stalled) return `SWAP no stalled note to borrow — ${appState}`;
+
+        const target = stalled.src;
+        const st = (e) => `ready=${e.readyState} net=${e.networkState} err=${e.error?.code ?? '-'}`;
+        const beforeGood = st(good);
+
+        good.src = target;
+        good.load();
+        await wait(8000);
+
+        return `SWAP ${appState} | donorBefore ${beforeGood} | donorAfterSwap ${st(good)} | stalledOriginal ${st(stalled)}`;
         """
         bridge?.webView?.callAsyncJavaScript(js, arguments: [:], in: nil, in: .page) { result in
             switch result {

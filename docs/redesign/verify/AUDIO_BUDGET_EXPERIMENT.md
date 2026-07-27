@@ -116,3 +116,73 @@ it in the app page ~12s after launch. Read with:
 
 The standalone harness page is deliberately NOT committed — it measured nothing
 and keeping it invites re-running it.
+
+---
+
+# Round 3 — after a reboot. Both models fail.
+
+Run 2026-07-27 01:13–01:50, post-reboot, with per-test process isolation and a
+wait for resource reclamation between runs.
+
+## MEASURED
+
+| what | result |
+| --- | --- |
+| 39 notes, `src` at mount, launch 1 after reboot | **28 of 39 load**; the rest stall `net=2`, `error` null |
+| same, launch 2, ~90 s after quitting launch 1 | **0 of 39** |
+| same, launch 3, ~5 min after quitting launch 2 | **28 of 39** |
+| same, launch 4 | **29 of 39** |
+| fresh element given a REAL working note's blob URL, while 29 loaded | stalls |
+| my generated fixture, same conditions | stalls (so the fixture is NOT at fault) |
+| element that HAD a pipeline, repointed at a stalled note's URL | `ready=1 net=1` → **`ready=0 net=2`** |
+| **element-on-play fix, fresh pool, only 3 elements ever created** | **0 of 3 load** |
+
+## What this settles
+
+- **The resource is reclaimed on process exit, but over MINUTES, not instantly.**
+  The 0/39 at launch 2 was a still-occupied pool, not a permanent leak, and not
+  a code change. No reboot is required — waiting is.
+- **This confound invalidated most of round 2.** Rebuild-and-relaunch cycles are
+  ~2 minutes, so nearly every measurement that night was taken against a pool
+  the previous launch still held. That is where "nothing loads at all", "there
+  is no ceiling", and "late loads never complete" all came from.
+- **The fixture is exonerated.** A fresh element carrying a URL that another
+  element had provably loaded stalls identically.
+
+## What this does NOT settle — both models are now refuted
+
+**Count model** (a ceiling of ~28–31 elements): refuted by the last row. With a
+fresh pool and only THREE elements ever created, none loaded. A ceiling of 31
+cannot explain 0 of 3.
+
+**Late-creation model** (loads started after initial render never complete):
+refuted by the fact that the app's own notes are created by React when the
+conversation is opened — long after page load — and 28 of them load fine.
+
+Each model explains the measurements the other cannot, and neither explains all
+of them. **Do not build on either until something explains both.** Two rounds
+have now been spent implementing a model that later measurement destroyed.
+
+The sharpest remaining contrast, and where the next attempt should start:
+
+> 39 elements created together, when a conversation renders → 28 load.
+> 3 elements created one at a time, on click, in the same app → 0 load.
+
+Same component, same page, same session, same blob provenance. Whatever differs
+between those two situations IS the mechanism.
+
+## Where the app is left
+
+`src` at mount (unchanged, `45d4429`): ~28–29 of 39 notes play, the tail does
+not. The element-on-play fix was tested against a fresh pool and made it worse
+(0 of 3), so it stays reverted.
+
+## Method notes
+
+- Wait **4–5 minutes** after quitting before measuring, or the previous launch's
+  resources are still held and every result is void.
+- Automate unlock rather than relaunching by hand; the gate blocks the chat and
+  therefore all media. A password-typing script (System Events, credential read
+  from `.env` at run time, never echoed) made unattended runs possible.
+- Never full-screen screenshot this machine while testing — an editor had a live
+  credential on screen. Capture the app window region only.

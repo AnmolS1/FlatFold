@@ -68,6 +68,16 @@ on run argv
       --
       -- 0.386 of the window height is the middle of the box, verified by hand
       -- against a capture at the live bounds.
+      -- Click the window BACKGROUND first, to force the web view to become
+      -- first responder. A freshly launched WKWebView here reports
+      -- canBecomeFirstResponder = false (a finding this project already paid
+      -- for elsewhere), which fits the symptom exactly: every component of the
+      -- paste works in isolation, the field click lands, the menu item is
+      -- enabled, and nothing arrives in the field. An app that has been clicked
+      -- in by a human does not show this — which is why it only failed under
+      -- the runner.
+      click at {wx + (ww * 0.5), wy + (wh * 0.75)}
+      delay 0.6
       click at {wx + (ww * 0.5), wy + (wh * 0.386)}
 
       -- CLICK THE FIELD BEFORE TYPING. It renders as focused, but keystrokes

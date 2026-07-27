@@ -178,6 +178,21 @@ class MainViewController: CAPBridgeViewController {
         }
         let condition = value("audio-experiment") ?? "control"
         let trial = value("trial") ?? "0"
+        // DEBUG-ONLY test credential, for unattended trials.
+        //
+        // The keystore gate blocks the chat, and with no chat there are no
+        // notes and no trial. Every UI-automation route to it failed under the
+        // runner while working by hand — the click lands, the Paste menu item
+        // is enabled, the clipboard is populated, and the field stays empty —
+        // which points at first responder in a freshly launched WKWebView.
+        //
+        // The tradeoff, stated rather than buried: this puts a plaintext
+        // password into the web context. It is confined to `#if DEBUG`, so it
+        // cannot exist in TestFlight or the App Store; it is a throwaway test
+        // account, never the user's; it is never logged; and it arrives only
+        // when the operator passes --unlock-pw explicitly. It is NOT a
+        // mechanism the app has otherwise, and must never be reused for one.
+        let unlockPw = value("unlock-pw") ?? ""
 
         let js = """
         // EVERY path returns a STRING.
@@ -192,6 +207,30 @@ class MainViewController: CAPBridgeViewController {
         const condition = arguments0, trial = arguments1;
         const wait = (ms) => new Promise(r => setTimeout(r, ms));
         const st = (e) => ({ ready: e.readyState, net: e.networkState, err: e.error?.code ?? null });
+
+        // Unlock from the DOM if the gate is up. React owns this input, so
+        // assigning .value is not enough — set it through the native setter and
+        // dispatch the event React listens for, or the state never updates and
+        // submitting sends an empty password.
+        let unlocked = 'n/a';
+        const pwField = document.querySelector('input[type=password]');
+        if (pwField && arguments2) {
+          const setter = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype, 'value').set;
+          setter.call(pwField, arguments2);
+          pwField.dispatchEvent(new Event('input', { bubbles: true }));
+          await wait(300);
+          (pwField.form || pwField.closest('form'))?.requestSubmit?.();
+          await wait(1000);
+          if (!document.querySelector('input[type=password]')) unlocked = 'ok';
+          else {
+            const btn = [...document.querySelectorAll('button')]
+              .find(b => /unlock/i.test(b.textContent || ''));
+            if (btn) { btn.click(); await wait(2500); }
+            unlocked = document.querySelector('input[type=password]') ? 'failed' : 'ok';
+          }
+          await wait(4000);
+        }
         const mask = (els, f) => els.map(f).join('');
 
         // OPEN THE CONVERSATION FROM THE DOM, not with a synthetic click at a
@@ -285,7 +324,7 @@ class MainViewController: CAPBridgeViewController {
           errors: mine.map(e => e.error?.code ?? null).filter(c => c !== null),
           appReadyMask: mask(app, e => e.readyState),
           borrowedRealUrl: !!good,
-          opened,
+          opened, unlocked,
           note,
         };
         mine.forEach(e => { e.removeAttribute('src'); e.remove(); });
@@ -301,7 +340,7 @@ class MainViewController: CAPBridgeViewController {
         }
         """
         bridge?.webView?.callAsyncJavaScript(
-            js, arguments: ["arguments0": condition, "arguments1": trial], in: nil, in: .page
+            js, arguments: ["arguments0": condition, "arguments1": trial, "arguments2": unlockPw], in: nil, in: .page
         ) { result in
             switch result {
             case .success(let v): probe.notice("\(String(describing: v), privacy: .public)")

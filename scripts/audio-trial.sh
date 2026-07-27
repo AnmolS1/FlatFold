@@ -44,7 +44,11 @@ pkill -f "Debug-maccatalyst/App.app" 2>/dev/null || true
 sleep 1
 
 START=$(date +%s)
-open -n "$APP" --args --audio-experiment="$CONDITION" --trial="$TRIAL"
+# DEBUG-only test credential, read from .env at run time and never echoed.
+# The UI-automation unlock is unreliable under the runner (see audio-unlock.sh);
+# the probe does it from the DOM instead, which is the one actor that works.
+PW=$(grep -m1 '^DISCOINFERNO_PROD_PASSWORD=' .env 2>/dev/null | cut -d= -f2- | sed 's/^"//; s/"$//')
+open -n "$APP" --args --audio-experiment="$CONDITION" --trial="$TRIAL" --unlock-pw="$PW"
 sleep 30
 
 # Unlock, then open the conversation — the keystore gate blocks the chat, and

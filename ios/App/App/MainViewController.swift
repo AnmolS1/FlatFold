@@ -21,8 +21,17 @@ class MainViewController: CAPBridgeViewController {
         //
         // Injected at documentStart so it is set before any app code reads it.
         let isOnMac = ProcessInfo.processInfo.isiOSAppOnMac
+        // `__flatfoldDebug` gates the web layer's os_log bridge (lib/nativeLog).
+        // Without it, instrumentation added for one debugging round would keep
+        // making a bridge round-trip per voice note in TestFlight and the App
+        // Store — the NSLog compiles out, the IPC does not.
+        #if DEBUG
+        let isDebug = true
+        #else
+        let isDebug = false
+        #endif
         let script = WKUserScript(
-            source: "window.__flatfoldIsIOSAppOnMac = \(isOnMac);",
+            source: "window.__flatfoldIsIOSAppOnMac = \(isOnMac); window.__flatfoldDebug = \(isDebug);",
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true
         )

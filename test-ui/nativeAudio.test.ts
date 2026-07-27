@@ -186,3 +186,27 @@ describe('the file-scheme read does not trust HTTP status', () => {
 		await expect(readRecordingFile('/tmp/flatfold-voice-z.m4a')).rejects.toThrow(/empty|could not read/i);
 	});
 });
+
+describe('debug instrumentation does not ship', () => {
+	// nativeLog/timed wrap the per-note decode path, so an ungated version makes
+	// a Capacitor bridge round-trip per voice note in TestFlight and the App
+	// Store. The NSLog compiles out of a Release build; the IPC does not.
+	it('is silent unless the native DEBUG build opted in', async () => {
+		const calls: string[] = [];
+		vi.stubGlobal('Capacitor', { Plugins: { FlatFoldAudio: { debugLog: async ({ message }: { message: string }) => { calls.push(message); } } } });
+		vi.stubGlobal('__flatfoldDebug', undefined);
+		const { nativeLog, timed } = await import('../src/lib/nativeLog');
+		nativeLog('should not appear');
+		await timed('step', async () => 'x');
+		expect(calls).toEqual([]);
+	});
+
+	it('reports when the DEBUG build did opt in', async () => {
+		const calls: string[] = [];
+		vi.stubGlobal('Capacitor', { Plugins: { FlatFoldAudio: { debugLog: async ({ message }: { message: string }) => { calls.push(message); } } } });
+		vi.stubGlobal('__flatfoldDebug', true);
+		const { nativeLog } = await import('../src/lib/nativeLog');
+		nativeLog('hello');
+		expect(calls).toEqual(['hello']);
+	});
+});

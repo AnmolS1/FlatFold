@@ -321,7 +321,22 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDe
             try? FileManager.default.removeItem(at: url)
             fileURL = nil
         }
-        // Deliberately NOT deactivating the audio session.
+        // Hand the session back to PLAYBACK.
+        //
+        // Leaving a playAndRecord session active forever is its own bug: the
+        // device log wedges the WebContent process right after a recording
+        // completes, and playback is dead afterwards. WebKit's media stack lives
+        // in that process and an input-configured session is the only global
+        // audio state this plugin mutates.
+        //
+        // Restoring the CATEGORY is not the same as deactivating: the earlier
+        // `setActive(false, .notifyOthersOnDeactivation)` broadcast a system-wide
+        // "everyone else resume", which is what killed WebView playback. This
+        // just puts the session back in a shape suited to playing audio, which is
+        // what the app does the rest of the time.
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
+
+        // Deliberately still NOT deactivating the audio session.
         //
         // The first version called
         // `setActive(false, options: .notifyOthersOnDeactivation)` here, on every

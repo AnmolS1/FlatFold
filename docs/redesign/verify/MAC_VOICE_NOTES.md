@@ -55,7 +55,37 @@ Each cost at least one rebuild, several cost more.
   closed fire-and-forget, exhausted them. Now one shared context, decodes capped
   at 2 with an 8s timeout.
 
-## The live hypothesis (UNVERIFIED)
+## Tested and REJECTED: the audio-session hypothesis
+
+`60b5a06` restored the session to `.playback` after each recording. It made no
+difference — `WebProcessProxy::didBecomeUnresponsive` still fires immediately
+after `discardRecording` returns. Combined with the earlier finding that
+`setActive(false, .notifyOthersOnDeactivation)` broke playback, the session has
+now been left active, deactivated, and restored-to-playback, and the wedge
+survives all three. **Stop suspecting AVAudioSession.**
+
+## What the last log actually shows
+
+The wedge is in the WEB process, and it happens after the send, with no play
+attempt anywhere in the log. That reframes the problem:
+
+> "Playback is broken" may not be a playback bug. The WebContent process is
+> unresponsive for seconds after EVERY recording, and nothing can play while it
+> is. The user-visible symptom and the actual fault may be one step apart.
+
+`didBecomeUnresponsive` means the web main thread missed its watchdog — that is
+JavaScript, not Swift. Everything native completes cleanly and quickly before it
+(`finalized`, `probe ok`, path returned, `discardRecording` acknowledged).
+
+The unexamined region is therefore what JS does after the read: `onSendMedia`
+(encrypt + upload) and then the new note mounting, which triggers a
+`decodeAudioData` of a ~4-second file on the shared AudioContext. The 8s decode
+timeout added earlier would also explain a wedge that RECOVERS rather than
+persisting — which fits, since the note does send successfully.
+
+**None of that is measured.** It is the next place to look, not a conclusion.
+
+## Superseded hypothesis (kept for the record)
 
 `WebProcessProxy::didBecomeUnresponsive` now fires immediately AFTER the
 recording is read, and playback is dead from then on. The only global audio state

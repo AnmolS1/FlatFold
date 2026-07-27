@@ -21,13 +21,29 @@ CONDITIONS=("${@:-control click3 batch10}")
 [ "${#CONDITIONS[@]}" -eq 1 ] && read -ra CONDITIONS <<< "${CONDITIONS[0]}"
 
 # Every rep gets a control, so drift is sampled at the same rate as the effects.
+# Only add one if the caller did not already ask for controls, or they get
+# double-weighted (which is how the first batch ended up 10 controls to 5 each).
 PLAN=()
+HAS_CONTROL=no
+for c in "${CONDITIONS[@]}"; do [ "$c" = "control" ] && HAS_CONTROL=yes; done
 for _ in $(seq 1 "$REPS"); do
   for c in "${CONDITIONS[@]}"; do PLAN+=("$c"); done
-  PLAN+=("control")
+  [ "$HAS_CONTROL" = "no" ] && PLAN+=("control")
 done
-# Shuffle
-mapfile -t PLAN < <(printf '%s\n' "${PLAN[@]}" | sort -R)
+
+# Shuffle with python3, NOT `sort -R`.
+#
+# `sort -R` sorts by a random hash OF THE LINE, so identical lines land
+# adjacent. On a plan that is by construction a list of repeated condition
+# names, it produces perfectly blocked output — `control x10, click3 x5,
+# batch10 x5` — which is the precise arrangement interleaving exists to
+# prevent. It looks shuffled and is not. Caught in the first live batch.
+mapfile -t PLAN < <(printf '%s\n' "${PLAN[@]}" | python3 -c '
+import random, sys
+lines = [l for l in sys.stdin.read().split("\n") if l]
+random.shuffle(lines)
+print("\n".join(lines))
+')
 
 echo "batch: ${#PLAN[@]} trials, cooldown ${COOLDOWN:-900}s"
 echo "estimated wall clock: $(( ${#PLAN[@]} * (${COOLDOWN:-900} + 120) / 3600 ))h"

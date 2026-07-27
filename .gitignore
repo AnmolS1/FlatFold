@@ -82,3 +82,6 @@ fastlane/Preview.html
 # `No such module 'Capacitor'` — the project cannot see the pods. Committing the
 # workspace is also the normal CocoaPods convention.
 ios/App/Pods/
+
+# Machine state for the audio-trial harness — not source.
+.audio-last-quit

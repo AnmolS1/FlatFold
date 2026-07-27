@@ -112,7 +112,8 @@ class MainViewController: CAPBridgeViewController {
             }
         }
 
-        if ProcessInfo.processInfo.arguments.contains("--audio-experiment") {
+        // Matches both `--audio-experiment` and `--audio-experiment=<condition>`.
+        if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--audio-experiment") }) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in
                 self?.runAudioExperiment(probe)
             }
@@ -154,77 +155,118 @@ class MainViewController: CAPBridgeViewController {
         #endif
     }
 
-    /// The element-budget experiment, run in the app's own page.
+    /// One parameterised trial of the audio-loader experiment.
     ///
-    /// Answers one question: with the app's real conversation already rendered,
-    /// how many ADDITIONAL `<audio>` elements can reach `readyState >= 1`? That
-    /// is the ceiling the fix in `347944c` assumes exists, and its real value.
+    /// The condition is a LAUNCH ARGUMENT, not source, so one build runs every
+    /// condition. Editing probe JS per condition meant each one cost a rebuild,
+    /// which made batches expensive and pushed the work toward n=1 — and n=1 is
+    /// where every wrong conclusion in this investigation came from.
+    ///
+    /// Emits a single `FLATFOLD_EXP {json}` line for the runner to harvest.
+    /// `appReady`/`appTotal` are the app's OWN notes and are the trial's
+    /// baseline: a trial without one is discarded, because a drained pool fails
+    /// totally and is indistinguishable from any hypothesis being tested.
     private func runAudioExperiment(_ probe: os.Logger) {
         #if DEBUG
-        // SINGLETON ONLY, and deliberately frugal.
-        //
-        // The resource this measures is system-wide and is NOT returned when the
-        // process exits — only a reboot restores it (measured: 0/39 elements
-        // loaded before a reboot, 28/39 after, on identical code). So a fresh
-        // machine is a consumable, and the earlier 1→80 element sweep spent the
-        // whole thing and then reported "there is no ceiling" from an exhausted
-        // pool. One element, reused, is the only question worth that budget.
-        //
-        // It answers: can ONE element serve many notes by swapping `src`, and
-        // does each swap RELEASE the previous pipeline or leak it? A leak shows
-        // up as a failure partway through, at roughly the remaining headroom.
-        // THE CONTROL THAT WAS MISSING ALL ALONG.
-        //
-        // Every previous experiment used a fixture generated with `say` +
-        // `afconvert`, and NONE of them ever checked that fixture against a
-        // source known to work in this app. A source WebKit will not open
-        // stalls exactly like an exhausted pool — networkState 2, readyState 0,
-        // `error` null — so a bad fixture is indistinguishable from the bug
-        // being investigated, and would make every result look like a resource
-        // failure. That is very likely what happened.
-        //
-        // So: wait for the app's own notes to render, take the blob URL of one
-        // that PROVABLY loaded, and build a fresh element around that exact
-        // URL. Then the only variable is programmatic-vs-React creation.
-        let js = """
-        const wait = (ms) => new Promise(r => setTimeout(r, ms));
-        // Wait for a conversation with at least one LOADED note.
-        let good = null;
-        for (let t = 0; t < 60 && !good; t++) {
-          good = [...document.querySelectorAll('audio')].find(e => e.readyState >= 1) || null;
-          if (!good) await wait(1000);
+        let args = ProcessInfo.processInfo.arguments
+        func value(_ name: String) -> String? {
+            if let a = args.first(where: { $0.hasPrefix("--\(name)=") }) {
+                return String(a.dropFirst(name.count + 3))
+            }
+            if let i = args.firstIndex(of: "--\(name)") { return args.dropFirst(i + 1).first }
+            return nil
         }
-        if (!good) return 'CONTROL no loaded note found — open a conversation';
+        let condition = value("audio-experiment") ?? "control"
+        let trial = value("trial") ?? "0"
 
-        const els = [...document.querySelectorAll('audio')];
-        const appState = `appReady=${els.filter(e=>e.readyState>=1).length}/${els.length}`;
+        let js = """
+        const condition = arguments0, trial = arguments1;
+        const wait = (ms) => new Promise(r => setTimeout(r, ms));
+        const st = (e) => ({ ready: e.readyState, net: e.networkState, err: e.error?.code ?? null });
+        const mask = (els, f) => els.map(f).join('');
 
-        // DOES SWAPPING `src` REUSE THE PIPELINE, OR ASK FOR A NEW ONE?
-        //
-        // This is the question the singleton design turns on, and it can be
-        // answered without a free pool: take an element that ALREADY HAS a
-        // pipeline (readyState >= 1) and repoint it at a note that is stalled
-        // for want of one. If it loads, swapping reuses — one element can serve
-        // every note and the fix is a singleton. If it stalls, a swap requests a
-        // fresh pipeline and a singleton buys nothing.
-        const stalled = [...document.querySelectorAll('audio')]
-          .find(e => e.readyState === 0 && e.networkState === 2);
-        if (!stalled) return `SWAP no stalled note to borrow — ${appState}`;
+        // Baseline: wait for the conversation's own notes to settle.
+        let app = [];
+        for (let t = 0; t < 45; t++) {
+          app = [...document.querySelectorAll('audio')];
+          if (app.length && app.some(e => e.readyState >= 1 || e.networkState === 3)) break;
+          await wait(1000);
+        }
+        await wait(4000);
+        app = [...document.querySelectorAll('audio')];
+        const appReady = app.filter(e => e.readyState >= 1).length;
 
-        const target = stalled.src;
-        const st = (e) => `ready=${e.readyState} net=${e.networkState} err=${e.error?.code ?? '-'}`;
-        const beforeGood = st(good);
+        // Borrow a URL that PROVABLY loads, so the source is never the variable.
+        const good = app.find(e => e.readyState >= 1);
+        const srcOf = () => good ? good.src : null;
 
-        good.src = target;
-        good.load();
-        await wait(8000);
+        const mine = [];
+        const mk = (src) => {
+          const a = document.createElement('audio');
+          a.preload = 'metadata'; a.playsInline = true;
+          if (src) a.src = src;
+          document.body.appendChild(a);
+          mine.push(a);
+          return a;
+        };
 
-        return `SWAP ${appState} | donorBefore ${beforeGood} | donorAfterSwap ${st(good)} | stalledOriginal ${st(stalled)}`;
+        let note = '';
+        if (condition === 'control') {
+          // Baseline only. Interleaved through every batch: if the control
+          // drifts, the batch is void and no condition in it can be trusted.
+        } else if (condition === 'click3') {
+          for (let i = 0; i < 3; i++) { mk(srcOf()); await wait(1500); }
+          await wait(9000);
+        } else if (condition === 'batch10') {
+          // Batch vs timing: 10 at once. If several load where click3's 3 did
+          // not, the variable is BATCH, not when the load starts.
+          for (let i = 0; i < 10; i++) mk(srcOf());
+          await wait(12000);
+        } else if (condition === 'reinsert') {
+          // Does an element keep its loader across DOM removal + re-insert?
+          if (good) {
+            const before = st(good);
+            const parent = good.parentNode, next = good.nextSibling;
+            good.remove(); await wait(2000); parent.insertBefore(good, next);
+            await wait(8000);
+            note = `before=${JSON.stringify(before)} after=${JSON.stringify(st(good))}`;
+          }
+        } else if (condition === 'delayed3') {
+          // Same as click3 but created OUTSIDE any user-activation window.
+          await wait(2000);
+          for (let i = 0; i < 3; i++) { mk(srcOf()); await wait(1500); }
+          await wait(9000);
+        } else if (condition === 'fixture3') {
+          // 3 elements from the generated fixture rather than a real note, to
+          // confirm the source stays irrelevant under the cooled protocol.
+          const buf = await (await fetch('/fixture.m4a')).arrayBuffer();
+          for (let i = 0; i < 3; i++) { mk(URL.createObjectURL(new Blob([buf.slice(0)], {type:'audio/mp4'}))); await wait(1500); }
+          await wait(9000);
+        } else {
+          note = 'unknown condition';
+        }
+
+        const out = {
+          trial: Number(trial), condition,
+          appReady, appTotal: app.length,
+          expReady: mine.filter(e => e.readyState >= 1).length,
+          expTotal: mine.length,
+          readyMask: mask(mine, e => e.readyState),
+          netMask: mask(mine, e => e.networkState),
+          errors: mine.map(e => e.error?.code ?? null).filter(c => c !== null),
+          appReadyMask: mask(app, e => e.readyState),
+          borrowedRealUrl: !!good,
+          note,
+        };
+        mine.forEach(e => { e.removeAttribute('src'); e.remove(); });
+        return 'FLATFOLD_EXP ' + JSON.stringify(out);
         """
-        bridge?.webView?.callAsyncJavaScript(js, arguments: [:], in: nil, in: .page) { result in
+        bridge?.webView?.callAsyncJavaScript(
+            js, arguments: ["arguments0": condition, "arguments1": trial], in: nil, in: .page
+        ) { result in
             switch result {
             case .success(let v): probe.notice("\(String(describing: v), privacy: .public)")
-            case .failure(let e): probe.notice("EXPERIMENT failed=\(String(describing: e), privacy: .public)")
+            case .failure(let e): probe.notice("FLATFOLD_EXP_FAIL \(String(describing: e), privacy: .public)")
             }
         }
         #endif

@@ -114,7 +114,7 @@ class MainViewController: CAPBridgeViewController {
 
         // Matches both `--audio-experiment` and `--audio-experiment=<condition>`.
         if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--audio-experiment") }) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 50) { [weak self] in
                 self?.runAudioExperiment(probe)
             }
         }
@@ -180,10 +180,39 @@ class MainViewController: CAPBridgeViewController {
         let trial = value("trial") ?? "0"
 
         let js = """
+        // EVERY path returns a STRING.
+        //
+        // `callAsyncJavaScript` rejected with WKErrorDomain Code=5, "JavaScript
+        // execution returned a result of an unsupported type", and a trial then
+        // reported NO RESULT even though the app was correctly driven. Any path
+        // that falls out without an explicit string return — a throw, or a
+        // branch that ends without one — produces exactly that, and it is
+        // indistinguishable from the probe never running.
+        try {
         const condition = arguments0, trial = arguments1;
         const wait = (ms) => new Promise(r => setTimeout(r, ms));
         const st = (e) => ({ ready: e.readyState, net: e.networkState, err: e.error?.code ?? null });
         const mask = (els, f) => els.map(f).join('');
+
+        // OPEN THE CONVERSATION FROM THE DOM, not with a synthetic click at a
+        // screen coordinate. The chat row's position depends on window size,
+        // layout (the narrow one-pane vs wide two-pane), and scroll — three
+        // things that changed under an overnight batch and left every trial
+        // measuring a chat list with no notes in it. In here we can just ask
+        // for the link.
+        let opened = '';
+        if (!document.querySelector('audio')) {
+          for (let t = 0; t < 20 && !document.querySelector('audio'); t++) {
+            // Rows are BUTTONS with click handlers, not links — there is no
+            // href to match on. Exclude the chrome by name rather than by
+            // position, which is the thing that keeps changing.
+            const skip = /search|panic|settings|new message|chats|contacts|theme/i;
+            const row = [...document.querySelectorAll('button')]
+              .find(b => (b.textContent || '').trim().length > 2 && !skip.test(b.textContent || ''));
+            if (row) { opened = (row.textContent || '').trim().slice(0, 24); row.click(); await wait(3000); }
+            else await wait(1000);
+          }
+        }
 
         // Baseline: wait for the conversation's own notes to settle.
         let app = [];
@@ -256,10 +285,20 @@ class MainViewController: CAPBridgeViewController {
           errors: mine.map(e => e.error?.code ?? null).filter(c => c !== null),
           appReadyMask: mask(app, e => e.readyState),
           borrowedRealUrl: !!good,
+          opened,
           note,
         };
         mine.forEach(e => { e.removeAttribute('src'); e.remove(); });
         return 'FLATFOLD_EXP ' + JSON.stringify(out);
+        } catch (e) {
+          return 'FLATFOLD_EXP ' + JSON.stringify({
+            trial: Number(arguments1), condition: arguments0,
+            appReady: 0, appTotal: 0, expReady: 0, expTotal: 0,
+            readyMask: '', netMask: '', errors: [], appReadyMask: '',
+            borrowedRealUrl: false,
+            note: 'probe threw: ' + (e && e.message ? e.message : String(e)),
+          });
+        }
         """
         bridge?.webView?.callAsyncJavaScript(
             js, arguments: ["arguments0": condition, "arguments1": trial], in: nil, in: .page

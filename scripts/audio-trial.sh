@@ -19,7 +19,7 @@ CONDITION="${1:?usage: audio-trial.sh <condition> <trial-n>}"
 TRIAL="${2:?usage: audio-trial.sh <condition> <trial-n>}"
 
 COOLDOWN=${COOLDOWN:-900}          # seconds; generous vs the ~5 min observed
-SETTLE=${SETTLE:-95}               # launch + unlock + open chat + condition
+SETTLE=${SETTLE:-140}               # unlock + open chat + condition, after a slow boot
 APP="ios/App/build/DDcat/Build/Products/Debug-maccatalyst/App.app"
 STAMP=".audio-last-quit"           # gitignored: machine state, not source
 OUT="docs/redesign/verify/audio-trials.jsonl"
@@ -45,7 +45,7 @@ sleep 1
 
 START=$(date +%s)
 open -n "$APP" --args --audio-experiment="$CONDITION" --trial="$TRIAL"
-sleep 14
+sleep 30
 
 # Unlock, then open the conversation — the keystore gate blocks the chat, and
 # with no chat there are no notes, no baseline, and the trial is void.

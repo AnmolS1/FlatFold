@@ -49,9 +49,15 @@ sleep 14
 
 # Unlock, then open the conversation — the keystore gate blocks the chat, and
 # with no chat there are no notes, no baseline, and the trial is void.
-scripts/audio-unlock.sh || echo "unlock: failed (may already be unlocked)" >&2
-sleep 6
-osascript -e 'tell application "System Events" to click at {361, 318}' >/dev/null 2>&1 || true
+# Unlock AND open the conversation, both through the accessibility tree. A
+# failure here aborts the trial rather than measuring a locked app: a batch that
+# silently ran against the unlock gate produced 14 discarded trials in a row.
+if ! scripts/audio-unlock.sh; then
+  echo "trial $TRIAL/$CONDITION: unlock failed — aborting trial" >&2
+  osascript -e 'quit app "App"' >/dev/null 2>&1 || true
+  date +%s > "$STAMP"
+  exit 3
+fi
 
 sleep "$SETTLE"
 

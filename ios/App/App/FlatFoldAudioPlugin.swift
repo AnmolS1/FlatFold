@@ -4,13 +4,26 @@ import AVFoundation
 
 // Native voice-note recording, for the Mac only.
 //
-// WHY this exists at all: on "Designed for iPad" running on a Mac, the WebView
-// does not expose `navigator.mediaDevices` — measured, not assumed. The web
-// layer reported `secure: yes` with `mediaDevices: false`, so it is neither a
-// permission problem nor a secure-context problem, and nothing in JS can reach
-// the microphone. The Mac's microphone hardware is fine; only the WebView's
-// route to it is missing. So we record natively and hand the bytes to the web
-// layer, which then follows exactly the same send path as every other platform.
+// WHY this exists at all: on a Mac, the WebView does not expose
+// `navigator.mediaDevices` — measured, not assumed, and on BOTH Mac shells:
+//
+//   Designed for iPad  `secure: yes`, `mediaDevices: false`
+//   Mac Catalyst       `{"mediaDevices":"undefined","secure":true,
+//                        "origin":"capacitor://localhost"}`  (2026-07-26)
+//
+// So it is neither a permission problem nor a secure-context problem, and
+// nothing in JS can reach the microphone. The Mac's microphone hardware is fine;
+// only the WebView's route to it is missing. So we record natively and hand the
+// bytes to the web layer, which then follows exactly the same send path as every
+// other platform.
+//
+// Migrating to Mac Catalyst was expected to make this file deletable. It does
+// not: Catalyst is a real Mac app, with the microphone entitlement present in
+// the signed binary, and `mediaDevices` is still absent. One untested lead
+// remains — the origin above is the custom scheme `capacitor://localhost`, and
+// WebKit may gate capture on http/https. That is NOT a free experiment: the
+// keystore is origin-bound, so changing the scheme orphans every existing
+// install's encrypted local data.
 //
 // The output format is deliberately pinned to AAC-in-MP4 (`mp4a.40.2`). That is
 // the same format `src/lib/audioFormat.ts` makes the recorder pick in the
@@ -43,12 +56,33 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDe
     private var pendingPeakDb: Float = 0
     private var stopWatchdog: DispatchWorkItem?
 
+    /// True on BOTH Mac shells, because both lack `navigator.mediaDevices`.
+    ///
+    /// This used to read `isiOSAppOnMac` alone, and that was a real bug: those
+    /// two flags are not synonyms. `isiOSAppOnMac` exists precisely to separate
+    /// the two Mac shells and is **false** under Mac Catalyst — measured
+    /// 2026-07-26, `isiOSAppOnMac=false isMacCatalystApp=true`. So on Catalyst
+    /// this plugin declared itself unsupported, the web layer skipped it
+    /// (MessageInput.tsx), fell through to `getUserMedia`, and reported "this
+    /// build has no navigator.mediaDevices". The recorder was never defeated
+    /// there — it was never asked.
+    ///
+    /// The `||` is deliberate rather than redundant. `isMacCatalystApp` is
+    /// documented to cover the passthrough case too, which would make the second
+    /// term unnecessary — but only the Catalyst leg has actually been measured
+    /// here, and the passthrough build is the one that ships today. The OR is
+    /// correct under either reading; collapsing it rests on documentation alone.
+    private static var webViewLacksMediaDevices: Bool {
+        let info = ProcessInfo.processInfo
+        return info.isMacCatalystApp || info.isiOSAppOnMac
+    }
+
     /// Only offered where the WebView route is missing. Everywhere else
     /// `getUserMedia` works and is the better path — it needs no native surface
     /// and no extra permission plumbing.
     @objc func isSupported(_ call: CAPPluginCall) {
         call.resolve([
-            "supported": ProcessInfo.processInfo.isiOSAppOnMac,
+            "supported": Self.webViewLacksMediaDevices,
             "mimeType": Self.mimeType,
         ])
     }

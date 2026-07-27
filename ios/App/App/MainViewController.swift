@@ -1,6 +1,7 @@
 import UIKit
 import Capacitor
 import WebKit
+import os
 
 // Capacitor 8 instantiates plugins from the generated `packageClassList`, which
 // `cap sync` builds from installed plugin PACKAGES only. Our biometric plugin is
@@ -40,6 +41,61 @@ class MainViewController: CAPBridgeViewController {
         if isOnMac { installMacInputBarHide() }
 
         hardenWebInspector()
+        probeMacCapabilities()
+    }
+
+    // MARK: - Capability probe (DEBUG only)
+
+    /// Report the two Mac flags and the WebView's actual media surface.
+    ///
+    /// These three facts have to be read TOGETHER or they mislead. The absence of
+    /// `navigator.mediaDevices` was previously recorded as "Catalyst buys
+    /// nothing", but it was measured on a build where the native recorder was
+    /// gated on `isiOSAppOnMac` — false on Catalyst — so the plugin was inert and
+    /// the web layer fell through to `getUserMedia` regardless of what the
+    /// WebView could do. Whether Catalyst exposes the API is a SEPARATE question
+    /// from whether the app used the native path, and only probing both in one
+    /// launch tells them apart.
+    private func probeMacCapabilities() {
+        #if DEBUG
+        // `os.Logger`, not NSLog: NSLog from this target produced NOTHING in the
+        // unified log (the JS eval was visibly running in WebKit's own entries at
+        // the same moment, so the code ran and only the logging was lost).
+        // Every interpolation is `.public` — Logger redacts them to `<private>`
+        // by default, which would have looked exactly like a failed probe.
+        let probe = os.Logger(subsystem: "dev.flatfold", category: "probe")
+        let info = ProcessInfo.processInfo
+        probe.notice("""
+        flags isiOSAppOnMac=\(info.isiOSAppOnMac, privacy: .public) \
+        isMacCatalystApp=\(info.isMacCatalystApp, privacy: .public) \
+        home=\(NSHomeDirectory(), privacy: .public)
+        """)
+        // After load: the bridge's webView has no document at capacitorDidLoad.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+            // `supported` is the one that matters. It is what MessageInput.tsx
+            // branches on, so it — not the presence of the plugin object —
+            // decides whether the microphone works at all on this platform.
+            // `callAsyncJavaScript`, not `evaluateJavaScript`: the latter cannot
+            // await, so an async IIFE would come back as an unserialisable
+            // Promise rather than the answer.
+            let js = """
+            return JSON.stringify({
+              mediaDevices: typeof navigator.mediaDevices,
+              getUserMedia: typeof navigator.mediaDevices?.getUserMedia,
+              secure: window.isSecureContext,
+              origin: location.origin,
+              plugin: typeof window.Capacitor?.Plugins?.FlatFoldAudio,
+              supported: await window.Capacitor?.Plugins?.FlatFoldAudio
+                ?.isSupported().then(r => r.supported).catch(e => 'threw: ' + e)
+            })
+            """
+            self?.bridge?.webView?.callAsyncJavaScript(
+                js, arguments: [:], in: nil, in: .page
+            ) { result in
+                probe.notice("web=\(String(describing: result), privacy: .public)")
+            }
+        }
+        #endif
     }
 
 

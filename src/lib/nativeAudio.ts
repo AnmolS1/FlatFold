@@ -1,12 +1,12 @@
 // Voice-note recording through the native plugin, for the one platform where
 // the WebView cannot do it.
 //
-// On "Designed for iPad" running on a Mac, `navigator.mediaDevices` is simply
-// absent. That was measured rather than assumed: the web layer reported
-// `secure: yes` with `mediaDevices: false`, so it is neither a permission
-// problem nor a secure-context problem, and no amount of JS reaches the
-// microphone. The Mac's microphone works; only the WebView's route to it is
-// missing. So on that platform we record in Swift (ios/App/App/
+// On a Mac — BOTH "Designed for iPad" and Mac Catalyst — `navigator.mediaDevices`
+// is simply absent. That was measured rather than assumed on each: the web layer
+// reported `secure: true` with `mediaDevices: undefined`, so it is neither a
+// permission problem nor a secure-context problem, and no amount of JS reaches
+// the microphone. The Mac's microphone works; only the WebView's route to it is
+// missing. So on those platforms we record in Swift (ios/App/App/
 // FlatFoldAudioPlugin.swift) and hand the bytes back here.
 //
 // Everywhere else — iPhone, iPad, every browser — `getUserMedia` works and stays
@@ -87,10 +87,13 @@ export function base64ToBytes(b64: string): Uint8Array {
 /**
  * Whether to use the native recorder here.
  *
- * The PLUGIN decides, not the web layer — it answers from
- * `ProcessInfo.isiOSAppOnMac`, which is the authoritative signal. Any failure
- * means "no", so a missing or broken plugin degrades to the browser path rather
- * than breaking recording everywhere.
+ * The PLUGIN decides, not the web layer — only native code can tell the two Mac
+ * shells apart, and the answer must cover both. It reads `isMacCatalystApp ||
+ * isiOSAppOnMac`; reading `isiOSAppOnMac` alone was a bug, because that flag is
+ * false under Mac Catalyst, so the plugin reported "unsupported" on the very
+ * platform it exists for and recording fell through to the absent
+ * `getUserMedia`. Any failure means "no", so a missing or broken plugin degrades
+ * to the browser path rather than breaking recording everywhere.
  */
 export async function nativeRecordingSupported(): Promise<boolean> {
 	try {

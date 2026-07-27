@@ -7,6 +7,42 @@ this date; Tauri moves fast, so re-check before committing.
 
 This is a decision paper, not a recommendation to act today.
 
+## RESULT 2026-07-26: Catalyst works, but does NOT restore navigator.mediaDevices
+
+Measured on a signed Mac Catalyst build, on device:
+
+| | result |
+| --- | --- |
+| Builds and launches as a real Mac app | YES (`platform MACCATALYST`) |
+| Sandbox entitlements apply | YES — verified in the signed binary, and messages send, which is `network.client` working |
+| `navigator.mediaDevices` | **STILL ABSENT** (`secure: yes`, no mediaDevices) |
+
+`com.apple.security.device.audio-input` is present in the signed entitlements and
+does not change it. So the microphone gap is a WKWebView limitation that survives
+the move to a real Mac app — it was never only about the iPad passthrough.
+
+**This removes the strongest argument for the migration.** The case for Catalyst
+was "it deletes FlatFoldAudioPlugin and the ghost-row hack" rather than "it fixes
+bugs". Half of that is now false: the native audio plugin has to stay, because
+there is still no web route to the microphone on macOS.
+
+What Catalyst DOES still buy, and it is not nothing:
+
+- a real Mac app rather than an iPad app in a compatibility runtime
+- real Mac text input, which is what the ghost-row hack works around
+- it can be LAUNCHED and UI-TESTED from the command line, which
+  "Designed for iPad" cannot — that alone would have removed most of the
+  round-trips this debugging round cost
+- a proper sandbox with explicit, auditable entitlements
+
+What it costs: a CocoaPods migration to maintain, `@capacitor/filesystem`
+excluded on Mac (its `IONFilesystemLib` is a binary-only pod with no Catalyst
+slice), and a second build configuration that must be re-installed when switching
+targets.
+
+**The decision is now genuinely balanced rather than obvious**, and it should be
+made on those terms — not on the microphone, which Catalyst does not fix.
+
 ## VALIDATED 2026-07-26: Catalyst is NOT blocked by Capacitor's source
 
 The earlier spike concluded "blocked". That was true of the SwiftPM

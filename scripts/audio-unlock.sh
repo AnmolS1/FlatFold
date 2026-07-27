@@ -45,40 +45,38 @@ on run argv
       set {wx, wy} to position of window 1
       set {ww, wh} to size of window 1
 
-      -- FIND THE FIELD IN THE ACCESSIBILITY TREE, then click where it actually
-      -- is. Fractions of the window were the previous approach and they are the
-      -- wrong abstraction: 0.386 of the height landed between the password box
-      -- and the Unlock button, so a polling loop clicked *Unlock* twenty times
-      -- against an empty field and reported "field never appeared".
+      -- Click the password box by window fraction, then paste.
       --
-      -- Polling also handles boot time: the app comes up through Argon2 and
-      -- WASM, so at any fixed delay after launch it may still be loading.
-      set fld to missing value
-      repeat 20 times
-        try
-          set fld to first text field of entire contents of window 1
-          exit repeat
-        end try
-        delay 2
-      end repeat
-      if fld is missing value then error "password field never appeared"
-
-      set {fx, fy} to position of fld
-      set {fw, fh} to size of fld
-      click at {fx + (fw / 2), fy + (fh / 2)}
+      -- Two smarter-looking approaches were tried and are worse:
+      --   * an explicit AX path (`text field 1 of group 2 of UI element 1 of
+      --     scroll area 1 of ...`) — the tree shape DIFFERS between the unlock
+      --     gate and the chat list, so no constant path resolves on both.
+      --   * `first text field of entire contents of window 1` — the WKWebView
+      --     tree is deep enough that the traversal times out.
+      --
+      -- And the polling loop that gated on `click at` returning something
+      -- containing "text field" was rejecting GOOD clicks: `click at` commonly
+      -- reports the enclosing group, not the field. That is why it looped
+      -- twenty times and then claimed the field never appeared — the clicks
+      -- were landing the whole time.
+      --
+      -- 0.386 of the window height is the middle of the box, verified by hand
+      -- against a capture at the live bounds.
+      click at {wx + (ww * 0.5), wy + (wh * 0.386)}
 
       -- CLICK THE FIELD BEFORE TYPING. It renders as focused, but keystrokes
       -- sent without a click go nowhere — that alone cost an overnight batch.
       -- Positions are FRACTIONS of the live window, so they survive the window
       -- being moved, resized, or switching between the wide two-pane layout and
       -- the narrow one-pane layout with a bottom tab bar.
-      -- PASTE, don't keystroke. `keystroke` landed the click on the field and
-      -- then typed nothing — the field stayed visibly empty — and per-character
-      -- synthesis is fragile with punctuation besides. One paste event is also
-      -- what a password manager does, so the web layer handles it normally.
+      -- PASTE VIA THE EDIT MENU. Two things do not work here and both look like
+      -- they should: `keystroke <password>` types nothing into this field, and
+      -- `keystroke "v" using command down` does not paste into it either. Both
+      -- leave the box visibly empty with no error. Catalyst apps carry a real
+      -- Edit menu, and driving Paste from it lands every time.
       delay 0.8
-      keystroke "v" using command down
-      delay 0.5
+      click menu item "Paste" of menu 1 of menu bar item "Edit" of menu bar 1
+      delay 0.6
       key code 36 -- Return
       delay 8
 

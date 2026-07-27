@@ -89,3 +89,19 @@ describe('recordNatively', () => {
 		await expect(session.stop()).rejects.toThrow(/nothing|empty/i);
 	});
 });
+
+describe('a recording with no samples must never be sent', () => {
+	// The Mac failure that looked like success: CoreAudio logged "client stopping
+	// after failed start", `record()` still returned true, and AVAudioRecorder
+	// still wrote a valid M4A header with a duration but no audio. The note sent
+	// fine and played as silence — indistinguishable, on the receiving end, from
+	// the codec bug this project already chased for three rounds.
+	it('surfaces a failed input device instead of a silent note', async () => {
+		withPlugin({
+			startRecording: async () => ({ mimeType: 'audio/mp4;codecs=mp4a.40.2' }),
+			stopRecording: async () => { throw Object.assign(new Error('no input'), { code: 'NO_INPUT' }); },
+		});
+		const session = await recordNatively.start();
+		await expect(session.stop()).rejects.toThrow(/did not start|System Settings/i);
+	});
+});

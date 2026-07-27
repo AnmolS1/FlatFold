@@ -67,6 +67,10 @@ function describe(err: unknown, fallback: string): Error {
 			return new Error('Microphone access was denied. Allow it in System Settings → Privacy & Security → Microphone, then try again.');
 		case 'EMPTY':
 			return new Error('That recording captured nothing — check the input device is not muted.');
+		case 'NO_INPUT':
+			// The audio queue failed to start, so the file has a header and no
+			// samples. Better to say so than to send a note that plays as silence.
+			return new Error('The microphone did not start. Check the input device in System Settings → Sound, then try again.');
 		case 'NOT_RECORDING':
 			return new Error('Recording had already stopped.');
 		default:

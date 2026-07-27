@@ -90,8 +90,20 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         // should not allow it, but a double-tap must not strand a file handle.
         cleanUp()
 
+        // Session configuration is the whole ballgame here, and the first version
+        // got it wrong twice.
+        //
+        // `.mixWithOthers` because this app PLAYS audio too — the WebView owns
+        // every voice note that is not being recorded. Without it, activating a
+        // playAndRecord session takes exclusive control and the notes already on
+        // screen stop being playable.
+        //
+        // `.defaultToSpeaker` is gone: it routes to the speaker instead of the
+        // receiver, which is an iPhone concept. On a Mac it contributed to the
+        // device reconfiguration that made the input queue fail to start
+        // ("Abandoning I/O cycle because reconfig pending").
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
+        try session.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers, .allowBluetooth])
         try session.setActive(true)
 
         let url = FileManager.default.temporaryDirectory
@@ -107,6 +119,19 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         ]
 
         let rec = try AVAudioRecorder(url: url, settings: settings)
+        // Metering is how we find out whether the microphone actually delivered
+        // anything. `record()` returning true is NOT that guarantee: the first
+        // build on Mac returned true while CoreAudio logged "client stopping
+        // after failed start", and produced a valid M4A header with no samples —
+        // a note that sends fine and plays as nothing.
+        rec.isMeteringEnabled = true
+        // Let the hardware settle before starting. The failed start came with
+        // "did not see 1 I/O cycles; suspension(s) blocking starting", which is
+        // the input device still reconfiguring when record() arrived.
+        guard rec.prepareToRecord() else {
+            throw NSError(domain: "FlatFoldAudio", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "recorder could not be prepared"])
+        }
         guard rec.record() else { throw NSError(domain: "FlatFoldAudio", code: 1,
                                                 userInfo: [NSLocalizedDescriptionKey: "recorder refused to start"]) }
         recorder = rec
@@ -119,12 +144,27 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
         let durationMs = Int(rec.currentTime * 1000)
+        // Read the meter BEFORE stopping — afterwards there is nothing to sample.
+        rec.updateMeters()
+        let peakDb = rec.peakPower(forChannel: 0)
         rec.stop()
         recorder = nil
 
         defer { cleanUp() }
         do {
             let data = try Data(contentsOf: url)
+            NSLog("[mic] recorded %d bytes, %d ms, peak %.1f dB", data.count, durationMs, peakDb)
+
+            // A header-only M4A is the failure this catches. When the input queue
+            // fails to start, AVAudioRecorder still writes ftyp+moov and still
+            // reports a duration, so `isEmpty` never fires — the note sends and
+            // plays as silence, which looks like a codec bug on the far side.
+            // A real AAC recording runs several KB per second; anything under
+            // this is structurally a file with no samples in it.
+            guard data.count >= 2048 else {
+                call.reject("the microphone produced no audio — the input device did not start", "NO_INPUT")
+                return
+            }
             guard !data.isEmpty else {
                 call.reject("recording was empty", "EMPTY")
                 return
@@ -152,6 +192,17 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin {
             try? FileManager.default.removeItem(at: url)
             fileURL = nil
         }
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        // Deliberately NOT deactivating the audio session.
+        //
+        // The first version called
+        // `setActive(false, options: .notifyOthersOnDeactivation)` here, on every
+        // record cycle. That is a system-wide "I am finished, everyone else
+        // resume" signal, and this app is one of the others — the WebView owns
+        // playback of every voice note on screen. Tearing the session down after
+        // each recording is why notes stopped playing, including ones recorded
+        // seconds earlier.
+        //
+        // Leaving a mixWithOthers playAndRecord session active costs nothing and
+        // keeps WebView playback working.
     }
 }

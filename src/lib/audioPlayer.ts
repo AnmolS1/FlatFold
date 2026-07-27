@@ -17,6 +17,8 @@ import { nativeLog } from './nativeLog';
 
 let el: HTMLAudioElement | null = null;
 let currentUrl: string | null = null;
+// The note whose play() is currently in flight, if any. See toggleSharedPlayback.
+let starting: string | null = null;
 const listeners = new Set<() => void>();
 
 function notify() {
@@ -118,23 +120,46 @@ export function subscribeSharedPlayer(fn: () => void): () => void {
 export async function toggleSharedPlayback(url: string): Promise<void> {
 	const a = ensure();
 	if (!a) return;
+
 	if (currentUrl === url) {
-		if (a.paused) await a.play();
-		else a.pause();
+		// `a.paused` is TRUE while a play() is still pending, so testing it alone
+		// made a second tap call play() AGAIN instead of pausing — tapping pause
+		// during the start-up window did nothing. `starting` is what distinguishes
+		// "not playing" from "about to play".
+		if (starting === url || !a.paused) {
+			a.pause();
+			starting = null;
+		} else {
+			starting = url;
+			try {
+				await a.play();
+			} finally {
+				starting = null;
+			}
+		}
 		notify();
 		return;
 	}
 	currentUrl = url;
 	a.src = url;
 	notify();
+	starting = url;
 	try {
 		await a.play();
 	} catch (err) {
-		// A rejected play() was silently swallowed by the caller. That is the one
-		// signal that says "the browser refused to play this", and losing it is
-		// why playback failures produced no message at all.
-		nativeLog(`play() rejected: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`);
+		// AbortError is EXPECTED and benign: pausing (or loading another note)
+		// aborts a play() that has not started yet, which is exactly what a user
+		// tapping play-then-pause produces. Reporting it as a failure sent this
+		// investigation after a bug that was not there.
+		const name = err instanceof Error ? err.name : '';
+		if (name === 'AbortError') return;
+		// Anything else is the browser genuinely refusing, and that signal was
+		// being swallowed by the caller's `void` — which is why playback failures
+		// produced no message at all.
+		nativeLog(`play() rejected: ${err instanceof Error ? `${name}: ${err.message}` : String(err)}`);
 		throw err;
+	} finally {
+		starting = null;
 	}
 }
 
@@ -145,5 +170,6 @@ export function releaseSharedPlayback(url: string): void {
 	el.removeAttribute('src');
 	el.load();
 	currentUrl = null;
+	starting = null;
 	notify();
 }

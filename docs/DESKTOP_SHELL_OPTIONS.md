@@ -7,6 +7,45 @@ this date; Tauri moves fast, so re-check before committing.
 
 This is a decision paper, not a recommendation to act today.
 
+## VALIDATED 2026-07-26: Catalyst is NOT blocked by Capacitor's source
+
+The earlier spike concluded "blocked". That was true of the SwiftPM
+distribution and only of that: `Capacitor.xcframework` ships `ios-arm64` and
+`ios-arm64_x86_64-simulator` and no `maccatalyst` slice, so it cannot link.
+The conclusion was then generalised to "Catalyst is blocked", which is wrong.
+
+Measured, by compiling the actual sources for `arm64-apple-ios15.0-macabi`
+against the macOS SDK with `System/iOSSupport` on the framework path:
+
+| target | Catalyst errors | iOS errors (control) |
+| --- | --- | --- |
+| Capacitor core (44 files) | 2 | 2 |
+| @capacitor/app | 2 | 2 |
+| @capacitor/haptics | 2 | 2 |
+| @capacitor/share | 2 | 2 |
+| @capacitor/filesystem | 0 | 0 |
+| @capacitor/push-notifications | 2 | 2 |
+| @capacitor/local-notifications | 2 | 2 |
+
+**The delta is zero everywhere.** Every error is identical on both targets and
+is an artifact of typechecking in isolation (an unbuilt `Capacitor` /
+`CAPBridgedPlugin` import), not a Catalyst incompatibility. A scan for
+Catalyst-unavailable APIs across Capacitor and CapacitorCordova found none.
+
+The podspecs are SOURCE-based (`s.source_files = 'ios/Sources/**/*.swift'`), so
+CocoaPods compiles rather than linking the prebuilt xcframework, and CocoaPods
+1.16.2 is installed. Option B's premise holds.
+
+**Still unproven**: that the app assembles, links, signs and launches as a
+Catalyst app. This validates "the code compiles for Catalyst", which is the
+question that made B look impossible — not the whole migration.
+
+Why it is worth doing, beyond fixing bugs: Catalyst gives the real macOS
+WKWebView, which exposes `navigator.mediaDevices`. That DELETES
+`FlatFoldAudioPlugin` entirely (~280 lines of Swift plus its bridge transport,
+finalize handling and audio-session juggling), and deletes the ghost-row hack in
+MainViewController. The argument is code removal, not bug fixing.
+
 ## The finding that changes the shape of the question
 
 **Tauri v2 does mobile.** It went stable on 2024-10-02 with iOS and Android

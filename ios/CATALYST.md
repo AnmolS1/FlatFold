@@ -5,6 +5,18 @@
     open ios/App/App.xcworkspace     # correct
     open ios/App/App.xcodeproj       # WRONG — pods are invisible
 
+If Xcode already has the PROJECT open, opening the workspace is not enough —
+quit Xcode first. Xcode keeps building whatever window is open, and the two have
+separate DerivedData directories, so the stale one keeps reproducing the same
+errors after the workspace is fixed:
+
+    osascript -e 'quit app "Xcode"'
+    rm -rf ~/Library/Developer/Xcode/DerivedData/App-*
+    open ios/App/App.xcworkspace
+
+The tell is the DerivedData hash in the error text. If it differs from the one a
+workspace build reports, the project is being built.
+
 This is the single most likely thing to go wrong. Building the `.xcodeproj`
 fails with `Unable to resolve module dependency: 'Capacitor'` and a list of
 `Search path ... not found` warnings naming every pod, because the project alone

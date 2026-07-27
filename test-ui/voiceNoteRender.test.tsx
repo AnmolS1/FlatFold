@@ -66,6 +66,30 @@ describe('VoiceNote renders', () => {
 		expect(container.querySelectorAll('audio').length).toBeLessThanOrEqual(LIVE_NOTE_LIMIT);
 	});
 
+	// Retiring an element to reclaim budget removes it from the DOM, so no
+	// `pause` event ever fires. Without an explicit reset the component stays in
+	// its playing state forever: the control keeps offering "Pause" for a note
+	// that is not playing and no longer has an element to pause.
+	it('resets to a playable state when its element is retired for budget', () => {
+		render(
+			<>
+				{Array.from({ length: LIVE_NOTE_LIMIT + 1 }, (_, i) => (
+					<VoiceNote key={i} url={`blob:${i}`} durationMs={1000} own={false} />
+				))}
+			</>
+		);
+		const buttons = () => screen.getAllByLabelText(/(play|pause) voice note/i);
+		// Play the first note and let it report that it started.
+		fireEvent.click(buttons()[0]);
+		fireEvent.play(document.querySelector('audio')!);
+		expect(screen.getByLabelText(/pause voice note/i)).toBeTruthy();
+
+		// Fill the budget so the first note is the one retired.
+		for (let i = 1; i <= LIVE_NOTE_LIMIT; i++) fireEvent.click(buttons()[i]);
+
+		expect(screen.queryByLabelText(/pause voice note/i)).toBeNull();
+	});
+
 	it('renders exactly ONE media element per played note', () => {
 		const { container } = render(<VoiceNote url="blob:one" durationMs={4200} own={false} />);
 		fireEvent.click(screen.getByLabelText(/play voice note/i));

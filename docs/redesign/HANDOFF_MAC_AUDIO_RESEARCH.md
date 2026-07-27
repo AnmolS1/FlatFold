@@ -73,7 +73,10 @@ Each cost at least one build/reproduce cycle.
 ## 4. The fix that is in, and what would falsify it
 
 `347944c` — **create the `<audio>` element on the play gesture, not at mount**,
-capped at `LIVE_NOTE_LIMIT = 6` live elements with LRU teardown.
+capped at `LIVE_NOTE_LIMIT = 6` live elements with LRU teardown. `bccc810`
+follows it with a state-reset fix: retiring an element removes it from the DOM,
+so no `pause` event fires and the control would otherwise keep offering "Pause"
+for a note with nothing left to pause.
 
 Reasoning: the budget appears to be on **elements**, not on loaded resources.
 That is inferred from one strong negative result — an earlier attempt
@@ -81,16 +84,30 @@ That is inferred from one strong negative result — an earlier attempt
 playback broke for **every** note, not just new ones. If the budget were on
 loaded sources, that should have worked.
 
-**UNVERIFIED and the most important thing to check:** whether the ceiling is
-really on element count, and what the real number is. `31` is one observation
-from one conversation on one machine. It could be a coincidence of that
-conversation's size.
+**UNVERIFIED, AND THE MOST IMPORTANT THING TO CHECK:** whether the ceiling is
+really on element count, and what the real number is. `31` is one observation,
+from one conversation, on one machine. It could be an artefact of that
+conversation's size rather than a constant.
+
+**Status at handoff: the fix builds, all 718 tests pass, and it is NOT yet
+confirmed on device.** Treat "voice notes work on Mac" as unproven. If it does
+work, that is consistent with the element-count theory but does not prove it —
+the cap is low enough to succeed for more than one reason.
 
 Falsifying evidence would be: with `LIVE_NOTE_LIMIT = 6`, a note still hangs.
+That would mean the ceiling is not element count and the whole §4 theory is
+wrong; go back to §2's census and re-derive.
 
-Also note `594e7e5`'s commit message asserts "a late load never completes." That
-is now believed WRONG — the late loads in that experiment failed because 37
-elements already existed. Read that commit as evidence, not as conclusion.
+Two corrections to the record, so earlier commits are not read as conclusions:
+
+- `594e7e5`'s message asserts "a late load never completes." Now believed
+  **WRONG** — those loads failed because 37 elements already existed, not
+  because they were late. Read it as evidence, not conclusion.
+- `dd31836`'s message asserts the budget is on loaded sources and that a cap of
+  3 loaded elements would fix it. Also wrong, for the same reason.
+
+Both are left in history deliberately, because the measurements inside them are
+sound even where the conclusions are not.
 
 ## 5. Questions worth actual research
 
@@ -179,10 +196,19 @@ What is already instrumented (all DEBUG-only):
 - **`durationMs` rides inside the `MediaRef`**, so it is present on RECEIVED
   notes, not only locally recorded ones. This is why a note can show its duration
   with no media element at all.
-- **UNVERIFIED:** `pendingDurationMs` comes from `rec.currentTime` sampled before
-  `stop()`, and overstates — 5017 ms reported for 174016 frames @ 44100
-  (3946 ms). Cosmetic. The authoritative number is `probe.length /
-  probe.fileFormat.sampleRate`, already available at that point.
+- **MEASURED, unfixed:** `pendingDurationMs` comes from `rec.currentTime` sampled
+  before `stop()`, and overstates — 5017 ms reported for 174016 frames @ 44100
+  (3946 ms), a 27% error that is baked into the `MediaRef` and shown on every
+  receiving device. Cosmetic but wrong. The authoritative number is
+  `probe.length / probe.fileFormat.sampleRate`, already computed a few lines
+  away in `finishStop`. Deliberately not fixed in the same round as a playback
+  bug — it changes what the recorder writes.
+- **Resolved, cause unknown:** the play button briefly required a DOUBLE click on
+  Catalyst, then stopped doing so without a related change. If it returns, it is
+  a Catalyst focus/hit-testing issue and not part of this audio work.
+- The `<audio>` element is `className="hidden"`. Worth confirming that a hidden
+  media element is not itself deprioritised by WebKit's loader — **untested**,
+  and it would be an embarrassing thing to have missed.
 
 ## 8. Hard constraints
 
@@ -201,10 +227,32 @@ What is already instrumented (all DEBUG-only):
 
 ## 9. Suggested order
 
-1. Confirm or refute the element-count ceiling, and find its real value. That
-   decides whether `347944c` is a fix or a coincidence.
-2. Research WebKit's actual limit and whether `capacitor://` or `blob:` changes
+1. **Reproduce first.** Build, launch, open a conversation with 30+ voice notes,
+   and read the census (§6). Confirm the fix works on device before theorising
+   about why — it is unverified.
+2. Confirm or refute the element-count ceiling and find its real value: mount N
+   elements, sweep N, find where `readyState` stops reaching 1. That single
+   experiment decides whether `347944c` is a fix or a coincidence, and it is
+   worth doing as a minimal standalone page rather than inside the app.
+3. Research WebKit's actual limit and whether `capacitor://` or `blob:` changes
    it (§5.1–5.3).
-3. If the ceiling is real and unavoidable, evaluate serving notes via
-   `convertFileSrc` instead of `blob:` — it sidesteps rather than rations.
-4. Only then: the Web Audio decode failure, and the duration overstatement.
+4. If the ceiling is real and unavoidable, evaluate serving notes via
+   `convertFileSrc` instead of `blob:` — it sidesteps rather than rations, and
+   the recorder already uses exactly that transport for reading the temp file.
+5. Only then: the Web Audio decode failure, and the duration overstatement.
+
+## 10. A process note, because it cost more than any single bug
+
+Three theories were held confidently and killed by measurement: the container,
+the revoked URL, the loaded-source pool. Each survived only until it was
+actually instrumented, and two of them were written into commit messages as
+fact before being checked.
+
+The thing that broke the deadlock was **tagging every log line with which note
+it came from**. Before that, `error code=4` lines were read as the broken note's
+failure for two rounds; they belonged to other notes entirely, and the broken
+note was reporting nothing at all. If a new symptom appears here, attribute it
+to a specific note before forming any theory about it.
+
+The corollary: `BUILD SUCCEEDED` and 718 green tests said nothing about any of
+this. Every real finding came from the running app.

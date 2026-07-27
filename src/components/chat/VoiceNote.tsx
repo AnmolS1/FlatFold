@@ -180,6 +180,12 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 			unregister.current = goLive(() => {
 				unregister.current = null;
 				setLiveEl(false);
+				// Reset the transport state too. Retiring REMOVES the element, so
+				// no `pause` event fires and `playing` would otherwise stay true —
+				// leaving the control offering "Pause" for a note that is not
+				// playing and has nothing left to pause.
+				setPlaying(false);
+				setProgress(0);
 			});
 			setLiveEl(true);
 			return;

@@ -11,7 +11,9 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const connectSrc = (csp: string) => /connect-src ([^;"`]+)/.exec(csp)?.[1] ?? '';
+// Match the DIRECTIVE, not prose: the native CSP file has a comment mentioning
+// connect-src above the real one, and a loose regex finds the comment first.
+const connectSrc = (csp: string) => /connect-src 'self'([^;"`]*)/.exec(csp)?.[1] ?? '';
 
 describe('CSP allows fetching our own blob: URLs', () => {
 	it('the native meta CSP permits blob: in connect-src', () => {

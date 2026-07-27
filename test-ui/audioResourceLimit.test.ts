@@ -64,22 +64,24 @@ describe('decodeAudioLimited', () => {
 	});
 });
 
-describe('VoiceNote owns no media element of its own', () => {
-	it('plays through the shared element instead of rendering <audio>', async () => {
+describe('VoiceNote renders its own media element, in JSX', () => {
+	it('keeps the element in the document and preloads metadata only', async () => {
 		const { readFileSync } = await import('node:fs');
 		const { resolve } = await import('node:path');
 		const src = readFileSync(resolve(process.cwd(), 'src/components/chat/VoiceNote.tsx'), 'utf8');
 
-		// The exhaustion scaled with how many notes were RENDERED. One element
-		// per note is the thing that must not come back.
-		//
-		// Matched as JSX (a tag followed by whitespace/newline then an attribute
-		// or close) rather than the bare string: three times now, a comment
-		// explaining the rule has matched the rule and failed its own test.
-		expect(src).not.toMatch(/<audio[\s/>]/);
-		expect(src).toContain('toggleSharedPlayback');
-		// And it must hand the element back when it goes away.
-		expect(src).toContain('releaseSharedPlayback');
+		// A shared `new Audio()` was tried and reverted: created imperatively, it
+		// never lived in the document, and WebKit does not load a DETACHED media
+		// element — no fetch, no events, and a play() that neither resolved nor
+		// rejected. Rendering it in JSX is what keeps it attached.
+		expect(src).toMatch(/<audio\s/);
+		expect(src).not.toContain('new Audio(');
+		expect(src).not.toContain('audioPlayer');
+		// Preloading metadata only is the resource mitigation that remains.
+		expect(src).toContain('preload="metadata"');
+		// Exactly ONE element per note: the decode-failure fallback used to add a
+		// second, doubling the cost precisely when resources were short.
+		expect(src.match(/<audio\s/g) ?? []).toHaveLength(1);
 		// Waveform decoding still goes through the concurrency cap.
 		expect(src).toContain('decodeAudioLimited');
 	});

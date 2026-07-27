@@ -1,7 +1,6 @@
 import UIKit
 import Capacitor
 import WebKit
-import AVFoundation
 
 // Capacitor 8 instantiates plugins from the generated `packageClassList`, which
 // `cap sync` builds from installed plugin PACKAGES only. Our biometric plugin is
@@ -32,44 +31,8 @@ class MainViewController: CAPBridgeViewController {
         if isOnMac { installMacInputBarHide() }
 
         hardenWebInspector()
-
-        #if DEBUG
-        logMicrophoneAuthorizationStatus()
-        #endif
     }
 
-    #if DEBUG
-    /// Temporary: which side of the microphone failure are we on?
-    ///
-    /// `getUserMedia` fails on Mac with no visible TCC prompt, and the recorded
-    /// theory — a Catalyst-only sandbox entitlement — was reasoned, never
-    /// measured. The same shape of assumption cost six attempts on the ghost row,
-    /// so measure first. This does NOT prompt; it only reports what TCC already
-    /// thinks, which is the fact that splits the possibilities:
-    ///
-    ///   notDetermined — nothing has ever asked. getUserMedia is not reaching TCC
-    ///                   at all, and requesting natively should raise the prompt.
-    ///   denied        — it was asked and refused; the fix is System Settings, not
-    ///                   code, and the entitlement theory is dead.
-    ///   restricted    — policy; not fixable in the app.
-    ///   authorized    — TCC is fine and the failure is above it, in the web layer.
-    ///
-    /// Pair this with the message the UI now shows (lib/mediaErrors names the
-    /// DOMException), and the two together identify the layer without guessing.
-    private func logMicrophoneAuthorizationStatus() {
-        let status = AVCaptureDevice.authorizationStatus(for: .audio)
-        let name: String
-        switch status {
-        case .notDetermined: name = "notDetermined — nothing has asked yet"
-        case .restricted:    name = "restricted — blocked by policy"
-        case .denied:        name = "denied — refused previously"
-        case .authorized:    name = "authorized — TCC is fine, look above it"
-        @unknown default:    name = "unknown(\(status.rawValue))"
-        }
-        NSLog("[mic] AVCaptureDevice.authorizationStatus(.audio) = %@", name)
-        NSLog("[mic] isiOSAppOnMac = %@", ProcessInfo.processInfo.isiOSAppOnMac ? "YES" : "NO")
-    }
-    #endif
 
     // MARK: - The ghost row (Mac only)
 

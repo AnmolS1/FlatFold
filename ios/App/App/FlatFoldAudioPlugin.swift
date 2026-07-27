@@ -153,7 +153,17 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         defer { cleanUp() }
         do {
             let data = try Data(contentsOf: url)
+            // DEBUG only, deliberately. Size, duration and loudness are metadata
+            // about a private message: anyone with Console access could see when
+            // this user records voice notes and for how long. Content-free, but
+            // this app already refuses that trade elsewhere — notifications say
+            // "New activity" and the app-switcher snapshot is covered — so it
+            // must not leak here either.
+            #if DEBUG
             NSLog("[mic] recorded %d bytes, %d ms, peak %.1f dB", data.count, durationMs, peakDb)
+            #else
+            _ = peakDb
+            #endif
 
             // A header-only M4A is the failure this catches. When the input queue
             // fails to start, AVAudioRecorder still writes ftyp+moov and still

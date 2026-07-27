@@ -309,17 +309,29 @@ per-feature evidence is described in the commit messages and in
    usernames. Low risk, because username-based identity is enumerable by design
    here, but it is a decision rather than an oversight. Remember git history is not
    undoable: once `9ce31a1` is pushed, this is settled.
-7. ~~The ghost row on "Designed for iPad".~~ **Fixed and verified on device
-   2026-07-26** (`2b42785`). It is `UIInputSetHostView` in `UITextEffectsWindow`,
-   hidden outright on Mac. Six attempts, because the first five went after the
-   wrong object — the ruled-out list in `MainViewController.installMacInputBarHide`
-   is worth more than the fix and is all measured, not reasoned. Short version:
-   not the web layer, not `inputAccessoryView` (it was already nil while the bar
-   was on screen), not `inputAssistantItem` (cleared on both the webview and the
-   content view; the bar did not move), and not the keyboard height (the software
-   keyboard in that view is already 0pt on a Mac). **The microphone** is still
-   open: it never prompts, the likely fix is a Catalyst-only sandbox entitlement,
-   so it is blocked behind item 2 and was parked rather than dug into further.
+7. ~~The Mac ("Designed for iPad") round.~~ **Both items fixed and verified on
+   device 2026-07-26.**
+   - **Ghost row** (`2b42785`): it is `UIInputSetHostView` in
+     `UITextEffectsWindow`, hidden outright on Mac. Six attempts, because the
+     first five went after the wrong object. The ruled-out list in
+     `MainViewController.installMacInputBarHide` is worth more than the fix and
+     is all measured: not the web layer, not `inputAccessoryView` (already nil
+     while the bar was on screen), not `inputAssistantItem`, not keyboard height.
+   - **Microphone** (`139c372`, `36ee5c5`): the WebView on iOS-app-on-Mac does
+     not expose `navigator.mediaDevices` at all — measured, `secure: yes` with
+     `mediaDevices: false`, so neither a permission nor a secure-context problem.
+     The Catalyst-entitlement theory was wrong. Fixed with `FlatFoldAudioPlugin`,
+     which records AAC-in-MP4 natively and hands the bytes to the same send path.
+     **This unblocks the mic independently of the macOS decision in item 2.**
+
+     Two traps worth keeping: `AVAudioRecorder.record()` returns `true` even when
+     the input queue fails to start, producing a valid M4A header with no samples
+     — a note that sends fine and plays as silence, so the byte-count guard is
+     load-bearing. And `AVAudioSession` is process-wide: calling
+     `setActive(false, .notifyOthersOnDeactivation)` after each recording killed
+     WebView playback of every other voice note. It is `.mixWithOthers` now and
+     never deactivated.
+
 8. **Smaller follow-ups:** the native push title is a fixed generic rather than the
    user's custom decoy label (the setting's help text now says so explicitly);
    `@capacitor/local-notifications` and `initNativePushDisplay` are now inert and

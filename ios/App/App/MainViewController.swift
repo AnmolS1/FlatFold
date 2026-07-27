@@ -70,11 +70,36 @@ class MainViewController: CAPBridgeViewController {
         isMacCatalystApp=\(info.isMacCatalystApp, privacy: .public) \
         home=\(NSHomeDirectory(), privacy: .public)
         """)
+        // The audio-budget harness (docs/redesign/PROMPT_MAC_AUDIO_FIX.md
+        // Phase 1). Launched with:
+        //
+        //   open -n <App.app> --args --audio-harness
+        //
+        // It must run INSIDE this shell, not in a browser tab: the whole point
+        // is the real media stack at the real origin (capacitor://localhost).
+        // The audio-budget experiment runs INSIDE THE APP'S OWN PAGE.
+        //
+        // It was first written as a standalone page navigated to with
+        // `webView.load`, and every measurement it produced was void: on that
+        // page NOTHING loaded — not a blob, not a direct custom-scheme URL, not
+        // a single element after a user gesture — while this very same WebView
+        // loads 31 elements on the app's page. A harness that cannot reproduce
+        // the working baseline cannot measure a deviation from it.
+        //
+        // Injecting into the real page keeps the origin, the CSP, the bridge and
+        // whatever else index.html establishes, so the only variable is the one
+        // being tested.
+        if ProcessInfo.processInfo.arguments.contains("--audio-experiment") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in
+                self?.runAudioExperiment(probe)
+            }
+        }
+
         // Repeating, because the interesting state only appears after a chat is
         // open and voice notes have mounted — not at launch. 10s is slow enough
         // to stay readable in the log and fast enough to catch the transition
         // from "playing fine" to "out of resources".
-        Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+        Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             self?.logAudioCensus(probe)
         }
 
@@ -106,6 +131,54 @@ class MainViewController: CAPBridgeViewController {
         #endif
     }
 
+    /// The element-budget experiment, run in the app's own page.
+    ///
+    /// Answers one question: with the app's real conversation already rendered,
+    /// how many ADDITIONAL `<audio>` elements can reach `readyState >= 1`? That
+    /// is the ceiling the fix in `347944c` assumes exists, and its real value.
+    private func runAudioExperiment(_ probe: os.Logger) {
+        #if DEBUG
+        let js = """
+        const before = document.querySelectorAll('audio').length;
+        const buf = await (await fetch('/fixture.m4a')).arrayBuffer();
+        const mk = () => {
+          const a = document.createElement('audio');
+          a.preload = 'metadata'; a.playsInline = true;
+          // src BEFORE insertion, matching what React does for the app's own
+          // elements — the ordering is a variable and must not drift.
+          a.src = URL.createObjectURL(new Blob([buf.slice(0)], {type:'audio/mp4'}));
+          document.body.appendChild(a);
+          return a;
+        };
+        const wait = (ms) => new Promise(r => setTimeout(r, ms));
+        const out = [];
+        const mine = [];
+        // Add in batches and report after each, so the ceiling shows up as the
+        // batch where `ready` stops climbing rather than as a single number.
+        for (const batch of [1, 4, 5, 10, 20, 40]) {
+          for (let i = 0; i < batch; i++) mine.push(mk());
+          await wait(6000);
+          out.push(`+${batch} total=${mine.length} ready=${mine.filter(a=>a.readyState>=1).length} stuck=${mine.filter(a=>a.networkState===2&&a.readyState===0).length}`);
+        }
+        // Give it all back, then check whether the budget returns.
+        mine.forEach(a => { URL.revokeObjectURL(a.src); a.removeAttribute('src'); a.load(); a.remove(); });
+        await wait(4000);
+        const after = [];
+        for (let i = 0; i < 5; i++) after.push(mk());
+        await wait(6000);
+        out.push(`afterTeardown ready=${after.filter(a=>a.readyState>=1).length}/5`);
+        after.forEach(a => { URL.revokeObjectURL(a.src); a.remove(); });
+        return `EXPERIMENT appAudioEls=${before} | ` + out.join(' | ');
+        """
+        bridge?.webView?.callAsyncJavaScript(js, arguments: [:], in: nil, in: .page) { result in
+            switch result {
+            case .success(let v): probe.notice("\(String(describing: v), privacy: .public)")
+            case .failure(let e): probe.notice("EXPERIMENT failed=\(String(describing: e), privacy: .public)")
+            }
+        }
+        #endif
+    }
+
     /// Census both audio pools in one shot, so they can be told apart.
     ///
     /// The <audio> side reports per-element `readyState`/`networkState`/`error`,
@@ -118,7 +191,15 @@ class MainViewController: CAPBridgeViewController {
     /// same to a user and come from opposite pools.
     private func logAudioCensus(_ probe: os.Logger) {
         #if DEBUG
+        // The harness accumulates its results on `window.__harnessOut` for
+        // exactly this reason: console.log from a WKWebView reaches neither the
+        // unified log nor any console when launched outside Xcode, so a harness
+        // that only printed would be unreadable on the platform it tests.
         let js = """
+        if (window.__harnessOut) {
+          const drained = window.__harnessOut.splice(0);
+          if (drained.length) return 'HARNESS ' + drained.join(' | ');
+        }
         const els = [...document.querySelectorAll('audio')];
         return JSON.stringify({
           audioEls: els.length,

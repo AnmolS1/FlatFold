@@ -24,10 +24,32 @@ has no idea the pods exist. If you have built the project before, its stale
 DerivedData will keep producing those warnings — delete that DerivedData
 directory (the hash differs from the workspace's).
 
-## The two configurations
+## The two configurations — YOU MUST RE-RUN pod install WHEN SWITCHING
 
-    pod install                       # iOS — @capacitor/filesystem INCLUDED
     FLATFOLD_CATALYST=1 pod install   # Mac Catalyst — filesystem EXCLUDED
+    pod install                       # iOS — @capacitor/filesystem INCLUDED
+
+**This is stateful.** Whichever ran last decides what Xcode builds against, and
+building the wrong one fails deep inside a vendor pod:
+
+    Unable to resolve module dependency: 'IONFilesystemLib'
+
+which reads like a broken dependency rather than the wrong install mode. It has
+cost two rounds already. `pod install` now prints a banner naming the mode and
+writes `ios/App/Pods/.flatfold-pod-mode`, so the current state is checkable:
+
+    cat ios/App/Pods/.flatfold-pod-mode
+
+If it says `ios` and you are building Catalyst, that error is why.
+
+### Why the switch exists at all
+
+`IONFilesystemLib` ships ONLY `ios-arm64` and `ios-arm64_x86_64-simulator`, and
+the pod contains no source — just the `.xcframework` and a LICENSE. It cannot be
+rebuilt for Catalyst, so exclusion is the only option. CocoaPods cannot include a
+pod conditionally per SDK within one target, which is why this is an env var and
+not something automatic. It is a wart caused by an upstream binary-only
+dependency, not a design choice.
 
 `@capacitor/filesystem` depends on `IONFilesystemLib`, a PREBUILT binary
 (`vendored_frameworks: IONFilesystemLib.xcframework`) with no `maccatalyst`

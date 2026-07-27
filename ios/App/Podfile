@@ -56,6 +56,29 @@ end
 post_install do |installer|
   assertDeploymentTarget(installer)
 
+  # Record which pod set is installed, and say so LOUDLY.
+  #
+  # The Catalyst exclusion below is stateful: whichever `pod install` ran last
+  # decides what Xcode builds against, and nothing on screen says which. Building
+  # the Catalyst destination against the iOS set fails deep inside a vendor pod
+  # with `Unable to resolve module dependency: 'IONFilesystemLib'`, which reads
+  # like a broken dependency rather than the wrong install mode. It has now
+  # cost two rounds.
+  mode = ENV['FLATFOLD_CATALYST'] == '1' ? 'catalyst' : 'ios'
+  File.write(File.join(installer.sandbox.root, '.flatfold-pod-mode'), mode)
+  puts ''
+  puts '  ┌────────────────────────────────────────────────────────────┐'
+  puts format('  │  Pods installed for: %-38s│', mode.upcase)
+  if mode == 'ios'
+    puts '  │  @capacitor/filesystem INCLUDED — Mac Catalyst will FAIL.  │'
+    puts '  │  For Catalyst:  FLATFOLD_CATALYST=1 pod install            │'
+  else
+    puts '  │  @capacitor/filesystem EXCLUDED — iOS loses native file    │'
+    puts '  │  save. For iOS:  pod install                               │'
+  end
+  puts '  └────────────────────────────────────────────────────────────┘'
+  puts ''
+
   # THE POINT OF THIS MIGRATION.
   #
   # SwiftPM ships Capacitor as a prebuilt xcframework with only `ios-arm64` and

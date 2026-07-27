@@ -13,6 +13,11 @@ Read in this order:
 | 3 | `redesign/HANDOFF_STEP6_CONTINUATION.md` | **authoritative for the hard constraints** (the frozen files). Otherwise historical — its status section is stale. |
 | 4 | whatever the task needs | the D1–D7 design specs, `FULL_AUDIT_2.md`, `NATIVE_MACOS_PLAN.md`, `DESKTOP_SHELL_OPTIONS.md`, `THREAT_MODEL.md` |
 
+**Open research question:** `redesign/HANDOFF_MAC_AUDIO_RESEARCH.md` — voice-note
+playback on Mac. Carries the measured evidence, the ruled-out list (each entry
+cost a build/reproduce cycle — do not re-test them), and the CLI
+build/launch/read-the-log loop that Catalyst makes possible.
+
 For macOS specifically: `ios/CATALYST.md` (build mechanics),
 `redesign/verify/MAC_VOICE_NOTES.md` (what is proven vs ruled out),
 `DESKTOP_SHELL_OPTIONS.md` (the decision, now genuinely balanced).

@@ -14,6 +14,56 @@ interface VoiceNoteProps {
 
 const BAR_COUNT = 40;
 
+/**
+ * How many notes may hold a media resource at once.
+ *
+ * WebKit caps concurrent media resources, and an element only costs a slot once
+ * it has a `src`. Measured on Mac Catalyst: 28 mounted notes, each with `src`
+ * and `preload="metadata"`, filled the pool — and the next note to be played
+ * then hung at `readyState 0` / `networkState 2` indefinitely with `error`
+ * still null, while four already-loaded notes were evicted to `networkState 3`
+ * at that same instant. That is the whole of "old notes play, new ones don't".
+ *
+ * Three rather than one: the note playing, the one just paused (so resuming it
+ * does not re-download and lose position), and one spare for a quick A/B
+ * between two notes. Small enough that the pool is never the binding constraint.
+ */
+export const LOADED_NOTE_LIMIT = 3;
+
+// Least-recently-used first. Module scope on purpose: the limit is a property of
+// the WebView process, not of any one conversation or component tree.
+const loaded: HTMLAudioElement[] = [];
+
+/** Release a note's media resource. Removing `src` alone does not free it. */
+function release(el: HTMLAudioElement) {
+	el.removeAttribute('src');
+	// `load()` is what actually tears the resource down — without it WebKit keeps
+	// the old one alive and the cap achieves nothing.
+	el.load();
+}
+
+/**
+ * Give this element a media resource, evicting the least-recently-used if the
+ * pool is full.
+ *
+ * Never evicts an element that is still playing: the cap exists to stop notes
+ * hanging, and stopping the note the user is listening to would be a worse bug
+ * than the one being fixed.
+ */
+function claimSlot(el: HTMLAudioElement, url: string) {
+	const existing = loaded.indexOf(el);
+	if (existing !== -1) loaded.splice(existing, 1);
+	else el.src = url;
+	loaded.push(el);
+
+	while (loaded.length > LOADED_NOTE_LIMIT) {
+		const victim = loaded.findIndex((c) => c !== el && c.paused);
+		if (victim === -1) break;
+		release(loaded[victim]);
+		loaded.splice(victim, 1);
+	}
+}
+
 function formatDuration(seconds: number): string {
 	if (!isFinite(seconds) || seconds < 0) return '0:00';
 	const m = Math.floor(seconds / 60);
@@ -43,19 +93,26 @@ function peaksFrom(channel: Float32Array): number[] {
 
 // A voice note: a waveform, a play/pause button, and a duration.
 //
-// THE MEDIA ELEMENT IS RENDERED IN JSX, PER NOTE, DELIBERATELY.
+// THE MEDIA ELEMENT IS RENDERED IN JSX, PER NOTE, DELIBERATELY — but it carries
+// no `src` until the note is played. Those are two separate decisions and both
+// were paid for.
 //
-// A single shared element, constructed imperatively at module scope, was tried
-// and reverted. It never lived in the document, and WebKit does not load a
-// DETACHED media element: no fetch, no `loadedmetadata`, no `error`, and a
-// play() that neither resolved nor rejected. Playback died completely and
-// silently, and appending it to document.body afterwards did not revive it.
-// Per-note elements in JSX are the arrangement that has always worked.
+// The ELEMENT stays in JSX because a single shared element, constructed
+// imperatively at module scope, was tried and reverted: it never lived in the
+// document, and WebKit does not load a DETACHED media element. No fetch, no
+// `loadedmetadata`, no `error`, and a play() that neither resolved nor rejected.
+// Appending it to document.body afterwards did not revive it.
 //
-// The reason the shared element was attempted — WebKit's cap on concurrent media
-// resources, which surfaced as MEDIA_ERR_SRC_NOT_SUPPORTED and reads as a codec
-// error — is real, and is mitigated here instead by preloading metadata only and
-// by NOT creating a second element when the waveform decode fails.
+// The SOURCE is attached lazily because an element with a `src` holds a media
+// resource, and WebKit's pool of those is small. See LOADED_NOTE_LIMIT.
+//
+// Worth knowing how this failure presents, because it wasted two debugging
+// rounds: the note that cannot get a slot HANGS — readyState 0, networkState 2,
+// `error` null — while OTHER, already-loaded notes are evicted and report
+// MEDIA_ERR_SRC_NOT_SUPPORTED (code 4). So the visible error belongs to a
+// different note than the broken one, and code 4 reads as a codec problem when
+// nothing is wrong with the codec. Always attribute a media error to a specific
+// note before believing it.
 export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) => {
 	const audioRef = useRef<HTMLAudioElement>(null);
 	const [bars, setBars] = useState<number[] | null>(null);
@@ -63,6 +120,23 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 	const [progress, setProgress] = useState(0); // 0..1
 	const [duration, setDuration] = useState(durationMs ? durationMs / 1000 : 0);
 	const [playbackError, setPlaybackError] = useState<string | null>(null);
+
+	// A short, stable label for this note in the debug log. The blob URL's last
+	// segment is unique per note and carries no message content.
+	const noteTag = url.slice(-6);
+
+	// Drop this note out of the pool when it unmounts. Without it the registry
+	// keeps references to detached elements, which both leaks them and lets the
+	// cap be consumed by notes that scrolled out of the list — reintroducing the
+	// exhaustion from the other end.
+	useEffect(() => {
+		const el = audioRef.current;
+		return () => {
+			if (!el) return;
+			const at = loaded.indexOf(el);
+			if (at !== -1) loaded.splice(at, 1);
+		};
+	}, []);
 
 	// Decode once for the waveform. Failure degrades to flat bars and MUST NOT
 	// affect playback: the old code swapped in a second media element here, which
@@ -85,7 +159,7 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 				setBars(peaksFrom(decoded.getChannelData(0)));
 				if (!durationMs) setDuration(decoded.duration);
 			} catch (err) {
-				nativeLog(`waveform decode failed: ${err instanceof Error ? err.message : String(err)}`);
+				nativeLog(`[${url.slice(-6)}] waveform decode failed: ${err instanceof Error ? err.message : String(err)}`);
 			}
 		})();
 		return () => {
@@ -96,7 +170,15 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 	const toggle = () => {
 		const el = audioRef.current;
 		if (!el) return;
+		nativeLog(`[${noteTag}] toggle paused=${el.paused} ready=${el.readyState} net=${el.networkState} err=${el.error?.code ?? '-'}`);
 		if (el.paused) {
+			// Claim the resource here, on the gesture, and imperatively.
+			//
+			// Not via React state: an earlier attempt set `src` through a re-render
+			// and then called play() against an element the render had not updated
+			// yet, which raced and silently did nothing. Setting it on the ref
+			// means the element is ready on the very next line.
+			claimSlot(el, url);
 			void el.play().catch((err: unknown) => {
 				// AbortError is benign — pausing aborts a play() that has not started.
 				const name = err instanceof Error ? err.name : '';
@@ -116,8 +198,19 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 			<div className="flex items-center gap-3">
 				<audio
 					ref={audioRef}
-					src={url}
-					preload="metadata"
+					// NO `src`, and preload="none": an <audio> costs a media
+					// resource the moment it has a source, and a conversation
+					// mounts one per note. See LOADED_NOTE_LIMIT above — this is
+					// the fix for notes that hang instead of playing.
+					//
+					// The duration shown while unloaded comes from `durationMs`,
+					// which rides inside the MediaRef and so is present on
+					// RECEIVED notes too, not only ones recorded on this device.
+					// An earlier attempt at lazy loading regressed the duration to
+					// 0:00 — but that was before the CSP `connect-src blob:` fix,
+					// when the waveform decode (the other duration source) was
+					// failing on every platform.
+					preload="none"
 					playsInline
 					onPlay={() => setPlaying(true)}
 					onPause={() => setPlaying(false)}
@@ -130,13 +223,17 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 						if (el.duration) setProgress(el.currentTime / el.duration);
 					}}
 					onLoadedMetadata={(e) => {
-						nativeLog(`audio loadedmetadata duration=${e.currentTarget.duration}`);
+						nativeLog(`[${noteTag}] loadedmetadata duration=${e.currentTarget.duration}`);
 						if (!durationMs && isFinite(e.currentTarget.duration)) setDuration(e.currentTarget.duration);
 					}}
 					onError={() => {
-						const code = audioRef.current?.error?.code;
-						nativeLog(`audio element error code=${code ?? '?'}`);
-						setPlaybackError(describeVoiceNotePlaybackError(code, mimeType));
+						const el = audioRef.current;
+						// Tagged, because a conversation renders one <audio> per note
+						// and an untagged "error code=4" cannot be attributed to any
+						// of them. Two rounds were spent reading these as the newest
+						// note's failure without ever establishing that they were.
+						nativeLog(`[${noteTag}] error code=${el?.error?.code ?? '?'} ready=${el?.readyState} net=${el?.networkState}`);
+						setPlaybackError(describeVoiceNotePlaybackError(el?.error?.code, mimeType));
 					}}
 					className="hidden"
 				/>

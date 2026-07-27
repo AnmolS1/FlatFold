@@ -1,6 +1,10 @@
 import Foundation
 import Capacitor
 import AVFoundation
+import os
+#if targetEnvironment(macCatalyst)
+import CoreAudio
+#endif
 
 // Native voice-note recording, for the Mac only.
 //
@@ -55,6 +59,20 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDe
     private var pendingDurationMs = 0
     private var pendingPeakDb: Float = 0
     private var stopWatchdog: DispatchWorkItem?
+
+    /// `os.Logger`, not NSLog.
+    ///
+    /// Every measurement below was written with NSLog and NONE of it was
+    /// readable on Mac Catalyst — NSLog from this target reaches neither the
+    /// unified log nor a console when the app is launched outside Xcode. So the
+    /// recorder's own account of what it produced, which is exactly the evidence
+    /// this bug needs, was silently discarded on the platform being debugged.
+    ///
+    /// Interpolations are `privacy: .public` on purpose: Logger redacts by
+    /// default, and `<private>` in every field looks identical to a failed probe.
+    /// Everything logged here is DEBUG-only and content-free by design — see the
+    /// note at the finalize site about why size and duration are still sensitive.
+    private static let log = os.Logger(subsystem: "dev.flatfold", category: "mic")
 
     /// True on BOTH Mac shells, because both lack `navigator.mediaDevices`.
     ///
@@ -259,8 +277,12 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDe
             // "New activity", the app-switcher snapshot is covered — so it must
             // not leak here either.
             #if DEBUG
-            NSLog("[mic] finalized (%@) %d bytes, %d ms, peak %.1f dB",
-                  note, data.count, pendingDurationMs, pendingPeakDb)
+            Self.log.notice("""
+            finalized via=\(note, privacy: .public) \
+            bytes=\(data.count, privacy: .public) \
+            ms=\(self.pendingDurationMs, privacy: .public) \
+            peakDb=\(self.pendingPeakDb, privacy: .public)
+            """)
             #endif
 
             // A header-only M4A is the failure this catches. When the input queue
@@ -293,7 +315,12 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDe
                     return
                 }
                 #if DEBUG
-                NSLog("[mic] probe ok: %lld frames @ %.0f Hz", probe.length, probe.fileFormat.sampleRate)
+                Self.log.notice("""
+                probe ok frames=\(probe.length, privacy: .public) \
+                rate=\(probe.fileFormat.sampleRate, privacy: .public) \
+                ch=\(probe.fileFormat.channelCount, privacy: .public)
+                """)
+                Self.log.notice("container \(Self.describeContainer(data), privacy: .public)")
                 #endif
             } catch {
                 cleanUp()
@@ -314,6 +341,14 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDe
             // source. It must call discardRecording() when done — this file is
             // PLAINTEXT audio of a message about to be sent end-to-end encrypted,
             // so it must not outlive the send.
+            // Hand the session back BEFORE answering, not only when a recording
+            // fails. Restoration used to live solely in cleanUp(), which the
+            // success path deliberately does not call (it would delete the file
+            // the web layer is about to read) — so a recording that WORKED left
+            // the process in `.playAndRecord` indefinitely, while one that failed
+            // tidied up after itself. Exactly backwards, and this file's own
+            // comments describe the consequence: "playback is dead afterwards".
+            restorePlaybackSession()
             call.resolve([
                 "path": url.path,
                 "byteLength": data.count,
@@ -338,7 +373,7 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDe
     /// from the web layer must never reach a shipped build's system log.
     @objc func debugLog(_ call: CAPPluginCall) {
         #if DEBUG
-        NSLog("[web] %@", call.getString("message") ?? "")
+        Self.log.notice("[web] \(call.getString("message") ?? "", privacy: .public)")
         #endif
         call.resolve()
     }
@@ -360,7 +395,112 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDe
         }
         try? FileManager.default.removeItem(atPath: path)
         if fileURL?.path == path { fileURL = nil }
+        restorePlaybackSession()
         call.resolve()
+    }
+
+    /// The MP4 top-level atom layout, plus the `ftyp` brand.
+    ///
+    /// Deliberately STRUCTURE ONLY — atom names, sizes and the brand string.
+    /// No audio bytes are logged and none are written anywhere, because this
+    /// file is plaintext audio of a message that is about to be sent end-to-end
+    /// encrypted; copying it somewhere readable to inspect it would defeat the
+    /// thing it is being inspected for.
+    ///
+    /// The question it answers: WebKit rejects these files outright (media
+    /// element code 4, `decodeAudioData` failing in 0 ms) while `AVAudioFile`
+    /// parses them as perfectly good audio, and browser-recorded notes of the
+    /// nominally identical type play fine. That is a container difference, and
+    /// `moov` position and brand are where such differences live.
+    private static func describeContainer(_ data: Data) -> String {
+        var parts: [String] = []
+        var offset = 0
+        // Top level only. A malformed size would otherwise spin forever, so
+        // every step is bounds-checked and a zero/absurd size ends the walk.
+        while offset + 8 <= data.count && parts.count < 12 {
+            let size = data[offset..<offset + 4].reduce(0) { $0 << 8 | Int($1) }
+            let name = String(bytes: data[offset + 4..<offset + 8], encoding: .ascii) ?? "????"
+            parts.append("\(name):\(size)")
+            if name == "ftyp", offset + 16 <= data.count {
+                let brand = String(bytes: data[offset + 8..<offset + 12], encoding: .ascii) ?? "????"
+                parts.append("brand=\(brand)")
+            }
+            if name == "mdat" { parts.append("mdatPayload@\(offset + 8)") }
+            guard size >= 8 else { break }
+            offset += size
+        }
+        if let stco = firstChunkOffset(data) { parts.append("stco[0]=\(stco)") }
+        return parts.joined(separator: " ") + " total=\(data.count)"
+    }
+
+    /// The first sample-chunk offset recorded in `moov`, or nil if absent.
+    ///
+    /// This is the number that decides whether the file is actually valid.
+    /// `AVAudioRecorder` pre-allocates space, then rewrites `moov` at finalize
+    /// for however much audio was really captured — which is why a big `free`
+    /// atom is left behind. If that rewrite does not also correct the chunk
+    /// offsets, `moov` describes a layout the file no longer has: AVFoundation
+    /// is tolerant and reseeks around it, a strict parser like WebKit's rejects
+    /// the file outright. Compare against `mdatPayload@` above; a first chunk
+    /// offset below where `mdat`'s payload begins means the index is stale.
+    private static func firstChunkOffset(_ data: Data) -> UInt32? {
+        // `stco` is buried at moov > trak > mdia > minf > stbl > stco. The
+        // nesting is fixed, but scanning for the signature is far less code than
+        // six levels of container walking and cannot be thrown off by an
+        // unexpected sibling atom.
+        let tag: [UInt8] = Array("stco".utf8)
+        let bytes = [UInt8](data.prefix(64 * 1024))
+        guard bytes.count > 24 else { return nil }
+        for i in 0..<(bytes.count - 24) where Array(bytes[i..<i + 4]) == tag {
+            // stco: 4 name, 1 version, 3 flags, 4 entry count, then entries.
+            let entryStart = i + 12
+            guard entryStart + 4 <= bytes.count else { return nil }
+            return bytes[entryStart..<entryStart + 4].reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
+        }
+        return nil
+    }
+
+    /// Is the default input device capturing for ANY process right now?
+    ///
+    /// This is the hardware answer, from the CoreAudio HAL — the same state the
+    /// orange menu-bar dot reflects. Deliberately not "did we call stop()":
+    /// releasing an input is asynchronous and the API returning cleanly is not
+    /// evidence the device went idle.
+    ///
+    /// Two honest limits. It is system-wide, so another app recording reads as
+    /// `true` here; and a sandboxed app may be refused the HAL query, in which
+    /// case this returns nil rather than a reassuring `false`. Never report "the
+    /// mic is off" from a nil — that is an unanswered question, not a no.
+    ///
+    /// Catalyst only: the HAL is not reachable from iOS, where the audio session
+    /// and the OS indicator are the equivalent signal.
+    private static func defaultInputIsRunning() -> Bool? {
+        #if targetEnvironment(macCatalyst)
+        var deviceID = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var deviceAddr = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        guard AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &deviceAddr, 0, nil, &size, &deviceID
+        ) == noErr, deviceID != kAudioObjectUnknown else { return nil }
+
+        var running = UInt32(0)
+        var runningSize = UInt32(MemoryLayout<UInt32>.size)
+        var runningAddr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsRunningSomewhere,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        guard AudioObjectGetPropertyData(
+            deviceID, &runningAddr, 0, nil, &runningSize, &running
+        ) == noErr else { return nil }
+        return running != 0
+        #else
+        return nil
+        #endif
     }
 
     /// Always remove the temp file. It holds decrypted audio of a message the
@@ -373,32 +513,41 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDe
             try? FileManager.default.removeItem(at: url)
             fileURL = nil
         }
-        // Hand the session back to PLAYBACK.
-        //
-        // Leaving a playAndRecord session active forever is its own bug: the
-        // device log wedges the WebContent process right after a recording
-        // completes, and playback is dead afterwards. WebKit's media stack lives
-        // in that process and an input-configured session is the only global
-        // audio state this plugin mutates.
-        //
-        // Restoring the CATEGORY is not the same as deactivating: the earlier
-        // `setActive(false, .notifyOthersOnDeactivation)` broadcast a system-wide
-        // "everyone else resume", which is what killed WebView playback. This
-        // just puts the session back in a shape suited to playing audio, which is
-        // what the app does the rest of the time.
+        restorePlaybackSession()
+    }
+
+    /// Put the process-wide audio session back to PLAYBACK, and verify the
+    /// microphone actually went cold.
+    ///
+    /// MUST run after every recording, successful or not. It used to live only
+    /// in `cleanUp()` — which the success path skips on purpose, because it
+    /// deletes the file the web layer still has to read — so the tidy-up
+    /// happened on failure and never on success.
+    ///
+    /// Restoring the CATEGORY is not the same as deactivating the session. An
+    /// earlier version called `setActive(false, .notifyOthersOnDeactivation)`
+    /// here, which broadcasts a system-wide "I am done, everyone else resume".
+    /// This app is one of the others: the WebView owns playback of every voice
+    /// note on screen, so that call killed playback of notes recorded seconds
+    /// earlier. Do not reintroduce it. Changing the category just puts the
+    /// session into a shape suited to playing audio, which is what the app does
+    /// the rest of the time.
+    private func restorePlaybackSession() {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
 
-        // Deliberately still NOT deactivating the audio session.
-        //
-        // The first version called
-        // `setActive(false, options: .notifyOthersOnDeactivation)` here, on every
-        // record cycle. That is a system-wide "I am finished, everyone else
-        // resume" signal, and this app is one of the others — the WebView owns
-        // playback of every voice note on screen. Tearing the session down after
-        // each recording is why notes stopped playing, including ones recorded
-        // seconds earlier.
-        //
-        // Leaving a mixWithOthers playAndRecord session active costs nothing and
-        // keeps WebView playback working.
+        #if DEBUG
+        // Confirm the microphone went cold, rather than trusting that stopping
+        // the recorder and changing the category was enough. CoreAudio is asked a
+        // moment later on purpose: releasing an input device is asynchronous, so
+        // an immediate read reports the state we are trying to leave and would
+        // look like a stuck microphone every single time.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            Self.log.notice("""
+            mic released? recorder=\(self?.recorder == nil ? "nil" : "LIVE", privacy: .public) \
+            category=\(AVAudioSession.sharedInstance().category.rawValue, privacy: .public) \
+            inputRunning=\(String(describing: Self.defaultInputIsRunning()), privacy: .public)
+            """)
+        }
+        #endif
     }
 }

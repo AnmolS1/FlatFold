@@ -70,6 +70,14 @@ class MainViewController: CAPBridgeViewController {
         isMacCatalystApp=\(info.isMacCatalystApp, privacy: .public) \
         home=\(NSHomeDirectory(), privacy: .public)
         """)
+        // Repeating, because the interesting state only appears after a chat is
+        // open and voice notes have mounted — not at launch. 10s is slow enough
+        // to stay readable in the log and fast enough to catch the transition
+        // from "playing fine" to "out of resources".
+        Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+            self?.logAudioCensus(probe)
+        }
+
         // After load: the bridge's webView has no document at capacitorDidLoad.
         DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
             // `supported` is the one that matters. It is what MessageInput.tsx
@@ -93,6 +101,40 @@ class MainViewController: CAPBridgeViewController {
                 js, arguments: [:], in: nil, in: .page
             ) { result in
                 probe.notice("web=\(String(describing: result), privacy: .public)")
+            }
+        }
+        #endif
+    }
+
+    /// Census both audio pools in one shot, so they can be told apart.
+    ///
+    /// The <audio> side reports per-element `readyState`/`networkState`/`error`,
+    /// because "how many elements exist" is not the question — "how many are
+    /// holding a decoder" is. The Web Audio side reports the module's own queue
+    /// state from `audioContext.ts`.
+    ///
+    /// Reading one without the other is what made this bug expensive: a note
+    /// that FAILS with code 4 and a note that HANGS with no duration look the
+    /// same to a user and come from opposite pools.
+    private func logAudioCensus(_ probe: os.Logger) {
+        #if DEBUG
+        let js = """
+        const els = [...document.querySelectorAll('audio')];
+        return JSON.stringify({
+          audioEls: els.length,
+          withSrc: els.filter(e => !!e.currentSrc || !!e.getAttribute('src')).length,
+          ready: els.map(e => e.readyState).join(''),
+          network: els.map(e => e.networkState).join(''),
+          errs: els.map(e => e.error?.code ?? '-').join(''),
+          pool: window.__flatfoldAudioStats?.() ?? 'absent'
+        })
+        """
+        bridge?.webView?.callAsyncJavaScript(js, arguments: [:], in: nil, in: .page) { result in
+            switch result {
+            case .success(let value):
+                probe.notice("census=\(String(describing: value), privacy: .public)")
+            case .failure(let err):
+                probe.notice("census failed=\(String(describing: err), privacy: .public)")
             }
         }
         #endif

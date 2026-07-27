@@ -50,6 +50,28 @@ export const DECODE_TIMEOUT_MS = 8000;
 let active = 0;
 const waiting: Array<() => void> = [];
 
+// Decode outcomes, for the DEBUG census below. Counters only — no payloads.
+const tally = { ok: 0, timedOut: 0, failed: 0 };
+
+/**
+ * A snapshot of this module's resource state.
+ *
+ * It exists because the two audio pools — Web Audio decodes here, and the
+ * WebView's <audio> element pool — BOTH exhaust into
+ * `MEDIA_ERR_SRC_NOT_SUPPORTED` (code 4). The user-facing text is identical
+ * either way, so the symptom cannot tell them apart, and three separate attempts
+ * at this bug were aimed at a pool that was never measured. Read alongside a DOM
+ * census of <audio> elements, this says which one is actually short.
+ */
+export function audioPoolStats() {
+	return { active, waiting: waiting.length, unavailable, hasContext: shared !== null, ...tally };
+}
+
+// Exposed for the native probe (MainViewController), on debug builds only.
+if (typeof window !== 'undefined' && (window as unknown as { __flatfoldDebug?: boolean }).__flatfoldDebug) {
+	(window as unknown as { __flatfoldAudioStats?: unknown }).__flatfoldAudioStats = audioPoolStats;
+}
+
 /**
  * Run an audio decode under a global concurrency cap.
  *
@@ -70,12 +92,21 @@ export async function decodeAudioLimited<T>(task: () => Promise<T>): Promise<T> 
 		// decodes hold both slots and every note behind them waits on a promise
 		// that will never resolve. The symptom is "all voice notes are broken",
 		// which is indistinguishable from a codec or download failure.
-		return await Promise.race([
+		const out = await Promise.race([
 			task(),
 			new Promise<never>((_, reject) => {
 				timer = setTimeout(() => reject(new Error('audio decode timed out')), DECODE_TIMEOUT_MS);
 			}),
 		]);
+		tally.ok++;
+		return out;
+	} catch (err) {
+		// Distinguished, not lumped: a timeout means a decode is still running and
+		// holding real resources after we stopped waiting for it, which is a very
+		// different problem from one that failed and released.
+		if (err instanceof Error && err.message === 'audio decode timed out') tally.timedOut++;
+		else tally.failed++;
+		throw err;
 	} finally {
 		if (timer) clearTimeout(timer);
 		active--;

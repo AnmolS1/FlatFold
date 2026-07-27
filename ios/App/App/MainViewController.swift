@@ -330,6 +330,16 @@ class MainViewController: CAPBridgeViewController {
             await wait(1500);
           }
           await wait(9000);
+        } else if (condition === 'react3') {
+          // Ask REACT to render the elements (components/debug/ExperimentAudio).
+          // Every imperative variant loads zero, including a clone of a working
+          // element in its own parent, so this tests the surviving hypothesis
+          // directly instead of by elimination: does an element created inside
+          // React's commit get a media loader where an appended one does not?
+          window.dispatchEvent(new CustomEvent('flatfold:exp-audio',
+            { detail: { count: 3, src: srcOf() } }));
+          await wait(12000);
+          mine.push(...document.querySelectorAll('audio[data-exp="react"]'));
         } else if (condition === 'fixture3') {
           // 3 elements from the generated fixture rather than a real note, to
           // confirm the source stays irrelevant under the cooled protocol.

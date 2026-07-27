@@ -15,6 +15,8 @@ import { Login } from './pages/Login';
 // dist/client/assets/, which gen-sw-manifest.mjs pins wholesale, so they keep
 // the same app-shell integrity guarantee as the entry bundle.
 const Chat = lazy(() => import('./pages/Chat').then((m) => ({ default: m.Chat })));
+import { ExperimentAudio } from './components/debug/ExperimentAudio';
+
 const Transparency = lazy(() => import('./pages/Transparency').then((m) => ({ default: m.Transparency })));
 
 function App() {
@@ -37,6 +39,10 @@ function App() {
 		// Outermost, so a throw in a provider or the router still shows something
 		// recoverable rather than a blank document.
 		<ErrorBoundary>
+			{/* DEBUG-only scaffolding for the Mac audio experiment. Renders
+			    nothing unless a probe asks and __flatfoldDebug is set, so it is
+			    inert on web and absent from TestFlight and the App Store. */}
+			<ExperimentAudio />
 			<ThemeProvider>
 				<ToastProvider>
 					<BrowserRouter>

@@ -33,17 +33,19 @@ function stubAudio() {
 }
 
 describe('shared player re-entrancy', () => {
-	it('a tap during the start-up window PAUSES instead of starting a second play', async () => {
+	it('a duplicated tap during start-up is ignored, not turned into a pause', async () => {
 		const { calls, settle } = stubAudio();
 		const { toggleSharedPlayback } = await import('../src/lib/audioPlayer');
 
 		const first = toggleSharedPlayback('blob:one'); // play, still pending
-		await toggleSharedPlayback('blob:one'); // user taps pause before it starts
+		await toggleSharedPlayback('blob:one'); // the duplicate tap
 		settle();
 		await first;
 
-		expect(calls.play).toBe(1); // NOT two
-		expect(calls.pause).toBe(1); // the user's pause was honoured
+		// One tap's worth of work: no second play(), and NOT an instant pause of
+		// the thing we just started.
+		expect(calls.play).toBe(1);
+		expect(calls.pause).toBe(0);
 	});
 
 	it('an AbortError from pausing a pending play is not surfaced as a failure', async () => {

@@ -33,8 +33,26 @@ function ensure(): HTMLAudioElement | null {
 	if (el) return el;
 	if (typeof Audio === 'undefined') return null;
 	el = new Audio();
-	// `preload` is irrelevant now — there is only one element and it only ever
-	// holds the note being played.
+
+	// ATTACH IT. This is the whole fix.
+	//
+	// WebKit does not load a DETACHED media element: `new Audio()` on its own,
+	// never added to the document, produced no `loadedmetadata`, no `error`, and a
+	// play() that neither resolved nor rejected. Silence, with nothing to debug.
+	//
+	// Every per-note <audio> before this was real JSX and therefore in the DOM,
+	// which is why playback worked before the shared player and stopped the moment
+	// the element became detached.
+	//
+	// `playsinline` because WKWebView otherwise wants to take audio full-screen,
+	// and `display:none` because this element is driven entirely by our own UI.
+	el.setAttribute('playsinline', '');
+	el.preload = 'auto';
+	el.style.display = 'none';
+	if (typeof document !== 'undefined' && document.body) {
+		document.body.appendChild(el);
+	}
+
 	for (const ev of ['play', 'pause', 'ended', 'timeupdate', 'loadedmetadata', 'error']) {
 		el.addEventListener(ev, notify);
 	}
@@ -126,9 +144,13 @@ export async function toggleSharedPlayback(url: string): Promise<void> {
 		// made a second tap call play() AGAIN instead of pausing — tapping pause
 		// during the start-up window did nothing. `starting` is what distinguishes
 		// "not playing" from "about to play".
-		if (starting === url || !a.paused) {
+		// A tap arriving while play() is still pending is a DUPLICATE, not a pause:
+		// one tap logged twice on device. Ignore it. Once the element is genuinely
+		// playing, `starting` is null and the pause below works normally — which is
+		// the case Anmol hit when pausing shortly after play.
+		if (starting === url) return;
+		if (!a.paused) {
 			a.pause();
-			starting = null;
 		} else {
 			starting = url;
 			try {

@@ -37,9 +37,15 @@ trap 'printf "" | pbcopy' EXIT
 
 osascript - "$PW" <<'APPLESCRIPT'
 on run argv
+  -- `activate` INSIDE this script, not `set frontmost to true` from a separate
+  -- osascript call. They are not equivalent: the frontmost property can read
+  -- true while the window is not key, and the paste then goes nowhere — which
+  -- is exactly the difference between this working by hand and failing inside
+  -- a trial. The by-hand version that worked did the activate right here.
+  tell application "App" to activate
+  delay 1.5
   tell application "System Events"
     tell process "App"
-      set frontmost to true
       delay 0.5
       if (count of windows) is 0 then error "no FlatFold window"
       set {wx, wy} to position of window 1

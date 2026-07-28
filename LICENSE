@@ -657,3 +657,38 @@ specific requirements.
 if any, to sign a "copyright disclaimer" for the program, if necessary.
 For more information on this, and how to apply and follow the GNU AGPL, see
 <https://www.gnu.org/licenses/>.
+
+-------------------------------------------------------------------------------
+
+                    ADDITIONAL PERMISSION UNDER AGPL v3 §7
+                     (Apple App Store distribution)
+
+Why this exists: the AGPL, like the rest of the GPL family, forbids imposing
+further restrictions on the rights it grants. Apple's standard End User License
+Agreement does impose some — a limit on the number of devices, and DRM. That
+conflict is what got VLC pulled from the App Store in 2011. As sole copyright
+holder, Anmol Saxena can resolve it by granting an exception, and does so here.
+Granted BEFORE accepting outside contributions, deliberately: afterwards every
+contributor would have to agree to it too.
+
+Not legal advice. The conflict is well documented and this is the standard
+remedy, but it is worth a lawyer's glance.
+
+  Additional permission under GNU AGPL version 3 section 7
+
+  As a special exception, Anmol Saxena, as the sole copyright holder of
+  FlatFold, grants you additional permission to convey copies of the Program
+  through the Apple App Store and other Apple-operated distribution channels,
+  notwithstanding any terms Apple imposes on end users that would otherwise
+  conflict with sections 4, 5, 6, or 10 of this License — including, without
+  limitation, restrictions on the number of devices on which a copy may be
+  installed, or on an end user's ability to copy, modify, or redistribute it.
+
+  This permission applies only to distribution through those channels. It does
+  not otherwise limit your rights or obligations under the GNU Affero General
+  Public License version 3, and it does not waive section 13: the Corresponding
+  Source for any version conveyed through those channels remains publicly
+  available at https://github.com/AnmolS1/FlatFold.
+
+  If you modify this Program, you may extend this exception to your version,
+  but you are not obligated to do so.

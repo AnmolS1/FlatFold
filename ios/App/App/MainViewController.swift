@@ -122,6 +122,12 @@ class MainViewController: CAPBridgeViewController {
             }
         }
 
+        if ProcessInfo.processInfo.arguments.contains("--verify-links") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+                self?.verifyExternalLinks(probe)
+            }
+        }
+
         if ProcessInfo.processInfo.arguments.contains("--verify-audio") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
                 self?.verifyNativeAudio(probe)
@@ -175,6 +181,124 @@ class MainViewController: CAPBridgeViewController {
     /// `appReady`/`appTotal` are the app's OWN notes and are the trial's
     /// baseline: a trial without one is discarded, because a drained pool fails
     /// totally and is indistinguishable from any hypothesis being tested.
+    /// Does an external link strand the WebView?
+    ///
+    /// THE RISK, stated precisely: in a `capacitor://localhost` WebView an
+    /// `<a href="https://…">` that navigates the MAIN FRAME would replace the
+    /// app with a web page, and there is no browser chrome to come back from —
+    /// the user would have to force-quit. Settings → About carries four such
+    /// links, so this is worth answering with a measurement rather than a
+    /// reading of Capacitor's source.
+    ///
+    /// What the source says, for comparison: `WebViewDelegationHandler`
+    /// CANCELS any top-level navigation to a non-application URL and hands it to
+    /// `UIApplication.shared.open`, and separately handles `target="_blank"` in
+    /// `createWebViewWith` the same way. `allowNavigation` would override that,
+    /// and this app configures none. So the prediction is "never strands".
+    ///
+    /// Reads `location.href` before and after clicking the REAL link, rather
+    /// than a synthesised one — provenance has mattered before in this codebase.
+    private func verifyExternalLinks(_ probe: os.Logger) {
+        #if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        func value(_ name: String) -> String? {
+            if let a = args.first(where: { $0.hasPrefix("--\(name)=") }) {
+                return String(a.dropFirst(name.count + 3))
+            }
+            if let i = args.firstIndex(of: "--\(name)") { return args.dropFirst(i + 1).first }
+            return nil
+        }
+        let js = """
+        try {
+        const wait = (ms) => new Promise(r => setTimeout(r, ms));
+        // Settings has TWO homes and the probe must accept either: a header
+        // glyph with aria-label="Settings" on a wide window, and a bottom
+        // tab-bar item labelled by its TEXT on a narrow one (chatChrome.ts
+        // showHeaderSettings). The first version of this probe looked only for
+        // the aria-label, found nothing on a default-sized Catalyst window, and
+        // reported "no View source link" — which reads as a missing link rather
+        // than a probe that never opened the dialog.
+        const settingsBtn = () => document.querySelector('button[aria-label="Settings"]')
+          ?? [...document.querySelectorAll('button')].find(b => (b.textContent || '').trim() === 'Settings');
+        const byLabel = (l) => l === 'Settings' ? settingsBtn() : document.querySelector(`button[aria-label="${l}"]`);
+
+        let unlocked = 'n/a';
+        let pwField = null;
+        if (arguments0) {
+          for (let t = 0; t < 40 && !pwField; t++) {
+            pwField = document.querySelector('input[type=password]');
+            if (!pwField && byLabel('Settings')) break;
+            if (!pwField) await wait(1000);
+          }
+        }
+        if (pwField && arguments0) {
+          const setter = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype, 'value').set;
+          setter.call(pwField, arguments0);
+          pwField.dispatchEvent(new Event('input', { bubbles: true }));
+          await wait(300);
+          (pwField.form || pwField.closest('form'))?.requestSubmit?.();
+          await wait(2500);
+          unlocked = document.querySelector('input[type=password]') ? 'failed' : 'ok';
+          await wait(2000);
+        }
+
+        // Settings is a dialog off the chat surface, so the chat has to be up.
+        for (let t = 0; t < 25 && !byLabel('Settings'); t++) await wait(1000);
+        const hadSettingsBtn = !!byLabel('Settings');
+        byLabel('Settings')?.click();
+
+        // POLL for the link rather than waiting a fixed beat. The dialog mounts
+        // a long scrolling form and the first attempt at this reported "no View
+        // source link found" purely because 2.5s was not enough.
+        const find = () => [...document.querySelectorAll('a')]
+          .find(a => /view source/i.test(a.textContent || ''));
+        let link = null;
+        for (let t = 0; t < 20 && !link; t++) { link = find(); if (!link) await wait(1000); }
+
+        if (!link) return 'FLATFOLD_LINKS ' + JSON.stringify({
+          unlocked, note: 'no View source link found', hadSettingsBtn,
+          anchors: document.querySelectorAll('a').length,
+          anchorText: [...document.querySelectorAll('a')].map(a => (a.textContent || '').trim().slice(0, 20)).slice(0, 12),
+          dialogs: document.querySelectorAll('[role=dialog]').length,
+        });
+
+        // Every external link in About, not just the one. They share a pattern,
+        // but "shares a pattern" is an argument and this is a measurement.
+        const wanted = ['view source', 'support', 'privacy policy', 'terms'];
+        const results = [];
+        for (const label of wanted) {
+          const a = [...document.querySelectorAll('a')]
+            .find(x => (x.textContent || '').trim().toLowerCase() === label);
+          if (!a) { results.push({ label, found: false }); continue; }
+          const before = location.href;
+          a.click();
+          await wait(2500);
+          results.push({
+            label, found: true,
+            href: a.getAttribute('href'),
+            target: a.getAttribute('target'),
+            stranded: location.href !== before,
+          });
+          if (location.href !== before) break; // stranded: nothing after this is meaningful
+        }
+
+        return 'FLATFOLD_LINKS ' + JSON.stringify({
+          unlocked,
+          results,
+          anyStranded: results.some(r => r.stranded),
+          allFound: results.every(r => r.found),
+          endedAt: location.href,
+          stillHasApp: !!byLabel('Settings') || !!document.querySelector('input[type=password]'),
+        });
+        } catch (e) {
+          return 'FLATFOLD_LINKS ' + JSON.stringify({ note: 'probe threw: ' + (e && e.message ? e.message : String(e)) });
+        }
+        """
+        runProbeJS(js, pw: value("unlock-pw") ?? "", newNote: "no", probe)
+        #endif
+    }
+
     /// Verify NATIVE voice-note playback end to end, unattended.
     ///
     /// Replaces the `--audio-experiment` conditions, which measured `<audio>`
@@ -371,9 +495,17 @@ class MainViewController: CAPBridgeViewController {
         bridge?.webView?.callAsyncJavaScript(
             js, arguments: ["arguments0": pw, "arguments1": newNote], in: nil, in: .page
         ) { result in
+            // BOTH sinks, deliberately. os_log is readable on a Mac; `print`
+            // reaches stdout, which is the ONLY one `devicectl … --console`
+            // carries from a real device — an earlier iOS probe ran correctly
+            // and its result was simply unreadable.
             switch result {
-            case .success(let v): probe.notice("\(String(describing: v), privacy: .public)")
-            case .failure(let e): probe.notice("FLATFOLD_VERIFY_FAIL \(String(describing: e), privacy: .public)")
+            case .success(let v):
+                probe.notice("\(String(describing: v), privacy: .public)")
+                print("PROBE \(String(describing: v))")
+            case .failure(let e):
+                probe.notice("FLATFOLD_VERIFY_FAIL \(String(describing: e), privacy: .public)")
+                print("PROBE_FAIL \(String(describing: e))")
             }
         }
         #endif

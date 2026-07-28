@@ -74,6 +74,8 @@ Found something? See [SECURITY.md](./SECURITY.md): email security@flatfold.ponde
 
 [AGPL-3.0](./LICENSE). It's a privacy tool, so the license is the strong-copyleft kind: if you run a modified version as a service, you have to publish your source. Nobody gets to take this, quietly weaken the privacy, and ship it closed.
 
+There's one **additional permission** at the end of [LICENSE](./LICENSE), covering distribution through the App Store. Apple's standard EULA imposes terms the AGPL otherwise forbids — a device limit, DRM — and that conflict is what got VLC pulled from the store in 2011. The exception resolves it for Apple's channels only; everything else about the AGPL, including the requirement that the source stay public, is untouched.
+
 ---
 
 Built by [Anmol](https://ponderance.dev), part of [ponderance.dev](https://ponderance.dev).

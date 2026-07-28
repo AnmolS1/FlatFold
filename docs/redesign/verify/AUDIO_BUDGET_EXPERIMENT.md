@@ -386,3 +386,49 @@ Directions that follow from the model, none tested:
 
 Re-try lazy `src`, element-on-play, singleton players, element-count caps,
 containment, cloning, or React-rendered elements. All measured, all zero.
+
+---
+
+# Round 7 — the window CAN be reopened. A WebView reload restores grants.
+
+    trial 1000/reload-after:  app=31/40   unlocked=ok   opened='DIdisco...'
+
+`webView.reload()` mid-session, then unlock and re-open the conversation: **31
+of 40 notes loaded**. The `unlocked=ok` is the proof it was a real page load —
+the keystore re-locked and had to be unlocked again, which only happens on a
+fresh document.
+
+This is the first POSITIVE result in the investigation. Everything before it
+established what does not work.
+
+## Model, now complete
+
+- media loaders are granted in a window tied to **page load**, capped at ~30
+- they are **never reclaimed** within that page — not by unmounting elements,
+  not by remounting the whole view
+- **a new page load reopens the window**
+
+A native `reload()` is a new page load. A React remount is not. That is the
+whole distinction, and it took every other avenue being closed to see it.
+
+## What a fix would cost — this is a product decision
+
+Reloading the WebView **re-locks the keystore**. That is the deliberate
+behaviour documented in STATUS.md: the Argon2-derived key lives only in the JS
+heap and a reload drops it. So "reload to fix audio" means "ask for the password
+again", which is hostile if it happens whenever a note arrives.
+
+Softening it, in rough order of appeal:
+- **Face ID / passkey unlock** already exist and make re-unlocking a gesture
+  rather than a typed password. On Mac that is Touch ID.
+- **Reload only on demand** — a "reload to play older notes" affordance on a
+  note that will not play, rather than automatically.
+- **Reload at a natural boundary** — e.g. when returning to the app after a
+  long background period, when a re-unlock is expected anyway.
+
+## UNVERIFIED
+
+n=1. Replicate before building on it: `reload` should be a standard condition in
+the next batch, alongside `control`. It is also worth checking whether the
+reload grant is the same ~30 cap (31 here suggests yes) and whether repeated
+reloads keep working or degrade.

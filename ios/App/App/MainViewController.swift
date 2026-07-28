@@ -420,8 +420,29 @@ class MainViewController: CAPBridgeViewController {
           });
         }
         """
+        // `reload` asks whether the grant window can be REOPENED — the only
+        // route to a real fix, since grants are made once per page load and are
+        // never reclaimed within one. Reload the WebView, let it come back up,
+        // then run the ordinary probe: if the app's own notes load again, a
+        // reload reopens the window and the app has something it can do about
+        // this. The probe's own JS cannot orchestrate it, because the reload
+        // destroys the context it is running in.
+        if condition == "reload" {
+            bridge?.webView?.reload()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in
+                self?.runProbeJS(js, condition: "reload-after", trial: trial, pw: unlockPw, probe)
+            }
+            return
+        }
+        runProbeJS(js, condition: condition, trial: trial, pw: unlockPw, probe)
+        #endif
+    }
+
+    /// Run the probe body and log its one JSON line.
+    private func runProbeJS(_ js: String, condition: String, trial: String, pw: String, _ probe: os.Logger) {
+        #if DEBUG
         bridge?.webView?.callAsyncJavaScript(
-            js, arguments: ["arguments0": condition, "arguments1": trial, "arguments2": unlockPw], in: nil, in: .page
+            js, arguments: ["arguments0": condition, "arguments1": trial, "arguments2": pw], in: nil, in: .page
         ) { result in
             switch result {
             case .success(let v): probe.notice("\(String(describing: v), privacy: .public)")

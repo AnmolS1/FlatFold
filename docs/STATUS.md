@@ -9,22 +9,20 @@ Read in this order:
 | --- | --- | --- |
 | 1 | **this file** | what is true today, and the "Deliberate behaviours" list — several of the most surprising behaviours in the app are intentional and already documented. Do not file them. |
 | 2 | `redesign/HANDOFF_2026-07-27.md` | **the current handoff.** Media/Mac round + the Catalyst migration, and what is left to finish macOS. |
-| 2b | `redesign/HANDOFF_2026-07-26.md` | the previous one. Still accurate for the FULL_AUDIT_2 round; superseded on anything media- or Mac-shaped. |
 | 3 | `redesign/HANDOFF_STEP6_CONTINUATION.md` | **authoritative for the hard constraints** (the frozen files). Otherwise historical — its status section is stale. |
 | 4 | whatever the task needs | the D1–D7 design specs, `FULL_AUDIT_2.md`, `NATIVE_MACOS_PLAN.md`, `DESKTOP_SHELL_OPTIONS.md`, `THREAT_MODEL.md` |
 
-**Open research question:** `redesign/MAC_AUDIO_ROUND3_BRIEF.md` (current; supersedes `HANDOFF_MAC_AUDIO_RESEARCH.md`) — voice-note
-playback on Mac. Carries the measured evidence, the ruled-out list (each entry
-cost a build/reproduce cycle — do not re-test them), and the CLI
-build/launch/read-the-log loop that Catalyst makes possible.
+**Mac voice-note playback:** `redesign/MAC_AUDIO_FINDINGS.md` — ANSWERED, and
+what is left is a product decision rather than a diagnosis. Loaders are granted
+per PAGE LOAD, capped at ~30, never reclaimed within a page; a WebView reload
+reopens the window. Carries the refuted list (each entry cost a build/reproduce
+cycle — do not re-test them) and the trial harness.
 
 For macOS specifically: `ios/CATALYST.md` (build mechanics),
 `redesign/verify/MAC_VOICE_NOTES.md` (what is proven vs ruled out),
 `DESKTOP_SHELL_OPTIONS.md` (the decision, now genuinely balanced).
 
-Superseded, read only for history: `redesign/HANDOFF_TO_CLAUDE_CODE.md`,
-`redesign/NATIVE_BUILD_PROMPT.md`, `FULL_AUDIT.md` (superseded by `FULL_AUDIT_2.md`),
-and the demo-account section of `redesign/D5_appstore_copy.md` (superseded by
+Superseded, read only for history: the demo-account section of `redesign/D5_appstore_copy.md` (superseded by
 `redesign/D5b_app_review_notes.md`).
 
 **Two things to check before debugging anything**, both in Settings → About:

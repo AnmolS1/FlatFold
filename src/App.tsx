@@ -16,10 +16,13 @@ import { Login } from './pages/Login';
 // the same app-shell integrity guarantee as the entry bundle.
 const Chat = lazy(() => import('./pages/Chat').then((m) => ({ default: m.Chat })));
 import { ExperimentAudio } from './components/debug/ExperimentAudio';
+import { useDebugRemountKey } from './components/debug/useDebugRemountKey';
 
 const Transparency = lazy(() => import('./pages/Transparency').then((m) => ({ default: m.Transparency })));
 
 function App() {
+	// DEBUG-only: lets a probe force the conversation view to remount.
+	const debugRemountKey = useDebugRemountKey();
 	// Mark the document as the native shell so native-only CSS applies (e.g.
 	// disabling the long-press text-selection callout). Set in an effect so the
 	// Capacitor bridge is guaranteed attached.
@@ -60,7 +63,7 @@ function App() {
 											    mounted, so you can still reach the UI that would
 											    delete it. */}
 											<ErrorBoundary>
-												<Chat />
+												<Chat key={debugRemountKey} />
 											</ErrorBoundary>
 										</ProtectedRoute>
 									}

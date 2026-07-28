@@ -332,3 +332,57 @@ render" framing needs re-deriving.
 24 of 61 rows discarded, still ~40%, almost all "app rendered no notes" — the
 DOM unlock remains flaky. It fails safely, but fixing it would roughly double
 throughput.
+
+---
+
+# Round 6 — remount REFUTES the initial-render model too
+
+`remount` now genuinely works, via a DEBUG hook the app exposes
+(`useDebugRemountKey`, bumping a `key` on `<Chat />`). `midEls=0` proves the
+subtree was torn down — the three earlier triggers never achieved that and
+their before==after numbers were meaningless.
+
+    before=30/40   after=0/40   midEls=0
+
+A fresh mount of the conversation view, rendering all 40 notes again from
+scratch, granted **zero** loaders — where the very same view granted 30 on the
+first mount of that page.
+
+## So the grant is per PAGE LOAD, and is never returned
+
+| observation | fits |
+| --- | --- |
+| first conversation render: 30 of 40 | ~30 grants available per page load |
+| every added element, every variant: 0 | the window has closed |
+| remount, 40 fresh elements: 0 | closed, and unmounting the original 30 did NOT return anything |
+| `347944c` (element on play, 0 rendered at mount): 0 | closed by then, even though nothing had spent the budget |
+| "reopening the app clears it" (the app's own error text) | a relaunch is a new page load |
+
+Two properties, both now measured:
+1. **Grants happen only during an early window** tied to page load, not to view
+   mount. A remount is not a new window.
+2. **Grants are never reclaimed within a page.** Tearing down the 30 elements
+   holding them freed nothing for the 40 that replaced them.
+
+Note this kills the reading in round 5 that a *view's* first render is what
+matters. It is the PAGE's.
+
+## What this means for a fix
+
+Bleak, and worth stating plainly: **a note that is not present during the early
+window after page load can probably never be played in that session.** That is
+consistent with every user report — new notes never play until the app is
+relaunched.
+
+Directions that follow from the model, none tested:
+- spend the ~30 on the notes most likely to be played (the most recent), and
+  accept that older ones need a relaunch — a product decision, not just a fix
+- find whether the window can be reopened or extended at all (a WKWebView
+  reload? a new WKWebView?), which is the only route to a real fix
+- `convertFileSrc` instead of `blob:` remains untested on the app page and is
+  the one input variable never varied
+
+## Do not
+
+Re-try lazy `src`, element-on-play, singleton players, element-count caps,
+containment, cloning, or React-rendered elements. All measured, all zero.

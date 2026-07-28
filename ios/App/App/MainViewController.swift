@@ -122,10 +122,9 @@ class MainViewController: CAPBridgeViewController {
             }
         }
 
-        // Matches both `--audio-experiment` and `--audio-experiment=<condition>`.
-        if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--audio-experiment") }) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 50) { [weak self] in
-                self?.runAudioExperiment(probe)
+        if ProcessInfo.processInfo.arguments.contains("--verify-audio") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+                self?.verifyNativeAudio(probe)
             }
         }
 
@@ -176,7 +175,22 @@ class MainViewController: CAPBridgeViewController {
     /// `appReady`/`appTotal` are the app's OWN notes and are the trial's
     /// baseline: a trial without one is discarded, because a drained pool fails
     /// totally and is indistinguishable from any hypothesis being tested.
-    private func runAudioExperiment(_ probe: os.Logger) {
+    /// Verify NATIVE voice-note playback end to end, unattended.
+    ///
+    /// Replaces the `--audio-experiment` conditions, which measured `<audio>`
+    /// elements — the exact thing this platform no longer renders. The unlock and
+    /// open-the-conversation preamble is kept verbatim, because both were paid
+    /// for: every UI-automation route to the keystore gate failed under a runner
+    /// while working by hand, and a batch once measured a chat list with no notes
+    /// in it because the row was found by screen position rather than by name.
+    ///
+    /// Answers the checks that can be answered without a second device: no
+    /// `<audio>` elements exist, every note plays including the tail, notes play
+    /// in any order and repeatedly, and a paused note resumes where it stopped.
+    /// The resume position is read from the PLUGIN'S OWN LOG (`from=` / `resume
+    /// at=`) rather than the DOM, because the DOM only shows a waveform and the
+    /// number that matters is the one Swift actually seeked to.
+    private func verifyNativeAudio(_ probe: os.Logger) {
         #if DEBUG
         let args = ProcessInfo.processInfo.arguments
         func value(_ name: String) -> String? {
@@ -186,59 +200,53 @@ class MainViewController: CAPBridgeViewController {
             if let i = args.firstIndex(of: "--\(name)") { return args.dropFirst(i + 1).first }
             return nil
         }
-        let condition = value("audio-experiment") ?? "control"
-        let trial = value("trial") ?? "0"
-        // DEBUG-ONLY test credential, for unattended trials.
+        // DEBUG-ONLY test credential, for unattended runs.
         //
-        // The keystore gate blocks the chat, and with no chat there are no
-        // notes and no trial. Every UI-automation route to it failed under the
-        // runner while working by hand — the click lands, the Paste menu item
-        // is enabled, the clipboard is populated, and the field stays empty —
-        // which points at first responder in a freshly launched WKWebView.
-        //
-        // The tradeoff, stated rather than buried: this puts a plaintext
-        // password into the web context. It is confined to `#if DEBUG`, so it
-        // cannot exist in TestFlight or the App Store; it is a throwaway test
-        // account, never the user's; it is never logged; and it arrives only
-        // when the operator passes --unlock-pw explicitly. It is NOT a
-        // mechanism the app has otherwise, and must never be reused for one.
+        // The keystore gate blocks the chat, and with no chat there are no notes
+        // and nothing to verify. The tradeoff, stated rather than buried: this
+        // puts a plaintext password into the web context. It is confined to
+        // `#if DEBUG`, so it cannot exist in TestFlight or the App Store; it is a
+        // throwaway test account, never the user's; it is never logged; and it
+        // arrives only when the operator passes --unlock-pw explicitly. It is NOT
+        // a mechanism the app has otherwise, and must never be reused for one.
         let unlockPw = value("unlock-pw") ?? ""
 
         let js = """
-        // EVERY path returns a STRING.
-        //
-        // `callAsyncJavaScript` rejected with WKErrorDomain Code=5, "JavaScript
-        // execution returned a result of an unsupported type", and a trial then
-        // reported NO RESULT even though the app was correctly driven. Any path
-        // that falls out without an explicit string return — a throw, or a
-        // branch that ends without one — produces exactly that, and it is
-        // indistinguishable from the probe never running.
+        // EVERY path returns a STRING. `callAsyncJavaScript` rejects with
+        // WKErrorDomain Code=5 for any other result type, and that failure is
+        // indistinguishable from the probe never having run.
         try {
-        const condition = arguments0, trial = arguments1;
         const wait = (ms) => new Promise(r => setTimeout(r, ms));
-        const st = (e) => ({ ready: e.readyState, net: e.networkState, err: e.error?.code ?? null });
+        // The play/pause control, per note. Found by accessible name, which is
+        // the app's own contract with a screen reader and therefore the most
+        // stable handle in the DOM.
+        //
+        // BOTH LABELS, EXACTLY. A suffix match on "voice note" also caught the
+        // composer's "Record a voice note" button, and the first run of this
+        // probe duly clicked it — starting a real recording, and then reporting
+        // the note it could not pause as a playback failure.
+        const notes = () => [...document.querySelectorAll(
+          'button[aria-label="Play voice note"], button[aria-label="Pause voice note"]')];
+        const isPlaying = (b) => /^Pause/.test(b.getAttribute('aria-label') || '');
 
-        // Unlock from the DOM if the gate is up. React owns this input, so
-        // assigning .value is not enough — set it through the native setter and
-        // dispatch the event React listens for, or the state never updates and
-        // submitting sends an empty password.
         let unlocked = 'n/a';
-        // POLL for the gate. A single check ran at a fixed delay after launch
-        // and missed it whenever the app was still booting through Argon2/WASM
-        // — roughly 40% of trials, every one of them then discarded for "app
-        // rendered no notes". Waiting costs seconds; missing costs a trial.
         let pwField = null;
-        if (arguments2) {
+        if (arguments0) {
+          // POLL for the gate. A single check at a fixed delay missed it whenever
+          // the app was still booting through Argon2/WASM — roughly 40% of runs.
           for (let t = 0; t < 40 && !pwField; t++) {
             pwField = document.querySelector('input[type=password]');
-            if (!pwField && document.querySelector('audio')) break; // already unlocked
+            if (!pwField && notes().length) break; // already unlocked
             if (!pwField) await wait(1000);
           }
         }
-        if (pwField && arguments2) {
+        if (pwField && arguments0) {
+          // React owns this input, so assigning .value is not enough — set it
+          // through the native setter and dispatch the event React listens for,
+          // or the state never updates and submitting sends an empty password.
           const setter = Object.getOwnPropertyDescriptor(
             window.HTMLInputElement.prototype, 'value').set;
-          setter.call(pwField, arguments2);
+          setter.call(pwField, arguments0);
           pwField.dispatchEvent(new Event('input', { bubbles: true }));
           await wait(300);
           (pwField.form || pwField.closest('form'))?.requestSubmit?.();
@@ -252,20 +260,13 @@ class MainViewController: CAPBridgeViewController {
           }
           await wait(4000);
         }
-        const mask = (els, f) => els.map(f).join('');
 
         // OPEN THE CONVERSATION FROM THE DOM, not with a synthetic click at a
-        // screen coordinate. The chat row's position depends on window size,
-        // layout (the narrow one-pane vs wide two-pane), and scroll — three
-        // things that changed under an overnight batch and left every trial
-        // measuring a chat list with no notes in it. In here we can just ask
-        // for the link.
+        // screen coordinate. The row's position depends on window size, layout
+        // and scroll — three things that changed under an overnight batch.
         let opened = '';
-        if (!document.querySelector('audio')) {
-          for (let t = 0; t < 20 && !document.querySelector('audio'); t++) {
-            // Rows are BUTTONS with click handlers, not links — there is no
-            // href to match on. Exclude the chrome by name rather than by
-            // position, which is the thing that keeps changing.
+        if (!notes().length) {
+          for (let t = 0; t < 20 && !notes().length; t++) {
             const skip = /search|panic|settings|new message|chats|contacts|theme/i;
             const row = [...document.querySelectorAll('button')]
               .find(b => (b.textContent || '').trim().length > 2 && !skip.test(b.textContent || ''));
@@ -273,190 +274,103 @@ class MainViewController: CAPBridgeViewController {
             else await wait(1000);
           }
         }
+        for (let t = 0; t < 20 && !notes().length; t++) await wait(1000);
 
-        // Baseline: wait for the conversation's own notes to settle.
-        let app = [];
-        for (let t = 0; t < 45; t++) {
-          app = [...document.querySelectorAll('audio')];
-          if (app.length && app.some(e => e.readyState >= 1 || e.networkState === 3)) break;
-          await wait(1000);
+        const all = notes();
+        const audioEls = document.querySelectorAll('audio').length;
+        const errText = () => [...document.querySelectorAll('p')]
+          .map(p => p.textContent || '').filter(t => /play|audio|resourc|unavail/i.test(t));
+
+        // CHECK 1 + 3: every note plays, including the ones past the old ~30
+        // line. Clicking the next note stops the previous one natively, so this
+        // is also the "in any order, repeatedly" pass at its most demanding —
+        // forty starts back to back with no reload in between.
+        // CHECKED AT 250ms, not at 900ms. The shortest note in the test
+        // conversation is 0.58s, so a late check catches it after it has
+        // already finished and reads a successful play as a failure.
+        const failed = [];
+        for (let i = 0; i < all.length; i++) {
+          all[i].click();
+          await wait(250);
+          if (!isPlaying(all[i])) failed.push(i);
+          await wait(650);
         }
-        await wait(4000);
-        app = [...document.querySelectorAll('audio')];
-        const appReady = app.filter(e => e.readyState >= 1).length;
+        const errorsAfterAll = errText();
 
-        // Borrow a URL that PROVABLY loads, so the source is never the variable.
-        const good = app.find(e => e.readyState >= 1);
-        const srcOf = () => good ? good.src : null;
-
-        const mine = [];
-        // `host` is the uncontrolled variable from round 4: the probe appended
-        // to document.body while the app's own elements live INSIDE the React
-        // tree, in the scrolling message container. Containment was never
-        // isolated from provenance, and it is just as plausible an explanation
-        // for "added elements never load".
-        const mk = (src, host) => {
-          const a = document.createElement('audio');
-          a.preload = 'metadata'; a.playsInline = true;
-          if (src) a.src = src;
-          (host || document.body).appendChild(a);
-          mine.push(a);
-          return a;
-        };
-        // The container the app's own working notes actually live in.
-        const noteHost = () => (good && good.parentNode) ? good.parentNode : document.body;
-
-        let note = '';
-        if (condition === 'control') {
-          // Baseline only. Interleaved through every batch: if the control
-          // drifts, the batch is void and no condition in it can be trusted.
-        } else if (condition === 'click3') {
-          for (let i = 0; i < 3; i++) { mk(srcOf()); await wait(1500); }
-          await wait(9000);
-        } else if (condition === 'batch10') {
-          // Batch vs timing: 10 at once. If several load where click3's 3 did
-          // not, the variable is BATCH, not when the load starts.
-          for (let i = 0; i < 10; i++) mk(srcOf());
-          await wait(12000);
-        } else if (condition === 'reinsert') {
-          // Does an element keep its loader across DOM removal + re-insert?
-          if (good) {
-            const before = st(good);
-            const parent = good.parentNode, next = good.nextSibling;
-            good.remove(); await wait(2000); parent.insertBefore(good, next);
-            await wait(8000);
-            note = `before=${JSON.stringify(before)} after=${JSON.stringify(st(good))}`;
-          }
-        } else if (condition === 'delayed3') {
-          // Same as click3 but created OUTSIDE any user-activation window.
-          await wait(2000);
-          for (let i = 0; i < 3; i++) { mk(srcOf()); await wait(1500); }
-          await wait(9000);
-        } else if (condition === 'container3') {
-          // Same as click3, but inserted into the container that holds the
-          // app's own loaded notes. If THESE load and click3's do not, the
-          // answer is DOM containment, not how the element was created.
-          for (let i = 0; i < 3; i++) { mk(srcOf(), noteHost()); await wait(1500); }
-          await wait(9000);
-        } else if (condition === 'clone3') {
-          // Clone elements the app itself rendered and reinsert the clones
-          // beside the originals. Closest possible copy of a working element:
-          // same attributes, same source, same parent — differing only in that
-          // React did not create it.
-          for (let i = 0; i < 3; i++) {
-            if (!good) break;
-            const c = good.cloneNode(true);
-            good.parentNode.appendChild(c);
-            mine.push(c);
-            await wait(1500);
-          }
-          await wait(9000);
-        } else if (condition === 'react3') {
-          // Ask REACT to render the elements (components/debug/ExperimentAudio).
-          // Every imperative variant loads zero, including a clone of a working
-          // element in its own parent, so this tests the surviving hypothesis
-          // directly instead of by elimination: does an element created inside
-          // React's commit get a media loader where an appended one does not?
-          window.dispatchEvent(new CustomEvent('flatfold:exp-audio',
-            { detail: { count: 3, src: srcOf() } }));
-          await wait(12000);
-          mine.push(...document.querySelectorAll('audio[data-exp="react"]'));
-        } else if (condition === 'remount') {
-          // THE FIX CANDIDATE. If a loader is granted only at a view's first
-          // render, unmounting the conversation and rendering it again should
-          // rescue the stalled tail: the notes are then part of a FRESH initial
-          // render rather than additions to a mounted one.
-          //
-          // Uses a DEBUG hook the APP exposes (useDebugRemountKey), because
-          // three attempts to force this from outside all failed to unmount
-          // anything — a tab button matching no element, history.back() which
-          // did not change the route, and a synthetic popstate the router
-          // ignored. Each reported before==after, which reads as "remount does
-          // not help" and would have been a completely false conclusion.
-          const before = app.filter(e => e.readyState >= 1).length;
-          const beforeTotal = app.length;
-          const skipNav = /search|panic|settings|new message|theme|chats|contacts/i;
-          window.dispatchEvent(new CustomEvent('flatfold:exp-remount'));
-          await wait(3000);
-          const mid = document.querySelectorAll('audio').length;
-          await wait(4000);
-          // Remounting <Chat /> resets its state, so it comes back on the
-          // conversation LIST with no notes — after=0/0 on the first attempt.
-          // Re-open the conversation so the notes render again, this time as
-          // part of a fresh initial render.
-          const reopen = [...document.querySelectorAll('button')]
-            .find(b => (b.textContent || '').trim().length > 2 && !skipNav.test(b.textContent || ''));
-          if (reopen) { reopen.click(); }
-          await wait(15000);
-          const now = [...document.querySelectorAll('audio')];
-          const after = now.filter(e => e.readyState >= 1).length;
-          // `midEls` is the proof the remount actually happened: it should drop
-          // to 0 while the subtree is torn down and rebuilt. If it does not,
-          // the trigger failed again and the numbers mean nothing.
-          note = `before=${before}/${beforeTotal} after=${after}/${now.length} midEls=${mid}`;
-          app = now;
-        } else if (condition === 'fixture3') {
-          // 3 elements from the generated fixture rather than a real note, to
-          // confirm the source stays irrelevant under the cooled protocol.
-          const buf = await (await fetch('/fixture.m4a')).arrayBuffer();
-          for (let i = 0; i < 3; i++) { mk(URL.createObjectURL(new Blob([buf.slice(0)], {type:'audio/mp4'}))); await wait(1500); }
-          await wait(9000);
-        } else {
-          note = 'unknown condition';
+        // CHECK 4: pause A, play B, come back to A. The position it resumes from
+        // is in the plugin's log line, not here.
+        // Every wait here is short on purpose: these notes are 2-4 seconds, and
+        // a note that ENDS while the probe is waiting looks exactly like a note
+        // that never played.
+        let resume = 'skipped';
+        if (all.length >= 2) {
+          const A = all[0], B = all[1];
+          A.click(); await wait(1100);         // play A for ~1.1s
+          const playedA = isPlaying(A);
+          A.click(); await wait(400);          // pause A
+          const pausedA = !isPlaying(A);
+          B.click(); await wait(400);          // play B — A is no longer loaded
+          const playedB = isPlaying(B);
+          A.click(); await wait(300);          // back to A: must resume, not restart
+          const backToA = isPlaying(A);
+          A.click();                            // leave it quiet
+          resume = `playedA=${playedA} pausedA=${pausedA} playedB=${playedB} backToA=${backToA}`;
         }
 
-        const out = {
-          trial: Number(trial), condition,
-          appReady, appTotal: app.length,
-          expReady: mine.filter(e => e.readyState >= 1).length,
-          expTotal: mine.length,
-          readyMask: mask(mine, e => e.readyState),
-          netMask: mask(mine, e => e.networkState),
-          errors: mine.map(e => e.error?.code ?? null).filter(c => c !== null),
-          appReadyMask: mask(app, e => e.readyState),
-          borrowedRealUrl: !!good,
-          opened, unlocked,
-          note,
-        };
-        mine.forEach(e => { e.removeAttribute('src'); e.remove(); });
-        return 'FLATFOLD_EXP ' + JSON.stringify(out);
+        // CHECK 2 + 7, opt-in with --verify-new-note because it SENDS a real
+        // voice note to whichever conversation is open. It is the only way to
+        // test the symptom that started all of this — a note that ARRIVES never
+        // played, because it mounted after the page-load grant window closed —
+        // and it exercises recording-after-playback in the same pass.
+        let newNote = 'skipped';
+        if (arguments1 === 'yes') {
+          const before = notes().length;
+          const rec = document.querySelector('button[aria-label="Record a voice note"]');
+          if (!rec) newNote = 'no record button';
+          else {
+            rec.click(); await wait(2500);
+            document.querySelector('button[aria-label="Stop recording"]')?.click();
+            let after = before;
+            for (let t = 0; t < 45 && after <= before; t++) { await wait(1000); after = notes().length; }
+            if (after > before) {
+              const fresh = notes()[after - 1];
+              fresh.click(); await wait(250);
+              const plays = isPlaying(fresh);
+              fresh.click();
+              newNote = `arrived=${after - before} plays=${plays}`;
+            } else newNote = `did not arrive (still ${after})`;
+          }
+        }
+
+        return 'FLATFOLD_VERIFY ' + JSON.stringify({
+          unlocked, opened,
+          notes: all.length,
+          audioEls,                 // MUST be 0 on this platform
+          playedOk: all.length - failed.length,
+          failedIdx: failed.slice(0, 12),
+          errors: errorsAfterAll.slice(0, 3),
+          resume, newNote,
+        });
         } catch (e) {
-          return 'FLATFOLD_EXP ' + JSON.stringify({
-            trial: Number(arguments1), condition: arguments0,
-            appReady: 0, appTotal: 0, expReady: 0, expTotal: 0,
-            readyMask: '', netMask: '', errors: [], appReadyMask: '',
-            borrowedRealUrl: false,
-            note: 'probe threw: ' + (e && e.message ? e.message : String(e)),
-          });
+          return 'FLATFOLD_VERIFY ' + JSON.stringify({
+            note: 'probe threw: ' + (e && e.message ? e.message : String(e)) });
         }
         """
-        // `reload` asks whether the grant window can be REOPENED — the only
-        // route to a real fix, since grants are made once per page load and are
-        // never reclaimed within one. Reload the WebView, let it come back up,
-        // then run the ordinary probe: if the app's own notes load again, a
-        // reload reopens the window and the app has something it can do about
-        // this. The probe's own JS cannot orchestrate it, because the reload
-        // destroys the context it is running in.
-        if condition == "reload" {
-            bridge?.webView?.reload()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in
-                self?.runProbeJS(js, condition: "reload-after", trial: trial, pw: unlockPw, probe)
-            }
-            return
-        }
-        runProbeJS(js, condition: condition, trial: trial, pw: unlockPw, probe)
+        let newNote = args.contains("--verify-new-note") ? "yes" : "no"
+        runProbeJS(js, pw: unlockPw, newNote: newNote, probe)
         #endif
     }
 
+
     /// Run the probe body and log its one JSON line.
-    private func runProbeJS(_ js: String, condition: String, trial: String, pw: String, _ probe: os.Logger) {
+    private func runProbeJS(_ js: String, pw: String, newNote: String, _ probe: os.Logger) {
         #if DEBUG
         bridge?.webView?.callAsyncJavaScript(
-            js, arguments: ["arguments0": condition, "arguments1": trial, "arguments2": pw], in: nil, in: .page
+            js, arguments: ["arguments0": pw, "arguments1": newNote], in: nil, in: .page
         ) { result in
             switch result {
             case .success(let v): probe.notice("\(String(describing: v), privacy: .public)")
-            case .failure(let e): probe.notice("FLATFOLD_EXP_FAIL \(String(describing: e), privacy: .public)")
+            case .failure(let e): probe.notice("FLATFOLD_VERIFY_FAIL \(String(describing: e), privacy: .public)")
             }
         }
         #endif

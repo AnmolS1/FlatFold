@@ -356,6 +356,9 @@ class MainViewController: CAPBridgeViewController {
             note: 'probe threw: ' + (e && e.message ? e.message : String(e)) });
         }
         """
+        // --verify-new-note SENDS A REAL VOICE NOTE to whichever conversation is
+        // open, to a real contact, on both sides, permanently. Opt-in for that
+        // reason and for no other: "verify" reads as harmless and this is not.
         let newNote = args.contains("--verify-new-note") ? "yes" : "no"
         runProbeJS(js, pw: unlockPw, newNote: newNote, probe)
         #endif

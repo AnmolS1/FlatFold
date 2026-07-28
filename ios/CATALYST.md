@@ -103,6 +103,26 @@ likely to succeed, so `BUILD SUCCEEDED` alone means little on a migration.
 
 `Pods/` and `App.xcworkspace/` are gitignored; `pod install` regenerates both.
 
+## Regression-testing voice notes on this platform
+
+```bash
+open -n ios/App/build/DDcat/Build/Products/Debug-maccatalyst/App.app \
+  --args --verify-audio --unlock-pw="$PW"
+/usr/bin/log show --last 4m --info --debug \
+  --predicate 'subsystem == "dev.flatfold"' --style compact
+```
+
+`--verify-audio` (DEBUG only) unlocks from the DOM, opens the conversation by
+accessible name, plays every note, and runs the pause/switch/resume sequence.
+It is the only thing that exercises the `NEED_DATA` resume fallback on real
+hardware, and it is what would catch a regression in native playback. Results
+and the two probe bugs it took to trust it:
+`docs/redesign/verify/NATIVE_AUDIO_PLAYBACK.md`.
+
+Adding `--verify-new-note` **sends a real voice note** to the open conversation.
+That is the only way to test a note that ARRIVES, and the reason it is a
+separate flag.
+
 ## Not yet done
 
 Launching and signing it, and confirming the actual payoff: that the real macOS

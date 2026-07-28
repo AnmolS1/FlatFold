@@ -82,11 +82,18 @@ cold at the CoreAudio HAL, not merely at the API, and the session came back to
 
 Re-verified 2026-07-28 on a real iPhone 14 Plus, after the component was split
 into two backends — the `<audio>` branch was rewritten in the same commit, so
-"iOS was unaffected by the bug" was no longer sufficient. A Debug build was
-installed on the device and **Anmol confirmed voice notes play by hand**, which
-is better evidence than the probe would have been. The gate reads
-`isMacCatalystApp || isiOSAppOnMac`, both false there, so the element path is
-what ran.
+"iOS was unaffected by the bug" stopped being sufficient. A Debug build was
+installed on the device and **Anmol confirmed voice notes play, by hand**.
+
+**This is weaker evidence than the Catalyst checks above, and deliberately
+labelled as such.** Hearing audio does not tell you which backend produced it.
+The claim that iOS ran the `<audio>` path is REASONED, not observed: the gate is
+`isMacCatalystApp || isiOSAppOnMac`, both false on an iPhone. The census was
+never read on device — the probe's result goes to `os_log`, which
+`devicectl --console` does not carry, and reading it would mean flipping the pod
+mode back to iOS and rebuilding. **One census line showing `audioEls: 41` would
+close this properly**, and it is the obvious first move if anything about iOS
+playback ever looks wrong.
 
 ## What is NOT covered here
 
@@ -94,6 +101,10 @@ what ran.
 - **A second device sending.** Check 2 was satisfied by producing a note on this
   device, which mounts after the page load in exactly the same way. A note
   arriving over the network is the same DOM event and a different source of it.
+- **Leaving the conversation mid-note.** Playback is not stopped on unmount, so
+  a note keeps playing if you navigate away. Deliberate — unmount also fires on
+  scroll if the message list ever virtualises — but untested and arguably wrong.
+- **Which backend iOS actually ran**, per the section above.
 
 ## Probe bugs worth remembering
 
@@ -110,3 +121,11 @@ Same build, 39/41 before the probe fixes and 41/41 after. The per-note log was
 right both times while the aggregate was wrong twice over, which is the lesson
 this bug has taught at every single stage: **tag the measurement with which note
 it came from, and trust that over the summary.**
+
+## Side effects of running this
+
+`--verify-new-note` **sends a real voice note** to whichever conversation is
+open, and the first run sent a second one by accident (the record-button
+selector bug). Two near-silent notes are now permanent messages on both sides of
+the test conversation. Delete them if they are in the way, and expect one more
+per `--verify-new-note` run.

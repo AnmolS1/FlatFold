@@ -8,7 +8,8 @@ Read in this order:
 | # | file | why |
 | --- | --- | --- |
 | 1 | **this file** | what is true today, and the "Deliberate behaviours" list — several of the most surprising behaviours in the app are intentional and already documented. Do not file them. |
-| 2 | `redesign/HANDOFF_2026-07-27.md` | **the current handoff.** Media/Mac round + the Catalyst migration, and what is left to finish macOS. |
+| 2 | `redesign/HANDOFF_2026-07-28.md` | **the current handoff.** Mac voice notes: diagnosed and half-fixed, plus build mechanics. |
+| 2b | `redesign/HANDOFF_2026-07-27.md` | the previous one. Still accurate for the Catalyst migration. |
 | 3 | `redesign/HANDOFF_STEP6_CONTINUATION.md` | **authoritative for the hard constraints** (the frozen files). Otherwise historical — its status section is stale. |
 | 4 | whatever the task needs | the D1–D7 design specs, `FULL_AUDIT_2.md`, `NATIVE_MACOS_PLAN.md`, `DESKTOP_SHELL_OPTIONS.md`, `THREAT_MODEL.md` |
 

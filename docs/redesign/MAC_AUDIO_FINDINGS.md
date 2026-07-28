@@ -88,12 +88,16 @@ biometry type rather than assuming Face ID.
   of `blob:`. It is the one thing about the source never varied, and the
   recorder already uses that transport.
 
-## 5. Scoping questions still open
+## 5. Scoping
 
-- **Does this reproduce on real iOS?** Everything here is Catalyst. iOS is the
-  shipped target. If iOS is unaffected, Catalyst is a known-degraded platform
-  and macOS can ship with this documented. One build, one conversation, needs a
-  real device (the simulator cannot reach a logged-in state).
+- **Does this reproduce on real iOS? NO — ANSWERED 2026-07-28.** A Debug build
+  was installed on a real iPhone 14 Plus and every voice note in the same 40-note
+  conversation played, including the oldest and the newest. iOS is unaffected.
+
+  Two consequences. **Native playback is gated to Mac Catalyst only** — iOS and
+  web keep the `<audio>` path, which works there and should not be churned. And
+  **iOS, the shipped target, is not broken**, so Catalyst is a known-degraded
+  platform rather than a release blocker.
 - **Was it ever better?** `git bisect` against a conversation with 30+ notes
   would name a regression commit, if one exists.
 

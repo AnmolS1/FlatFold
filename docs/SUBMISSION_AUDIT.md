@@ -28,7 +28,7 @@ You need exact pixel dimensions. Apple checks dimensions, not device provenance.
 
 **[High] The one thing to verify before shooting:** the native UI is gated on `isNativePlatform()` in places (tab bar, docked composer, native-only affordances), so a browser rendering may not match what the native app shows. Screenshots must depict the app as it actually appears on that platform — that's both an Apple expectation and an honesty one. Check a web render side by side with a device screenshot; if they differ materially, force the native layout for the capture (a debug flag that makes `isNativePlatform()` return true) rather than shipping shots of a different UI.
 
-**[Medium] Mac screenshots have a design prerequisite.** `NATIVE_MACOS_PLAN.md` records a layout dead-end above 900px that Catalyst inherits from iPad. At 1440×900 points you will be well into it. Fix the wide layout before shooting, or the Mac screenshots will honestly show an app that doesn't use its window.
+**[Medium → High] Mac screenshots have a design prerequisite, and it is worse than "doesn't use the width."** `NATIVE_MACOS_PLAN.md` records a layout dead-end above 900px that Catalyst inherits from iPad. Measured incidentally on 2026-07-28 while debugging the link probe: **a default-sized Catalyst window renders the PHONE chrome** — `showHeaderSettings`/`showTabBar` in `chatChrome.ts` put Settings in the bottom tab bar rather than the header, which is the narrow-window branch. So a 1440×900 capture would show a Mac app wearing a phone's tab bar, not merely a roomy layout. Fix the wide layout before shooting; this changes what item 5 costs.
 
 ---
 
@@ -112,8 +112,9 @@ All clear 4.5. Vellum's unreadable safety-number panel (1.27) is gone. `test-ui/
 
 ## 8. Claude Code can do these
 
-**Items 1–4 are DONE (2026-07-28).** Item 5 (screenshots) and item 6 (the
-ponderance accuracy pass, which waits for iOS approval) are not. Measured
+**Items 1, 2 and 4 are DONE (2026-07-28). Item 3 is STAGED, not done** — see
+below. Item 5 (screenshots) and item 6 (the ponderance accuracy pass, which
+waits for iOS approval) are not started. Measured
 results, and the one place the measurement stops short:
 
 - **Item 2's external-link risk does not exist here**, on either platform.
@@ -132,9 +133,14 @@ results, and the one place the measurement stops short:
   github.com tab appeared. The strand question is settled; "a real tap opens the
   system browser" rests on Capacitor's source, and is pre-existing behaviour of
   a link that already shipped. One human tap would close it.
-- **Item 3 has an ordering constraint that is easy to get backwards.**
-  `PrivacyInfo.xcprivacy` is bundled, so **build 3 must be uploaded before the
-  ASC privacy label is filled in**, or the shipped build contradicts the label.
+- **Item 3 is HALF done, and the half that is missing is the one that ships.**
+  The manifest now declares the push token, but `PrivacyInfo.xcprivacy` is
+  **bundled**: it is inert until a build carrying it is uploaded, and the only
+  builds on ASC are 1 and 2, both of which predate this change. So the order is
+  **manifest → build 3 → ASC label**, and filling in the label today would
+  describe a build that does not declare the token. The upload is Anmol's step
+  (§9) — this Mac holds only an Apple Development certificate and cannot
+  distribute.
 - Item 1 landed in the **ponderance** repo on branch `fix/home-footer-support`,
   not on `prod`, and is unpushed.
 

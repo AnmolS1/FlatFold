@@ -123,6 +123,13 @@ Adding `--verify-new-note` **sends a real voice note** to the open conversation.
 That is the only way to test a note that ARRIVES, and the reason it is a
 separate flag.
 
+`--verify-links` (same launch pattern) clicks every external link in Settings →
+About and reads `location.href` across each, answering whether an external link
+navigates the WebView away and strands the user with no chrome to come back
+from. Re-run it whenever the Settings layout or those links move. Note it has to
+find Settings in **either** of its two homes — a header glyph when the window is
+wide, a bottom tab-bar item when it is not.
+
 ## Not yet done
 
 Launching and signing it, and confirming the actual payoff: that the real macOS

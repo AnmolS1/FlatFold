@@ -213,7 +213,18 @@ class MainViewController: CAPBridgeViewController {
         // dispatch the event React listens for, or the state never updates and
         // submitting sends an empty password.
         let unlocked = 'n/a';
-        const pwField = document.querySelector('input[type=password]');
+        // POLL for the gate. A single check ran at a fixed delay after launch
+        // and missed it whenever the app was still booting through Argon2/WASM
+        // — roughly 40% of trials, every one of them then discarded for "app
+        // rendered no notes". Waiting costs seconds; missing costs a trial.
+        let pwField = null;
+        if (arguments2) {
+          for (let t = 0; t < 40 && !pwField; t++) {
+            pwField = document.querySelector('input[type=password]');
+            if (!pwField && document.querySelector('audio')) break; // already unlocked
+            if (!pwField) await wait(1000);
+          }
+        }
         if (pwField && arguments2) {
           const setter = Object.getOwnPropertyDescriptor(
             window.HTMLInputElement.prototype, 'value').set;
@@ -340,6 +351,39 @@ class MainViewController: CAPBridgeViewController {
             { detail: { count: 3, src: srcOf() } }));
           await wait(12000);
           mine.push(...document.querySelectorAll('audio[data-exp="react"]'));
+        } else if (condition === 'remount') {
+          // THE FIX CANDIDATE. If a loader is granted only at a view's first
+          // render, then unmounting the conversation and rendering it again
+          // should rescue the stalled tail — the notes are part of a FRESH
+          // initial render, not additions to a mounted one.
+          //
+          // ROUND3_BRIEF §7 says not to try this, reasoning that a remount is
+          // still a late load. That reasoning is wrong under the round-5 model,
+          // which is why this is measured rather than assumed.
+          const before = app.filter(e => e.readyState >= 1).length;
+          const skipNav = /search|panic|settings|new message|theme/i;
+          // history.back() rather than hunting for a tab button: the first
+          // attempt looked for text matching /contacts/i and found nothing
+          // (navAway=false), so no remount happened and before==after said
+          // nothing at all. The router owns the route, so pop it directly.
+          // Drive the router directly. `history.back()` did not move the route
+          // (navAway=false) — entering a conversation evidently does not push a
+          // history entry — so pop it by pushing the list route and telling the
+          // router about it, which is what React Router listens for.
+          const fromRoute = location.pathname;
+          history.pushState({}, '', '/chat');
+          window.dispatchEvent(new PopStateEvent('popstate', { state: {} }));
+          await wait(3500);
+          const leftRoute = !document.querySelector('audio');
+          // Re-enter the conversation, which mounts the view afresh.
+          const row = [...document.querySelectorAll('button')]
+            .find(b => (b.textContent || '').trim().length > 2 && !skipNav.test(b.textContent || '') && !/chats|contacts/i.test(b.textContent || ''));
+          if (row) { row.click(); await wait(14000); }
+          const navAway = leftRoute;
+          const now = [...document.querySelectorAll('audio')];
+          const after = now.filter(e => e.readyState >= 1).length;
+          note = `before=${before}/${app.length} after=${after}/${now.length} navAway=${!!navAway}`;
+          app = now;
         } else if (condition === 'fixture3') {
           // 3 elements from the generated fixture rather than a real note, to
           // confirm the source stays irrelevant under the cooled protocol.

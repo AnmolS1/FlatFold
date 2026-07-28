@@ -56,12 +56,10 @@ sleep 30
 # Unlock AND open the conversation, both through the accessibility tree. A
 # failure here aborts the trial rather than measuring a locked app: a batch that
 # silently ran against the unlock gate produced 14 discarded trials in a row.
-if ! scripts/audio-unlock.sh; then
-  echo "trial $TRIAL/$CONDITION: unlock failed — aborting trial" >&2
-  osascript -e 'quit app "App"' >/dev/null 2>&1 || true
-  date +%s > "$STAMP"
-  exit 3
-fi
+# Unlock is done BY THE PROBE, from the DOM. The System Events route is not
+# used: it worked by hand and failed under the runner, and having two actors
+# type into the same gate can only interfere. audio-unlock.sh is kept for
+# manual driving only.
 
 sleep "$SETTLE"
 

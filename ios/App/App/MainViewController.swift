@@ -85,8 +85,8 @@ class MainViewController: CAPBridgeViewController {
         isMacCatalystApp=\(info.isMacCatalystApp, privacy: .public) \
         home=\(NSHomeDirectory(), privacy: .public)
         """)
-        // The audio-budget harness (docs/redesign/PROMPT_MAC_AUDIO_FIX.md
-        // Phase 1). Launched with:
+        // The audio-budget harness (docs/redesign/MAC_AUDIO_FINDINGS.md).
+        // Launched with:
         //
         //   open -n <App.app> --args --audio-harness
         //

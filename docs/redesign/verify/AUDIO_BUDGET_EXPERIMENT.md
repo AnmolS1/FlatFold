@@ -1,7 +1,7 @@
 # Audio budget experiment — results
 
 Run 2026-07-27 on a signed Mac Catalyst build, per
-`../PROMPT_MAC_AUDIO_FIX.md` Phase 1.
+`../MAC_AUDIO_FINDINGS.md` Phase 1.
 
 **Outcome: the decision table's "stop and report" row fired. Phase 2 (the
 singleton player) was NOT implemented, and must not be until the model below is
@@ -315,7 +315,7 @@ Two effects, not one, which is why single models kept failing:
 If the model holds, **re-mounting the conversation view should rescue stalled
 notes**, because they then exist at a fresh initial render.
 
-`MAC_AUDIO_ROUND3_BRIEF.md` §7 says explicitly *"do not ship a workaround that
+The round-3 brief (since deleted) said explicitly *"do not ship a workaround that
 re-mounts the list"* — on the grounds that a re-mounted element is still a late
 load. Under this model that reasoning is wrong: a remount IS a new initial
 render. That instruction should be treated as superseded, but only after the

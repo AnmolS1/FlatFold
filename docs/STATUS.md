@@ -9,9 +9,9 @@ Read in this order:
 | --- | --- | --- |
 | 1 | **this file** | what is true today, and the "Deliberate behaviours" list — several of the most surprising behaviours in the app are intentional and already documented. Do not file them. |
 | 2 | `redesign/HANDOFF_2026-07-28.md` | **the current handoff.** Mac voice notes and the build mechanics. Its "half-fixed" framing is superseded — the fix landed and is verified. |
-| 2b | `redesign/HANDOFF_2026-07-27.md` | the previous one. Still accurate for the Catalyst migration. |
+| 2b | `redesign/HANDOFF_SUBMISSION_AUDIT.md` | **App Store state, read from the ASC API 2026-07-28.** Two hard blockers (no screenshots on either platform, no macOS build ever uploaded) and five judgement calls. Start here for anything submission-shaped. |
 | 3 | `redesign/HANDOFF_STEP6_CONTINUATION.md` | **authoritative for the hard constraints** (the frozen files). Otherwise historical — its status section is stale. |
-| 4 | whatever the task needs | the D1–D7 design specs, `FULL_AUDIT_2.md`, `NATIVE_MACOS_PLAN.md`, `DESKTOP_SHELL_OPTIONS.md`, `THREAT_MODEL.md` |
+| 4 | whatever the task needs | the D1–D7 design specs, `FULL_AUDIT_2.md`, `NATIVE_MACOS_PLAN.md`, `ENCRYPTION_COMPLIANCE.md`, `THREAT_MODEL.md` |
 
 **Mac voice-note playback: FIXED 2026-07-28.** Playback runs through
 `AVAudioPlayer` in the plugin on a Mac and renders no `<audio>` element there at
@@ -21,9 +21,10 @@ and the eleven refuted models are in `redesign/MAC_AUDIO_FINDINGS.md` — loader
 were granted per PAGE LOAD, capped at ~30, never reclaimed within a page. **Do
 not re-test the refuted list**; each entry cost a build/reproduce cycle.
 
-For macOS specifically: `ios/CATALYST.md` (build mechanics),
-`redesign/verify/MAC_VOICE_NOTES.md` (what is proven vs ruled out),
-`DESKTOP_SHELL_OPTIONS.md` (the decision, now genuinely balanced).
+For macOS specifically: `ios/CATALYST.md` (build mechanics) and
+`NATIVE_MACOS_PLAN.md` — whose layout finding (a dead-end above 900px that
+Catalyst inherits from iPad) is still live and is a submission problem, not just
+a polish one.
 
 Superseded, read only for history: the demo-account section of `redesign/D5_appstore_copy.md` (superseded by
 `redesign/D5b_app_review_notes.md`).
@@ -286,7 +287,7 @@ per-feature evidence is described in the commit messages and in
    distribution of `Capacitor.xcframework` ships only `ios-arm64` and
    `ios-arm64_x86_64-simulator`, with no `maccatalyst` slice. Recorded on branch
    `spike/mac-catalyst` (`5bc798e`), not merged. The only escape is migrating the
-   build to CocoaPods, which compiles from source. `DESKTOP_SHELL_OPTIONS.md` lays
+   build to CocoaPods, which compiles from source. `ios/CATALYST.md` lays
    out five options and argues the decision turns on **secure storage** — the
    master key currently lives in a Secure-Enclave-gated Keychain item, and the
    Tauri routes move that custody onto single-maintainer community plugins. The

@@ -85,7 +85,7 @@ post_install do |installer|
   # `ios-arm64_x86_64-simulator` slices, so a Catalyst build cannot link. Pods
   # compile from SOURCE, and that source was measured to typecheck for
   # arm64-apple-ios-macabi with a delta of ZERO against plain iOS across
-  # Capacitor core and every plugin. See docs/DESKTOP_SHELL_OPTIONS.md.
+  # Capacitor core and every plugin. See ios/CATALYST.md.
   installer.pods_project.targets.each do |target|
     target.build_configurations.each do |config|
       config.build_settings['SUPPORTS_MACCATALYST'] = 'YES'

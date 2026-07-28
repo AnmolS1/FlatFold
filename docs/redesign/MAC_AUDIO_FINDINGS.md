@@ -1,8 +1,8 @@
-# Mac voice-note playback — findings since PROMPT_MAC_AUDIO_AUTOMATION.md
+# Mac voice-note playback — the findings, and the fix
 
-Everything below is measured on a signed Mac Catalyst build. This supersedes
-`MAC_AUDIO_ROUND3_BRIEF.md` and the deleted round-2 docs, all of whose models
-are refuted. Full trial-by-trial record: `verify/AUDIO_BUDGET_EXPERIMENT.md`;
+Everything below is measured on a signed Mac Catalyst build. It supersedes every
+earlier round doc — all of their models are refuted, and they have been deleted
+rather than left to be re-read as current. Full trial-by-trial record: `verify/AUDIO_BUDGET_EXPERIMENT.md`;
 raw rows in `verify/audio-trials.jsonl`.
 
 **The question is answered, and the fix has landed.** Playback moved out of the

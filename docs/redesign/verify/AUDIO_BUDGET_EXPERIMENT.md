@@ -260,3 +260,75 @@ whole framing changes again. Run those three before any fix.
 23 of 42 rows discarded for no baseline, so the DOM unlock still fails roughly
 half the time. It fails SAFELY — discarded, not silently wrong — but it halves
 throughput and should be made reliable before the next batch.
+
+---
+
+# Round 5 — five conditions, 27 trials, one answer
+
+| condition | n | added loaded | app baseline |
+| --- | --- | --- | --- |
+| `click3` (append to body) | 10 | **0/3** (0–0) | 30 (8–31) |
+| `batch10` (10 at once) | 6 | **0/10** (0–0) | 28 (15–38) |
+| `container3` (into the notes' own parent) | 4 | **0/3** (0–0) | 30 (29–31) |
+| `clone3` (clone a WORKING element, same parent) | 4 | **0/3** (0–0) | 30 (15–31) |
+| `react3` (rendered by REACT, in a commit) | 3 | **0/3** (0–0) | 30 (30–31) |
+| `control` | 10 | — | 29 (15–31) |
+
+Zero variance. Not one added element loaded in 27 trials, while the app's own
+~30 loaded in every one of them.
+
+## Everything proposed so far is refuted
+
+- **not count** — 3 and 10 behave identically, and both fail at baseline 8 where
+  a ~30 ceiling leaves ~22 free slots
+- **not capacity** — identical outcome across baselines 8 to 38
+- **not containment** — appending into the exact parent of the app's working
+  notes changes nothing
+- **not provenance** — a CLONE of a working element, inserted beside the
+  original, fails; and so does an element React renders in its own commit
+- **not batch** — no difference between one-at-a-time and ten-at-once
+
+The control drift warning voids BETWEEN-condition comparisons and that verdict
+stands. It does not touch this finding: every condition is 0, so there is
+nothing to compare, and the result holds across a 4.75x range of the very
+quantity drift varies.
+
+## MODEL — the one thing left, and it fits every measurement
+
+> A media element is granted a loader only if it exists when the conversation
+> view FIRST RENDERS. Elements added to an already-mounted view never get one,
+> regardless of how they are created, where they are placed, or how much
+> capacity is free. Separately, that initial grant is itself capped at ~30.
+
+Two effects, not one, which is why single models kept failing:
+
+| observation | which effect |
+| --- | --- |
+| ~30 of 40 load, last ~10 stall | the ~30 cap on the initial grant |
+| a newly ARRIVED note never plays | added after initial render |
+| every experimental condition loads 0 | added after initial render |
+| withholding `src` from all 40 broke everything (`dd31836`) | made every load late |
+| creating on the play gesture broke everything (`347944c`) | made every load late |
+
+## The fix this implies — and the one experiment that would confirm it
+
+If the model holds, **re-mounting the conversation view should rescue stalled
+notes**, because they then exist at a fresh initial render.
+
+`MAC_AUDIO_ROUND3_BRIEF.md` §7 says explicitly *"do not ship a workaround that
+re-mounts the list"* — on the grounds that a re-mounted element is still a late
+load. Under this model that reasoning is wrong: a remount IS a new initial
+render. That instruction should be treated as superseded, but only after the
+experiment below, not before.
+
+**Next condition to build: `remount`.** Force the conversation view to unmount
+and re-render, then measure whether the previously-stalled tail loads. If it
+does, the fix is a remount on new-note arrival plus keeping the visible note
+count under the ~30 grant. If it does not, the model is wrong and the "initial
+render" framing needs re-deriving.
+
+## Harness
+
+24 of 61 rows discarded, still ~40%, almost all "app rendered no notes" — the
+DOM unlock remains flaky. It fails safely, but fixing it would roughly double
+throughput.

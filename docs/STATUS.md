@@ -8,16 +8,18 @@ Read in this order:
 | # | file | why |
 | --- | --- | --- |
 | 1 | **this file** | what is true today, and the "Deliberate behaviours" list — several of the most surprising behaviours in the app are intentional and already documented. Do not file them. |
-| 2 | `redesign/HANDOFF_2026-07-28.md` | **the current handoff.** Mac voice notes: diagnosed and half-fixed, plus build mechanics. |
+| 2 | `redesign/HANDOFF_2026-07-28.md` | **the current handoff.** Mac voice notes and the build mechanics. Its "half-fixed" framing is superseded — the fix landed and is verified. |
 | 2b | `redesign/HANDOFF_2026-07-27.md` | the previous one. Still accurate for the Catalyst migration. |
 | 3 | `redesign/HANDOFF_STEP6_CONTINUATION.md` | **authoritative for the hard constraints** (the frozen files). Otherwise historical — its status section is stale. |
 | 4 | whatever the task needs | the D1–D7 design specs, `FULL_AUDIT_2.md`, `NATIVE_MACOS_PLAN.md`, `DESKTOP_SHELL_OPTIONS.md`, `THREAT_MODEL.md` |
 
-**Mac voice-note playback:** `redesign/MAC_AUDIO_FINDINGS.md` — ANSWERED, and
-what is left is a product decision rather than a diagnosis. Loaders are granted
-per PAGE LOAD, capped at ~30, never reclaimed within a page; a WebView reload
-reopens the window. Carries the refuted list (each entry cost a build/reproduce
-cycle — do not re-test them) and the trial harness.
+**Mac voice-note playback: FIXED 2026-07-28.** Playback runs through
+`AVAudioPlayer` in the plugin on a Mac and renders no `<audio>` element there at
+all; iOS and web are untouched. Verification: `redesign/verify/
+NATIVE_AUDIO_PLAYBACK.md` (42 of 42 notes, three fresh launches). The diagnosis
+and the eleven refuted models are in `redesign/MAC_AUDIO_FINDINGS.md` — loaders
+were granted per PAGE LOAD, capped at ~30, never reclaimed within a page. **Do
+not re-test the refuted list**; each entry cost a build/reproduce cycle.
 
 For macOS specifically: `ios/CATALYST.md` (build mechanics),
 `redesign/verify/MAC_VOICE_NOTES.md` (what is proven vs ruled out),
@@ -122,6 +124,23 @@ the pre-fix code.
 Each of these looks wrong at first glance and is intentional. If you disagree with
 one, argue the tradeoff rather than reporting it as a defect.
 
+- **Voice notes on a Mac are played by native code, not by the browser.** There
+  is deliberately no `<audio>` element on that platform: WKWebView grants media
+  loaders per page load, caps them at ~30 and never reclaims them, so in a long
+  conversation the tail simply never played and a note that arrived never played
+  at all. Even an element that is never played takes a grant, so the fix is the
+  element's absence. iOS and web keep the element — measured unaffected there,
+  and churning the platform that ships to fix the one that does not would be the
+  wrong trade. `redesign/MAC_AUDIO_FINDINGS.md`.
+- **A voice note's duration can read ~27% long.** It is sampled from
+  `rec.currentTime` before the recorder stops and is baked into the `MediaRef`,
+  so every receiving device inherits it. On a Mac the native player overrides it
+  with the real one from the samples; everywhere else the wrong number shows
+  until the recorder is fixed separately.
+- **Waveforms are flat on a Mac.** Web Audio's `decodeAudioData` will not decode
+  this AAC there. Cosmetic, pre-existing, and unrelated to whether the note
+  plays. The durable fix is peaks computed by the sender and shipped in the
+  `MediaRef` — a payload-schema change, so it needs sign-off.
 - **A page reload asks for your password again** (unless passkey unlock is on).
   The Argon2-derived key lives only in a module-scoped Map in the JS heap. It is
   never in `sessionStorage`, because anything there is readable by any in-origin

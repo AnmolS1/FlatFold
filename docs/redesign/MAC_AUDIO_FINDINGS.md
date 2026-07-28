@@ -5,8 +5,11 @@ Everything below is measured on a signed Mac Catalyst build. This supersedes
 are refuted. Full trial-by-trial record: `verify/AUDIO_BUDGET_EXPERIMENT.md`;
 raw rows in `verify/audio-trials.jsonl`.
 
-**The question is answered.** What remains is a product decision, not a
-diagnosis.
+**The question is answered, and the fix has landed.** Playback moved out of the
+web view into `AVAudioPlayer` (`bf9a408`), and every note in a 42-note
+conversation now plays with zero `<audio>` elements on the platform —
+`verify/NATIVE_AUDIO_PLAYBACK.md`. §3 below is the road not taken: those four
+options were all ways to live with the constraint, and none of them is needed.
 
 ---
 
@@ -51,7 +54,14 @@ Also refuted, and worth naming because they were shipped and reverted: **lazy
 `src`** (`dd31836`) and **element-on-play** (`347944c`). Both made every load
 late and made things strictly worse.
 
-## 3. What a fix costs — the actual decision
+## 3. What a fix WOULD have cost — superseded, kept for the reasoning
+
+**None of this was implemented.** Every option here trades a voice note for a
+password prompt, and moving playback into Swift removes the constraint they were
+all working around. Kept because the cost model is still correct if the native
+path is ever unavailable.
+
+### The original framing
 
 A reload re-locks the keystore. That is deliberate (`STATUS.md`): the
 Argon2-derived key lives only in the JS heap, so a reload drops it. "Reload to
@@ -90,6 +100,11 @@ biometry type rather than assuming Face ID.
 
 ## 5. Scoping
 
+- **RESOLVED 2026-07-28.** Native playback is gated to the Mac shells by a
+  synchronous flag injected at document start (`__flatfoldNativeAudio`); iOS and
+  web keep the `<audio>` element. The gate has to be synchronous: an async
+  capability check would render the element it exists to avoid before it
+  resolved.
 - **Does this reproduce on real iOS? NO — ANSWERED 2026-07-28.** A Debug build
   was installed on a real iPhone 14 Plus and every voice note in the same 40-note
   conversation played, including the oldest and the newest. iOS is unaffected.
@@ -112,12 +127,13 @@ All committed, all reusable.
 - `scripts/audio-batch.sh` — interleaved, shuffled, control per rep.
 - `scripts/audio-analyze.py` — median/range/n per condition; flags `n=1` as "not
   a result"; **voids the batch if the control series drifts**.
-- `--audio-experiment=<condition>` — conditions are launch arguments, so one
-  build runs them all. Today: `control`, `click3`, `batch10`, `container3`,
-  `clone3`, `react3`, `remount`, `reload`, `fixture3`, `delayed3`.
-- `src/components/debug/` — DEBUG-gated scaffolding: `ExperimentAudio` (React
-  renders elements on request) and `useDebugRemountKey` (a probe can force a
-  real remount). **Delete both once this is settled.**
+- `--audio-experiment=<condition>` and `src/components/debug/` — **both deleted**
+  once playback went native. They measured `<audio>` elements, which the fixed
+  platform no longer renders.
+- `--verify-audio` (+ `--verify-new-note`) replaced them: unlocks from the DOM,
+  opens the conversation by accessible name, plays every note, and runs the
+  pause/switch/resume sequence. The unlock and open-the-conversation preamble is
+  the part of the old harness that was worth keeping.
 
 ### Traps that cost real time
 
@@ -131,7 +147,13 @@ All committed, all reusable.
 - **Screen coordinates are not a stable interface.** A batch once typed the test
   password into a video player because the window had moved.
 - **Nothing else on the Mac should play media during a batch** — the pool is
-  system-wide, and a video playing contaminated an entire overnight run.
+  system-wide, and a video playing contaminated an entire overnight run. (This
+  applied to the `<audio>` experiment. `AVAudioPlayer` is not subject to it, and
+  the cooldown gate in `scripts/audio-trial.sh` is likewise unnecessary for
+  verifying the native path.)
+- **A selector can match more than you meant.** `aria-label$="voice note"` also
+  matches the composer's "Record a voice note" button; the verification probe
+  clicked it, started a real recording, and scored a working note as broken.
 
 ## 7. Process note
 

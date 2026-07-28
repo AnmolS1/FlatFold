@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 # One trial of the Mac audio-loader experiment, with the protocol enforced.
 #
+# HISTORICAL AS WRITTEN. The `--audio-experiment` conditions this drives were
+# removed when playback moved into the plugin (docs/redesign/MAC_AUDIO_FINDINGS
+# .md), so it will not run as-is. Kept for the PROTOCOL, which is the reusable
+# part and is not obvious: a cooldown gate enforced in code rather than in
+# discipline, and auto-discard of any trial without a baseline. Both exist
+# because violating them voided entire nights of results. Point it at a new
+# launch argument to reuse it.
+#
+# Note that the cooldown is specific to the WebView's media-loader pool, which
+# is what this experiment measured. `AVAudioPlayer` is not subject to it — the
+# native-playback verifier (`--verify-audio`) needs no cooldown at all.
+#
 #   scripts/audio-trial.sh <condition> <trial-n>
 #
 # WHY THIS EXISTS: the media loader pool is system-wide and reclaimed over

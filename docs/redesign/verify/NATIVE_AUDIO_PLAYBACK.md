@@ -78,9 +78,18 @@ input (`peakDb=-49.9`, not the `-120` of digital silence). The microphone went
 cold at the CoreAudio HAL, not merely at the API, and the session came back to
 `.playback`.
 
+## iOS
+
+Re-verified 2026-07-28 on a real iPhone 14 Plus, after the component was split
+into two backends — the `<audio>` branch was rewritten in the same commit, so
+"iOS was unaffected by the bug" was no longer sufficient. A Debug build was
+installed on the device and **Anmol confirmed voice notes play by hand**, which
+is better evidence than the probe would have been. The gate reads
+`isMacCatalystApp || isiOSAppOnMac`, both false there, so the element path is
+what ran.
+
 ## What is NOT covered here
 
-- **iOS.** Verified separately — the `<audio>` path is untouched there.
 - **The interruption path**, per check 6.
 - **A second device sending.** Check 2 was satisfied by producing a note on this
   device, which mounts after the page load in exactly the same way. A note

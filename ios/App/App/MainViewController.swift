@@ -36,8 +36,18 @@ class MainViewController: CAPBridgeViewController {
         // flag is set before main.tsx reads it — the SW re-registers on every
         // launch, so unregistering at runtime cannot answer the question.
         let noSW = ProcessInfo.processInfo.arguments.contains("--no-sw")
+        // `__flatfoldNativeAudio`: play voice notes through the plugin instead of
+        // an <audio> element.
+        //
+        // INJECTED, RATHER THAN ASKED FOR, because of WHEN it is needed. The
+        // recorder's capability check is a plugin call on a user gesture and can
+        // afford to be async. This one is read during React's FIRST RENDER: if it
+        // resolved even a tick late, every note would mount an <audio src> first
+        // and spend the very loader grant the native path exists to avoid. A
+        // documentStart injection is set before any app code runs.
+        let nativeAudio = FlatFoldAudioPlugin.isMacShell
         let script = WKUserScript(
-            source: "window.__flatfoldIsIOSAppOnMac = \(isOnMac); window.__flatfoldDebug = \(isDebug); window.__flatfoldNoSW = \(noSW);",
+            source: "window.__flatfoldIsIOSAppOnMac = \(isOnMac); window.__flatfoldDebug = \(isDebug); window.__flatfoldNoSW = \(noSW); window.__flatfoldNativeAudio = \(nativeAudio);",
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true
         )

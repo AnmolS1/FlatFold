@@ -1,10 +1,20 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { Play, Pause } from 'lucide-react';
 import { getSharedAudioContext, decodeAudioLimited } from '../../lib/audioContext';
 import { describeVoiceNotePlaybackError } from '../../lib/mediaErrors';
 import { nativeLog, timed } from '../../lib/nativeLog';
+import { nativePlaybackSupported } from '../../lib/nativeAudio';
+import { voicePlayer } from '../../lib/voicePlayer';
 
 interface VoiceNoteProps {
+	/**
+	 * Stable identity for this note — the `MediaRef.id`, NOT the blob URL.
+	 *
+	 * The URL is created and revoked by `MediaAttachment`'s effect, so it changes
+	 * whenever the attachment remounts. Keying the saved playback position on it
+	 * would silently lose the position exactly when a note scrolls away and back.
+	 */
+	noteId: string;
 	url: string; // blob: object URL of the decrypted audio
 	durationMs?: number;
 	own: boolean;
@@ -13,28 +23,6 @@ interface VoiceNoteProps {
 }
 
 const BAR_COUNT = 40;
-
-/**
- * ON THIS PLATFORM, A MEDIA LOAD MUST START AT MOUNT. Measured on Mac Catalyst,
- * and the reason `src` is set in JSX rather than on the play gesture.
- *
- * A load initiated while the page first renders completes normally — a census
- * of a conversation showed 24 of 28 notes reaching `readyState 1`. A load
- * initiated at ANY later moment does not: the element goes to `networkState 2`
- * (LOADING) and stays at `readyState 0` forever, with `error` still null. Not
- * slow — never. It reproduces on the very first play after a fresh launch, so
- * it is not exhaustion, and it survives `preload="none"` vs `"metadata"` and an
- * explicit `load()`.
- *
- * That one fact explains the whole "old notes play, new ones don't" report: a
- * newly ARRIVED note mounts after the initial render, so its load is a late one
- * and hangs. Deferring `src` to the play gesture makes EVERY note late, which is
- * exactly what happened when it was tried — playback broke for all of them.
- *
- * So the outstanding bug is late-arriving notes, and lazy loading is not the
- * fix; it is the same defect applied universally. Do not re-try it without new
- * evidence about why late loads stall.
- */
 
 function formatDuration(seconds: number): string {
 	if (!isFinite(seconds) || seconds < 0) return '0:00';
@@ -63,47 +51,20 @@ function peaksFrom(channel: Float32Array): number[] {
 	return peaks.map((p) => (max > 0 ? Math.max(0.06, p / max) : 0.06));
 }
 
-// A voice note: a waveform, a play/pause button, and a duration.
-//
-// THE MEDIA ELEMENT IS RENDERED IN JSX, PER NOTE, DELIBERATELY — but it carries
-// no `src` until the note is played. Those are two separate decisions and both
-// were paid for.
-//
-// The ELEMENT stays in JSX because a single shared element, constructed
-// imperatively at module scope, was tried and reverted: it never lived in the
-// document, and WebKit does not load a DETACHED media element. No fetch, no
-// `loadedmetadata`, no `error`, and a play() that neither resolved nor rejected.
-// Appending it to document.body afterwards did not revive it.
-//
-// The SOURCE is attached lazily because an element with a `src` holds a media
-// resource, and WebKit's pool of those is small. See LOADED_NOTE_LIMIT.
-//
-// Worth knowing how this failure presents, because it wasted two debugging
-// rounds: the note that cannot get a slot HANGS — readyState 0, networkState 2,
-// `error` null — while OTHER, already-loaded notes are evicted and report
-// MEDIA_ERR_SRC_NOT_SUPPORTED (code 4). So the visible error belongs to a
-// different note than the broken one, and code 4 reads as a codec problem when
-// nothing is wrong with the codec. Always attribute a media error to a specific
-// note before believing it.
-export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) => {
-	const audioRef = useRef<HTMLAudioElement>(null);
+/**
+ * Decode once for the waveform. Failure degrades to flat bars and MUST NOT
+ * affect playback: the old code swapped in a second media element here, which
+ * doubled the resource cost exactly when resources were already short.
+ *
+ * On a Mac this always fails with "Decoding failed" — that runtime's Web Audio
+ * will not decode this AAC. Cosmetic, and unrelated to whether the note plays:
+ * both backends below use a different decoder. The durable fix is peaks computed
+ * by the SENDER and shipped in the MediaRef, which is a payload-schema change.
+ */
+function useWaveform(url: string, durationMs?: number) {
 	const [bars, setBars] = useState<number[] | null>(null);
-	const [playing, setPlaying] = useState(false);
-	const [progress, setProgress] = useState(0); // 0..1
-	const [duration, setDuration] = useState(durationMs ? durationMs / 1000 : 0);
-	const [playbackError, setPlaybackError] = useState<string | null>(null);
+	const [decodedDuration, setDecodedDuration] = useState(0);
 
-	// A short, stable label for this note in the debug log. The blob URL's last
-	// segment is unique per note and carries no message content.
-	const noteTag = url.slice(-6);
-
-	// Decode once for the waveform. Failure degrades to flat bars and MUST NOT
-	// affect playback: the old code swapped in a second media element here, which
-	// doubled the resource cost exactly when resources were already short.
-	//
-	// On the Mac passthrough this currently always fails with "Decoding failed" —
-	// that runtime's Web Audio will not decode this AAC. Cosmetic: the <audio>
-	// element below uses a different decoder and is unaffected.
 	useEffect(() => {
 		let cancelled = false;
 		(async () => {
@@ -116,7 +77,7 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 				});
 				if (cancelled) return;
 				setBars(peaksFrom(decoded.getChannelData(0)));
-				if (!durationMs) setDuration(decoded.duration);
+				if (!durationMs) setDecodedDuration(decoded.duration);
 			} catch (err) {
 				nativeLog(`[${url.slice(-6)}] waveform decode failed: ${err instanceof Error ? err.message : String(err)}`);
 			}
@@ -126,21 +87,35 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 		};
 	}, [url, durationMs]);
 
-	const toggle = () => {
-		const el = audioRef.current;
-		if (!el) return;
-		nativeLog(`[${noteTag}] toggle paused=${el.paused} ready=${el.readyState} net=${el.networkState} err=${el.error?.code ?? '-'}`);
-		if (el.paused) {
-			void el.play().catch((err: unknown) => {
-				// AbortError is benign — pausing aborts a play() that has not started.
-				const name = err instanceof Error ? err.name : '';
-				if (name === 'AbortError') return;
-				nativeLog(`play() rejected: ${name}`);
-			});
-		} else {
-			el.pause();
-		}
-	};
+	return { bars, decodedDuration };
+}
+
+interface ViewProps {
+	url: string;
+	durationMs?: number;
+	own: boolean;
+	playing: boolean;
+	/** Seconds into the note. */
+	currentTime: number;
+	/** Seconds, from the backend. 0 until it knows, which is when the props win. */
+	duration: number;
+	error: string | null;
+	onToggle: () => void;
+}
+
+// The visible note: a waveform, a play/pause button, and a duration. Owns no
+// transport — both backends below render this, which is what keeps them from
+// drifting into two different-looking voice notes.
+const VoiceNoteView = ({ url, durationMs, own, playing, currentTime, duration, error, onToggle }: ViewProps) => {
+	const { bars, decodedDuration } = useWaveform(url, durationMs);
+
+	// The BACKEND's duration wins when it has one. On a Mac that is
+	// `AVAudioPlayer.duration`, which is measured from the actual samples — the
+	// sender's `durationMs` is sampled before the recorder stops and overstates
+	// by ~27%, and it is baked into the MediaRef, so every receiving device
+	// inherits the same wrong number until the recorder is fixed separately.
+	const shown = duration || (durationMs ? durationMs / 1000 : decodedDuration);
+	const progress = duration > 0 ? Math.min(1, currentTime / duration) : 0;
 
 	const accent = own ? 'bg-on-crease' : 'bg-crease';
 	const dim = own ? 'bg-on-crease/35' : 'bg-crease/30';
@@ -148,41 +123,8 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 	return (
 		<div className="flex flex-col gap-1 min-w-[12rem]">
 			<div className="flex items-center gap-3">
-				<audio
-					ref={audioRef}
-					// `src` IS SET AT MOUNT, DELIBERATELY. Attaching it lazily on
-					// the play gesture was tried and reverted — see the note on
-					// late loads above the component.
-					src={url}
-					preload="metadata"
-					playsInline
-					onPlay={() => setPlaying(true)}
-					onPause={() => setPlaying(false)}
-					onEnded={() => {
-						setPlaying(false);
-						setProgress(0);
-					}}
-					onTimeUpdate={(e) => {
-						const el = e.currentTarget;
-						if (el.duration) setProgress(el.currentTime / el.duration);
-					}}
-					onLoadedMetadata={(e) => {
-						nativeLog(`[${noteTag}] loadedmetadata duration=${e.currentTarget.duration}`);
-						if (!durationMs && isFinite(e.currentTarget.duration)) setDuration(e.currentTarget.duration);
-					}}
-					onError={() => {
-						const el = audioRef.current;
-						// Tagged, because a conversation renders one <audio> per note
-						// and an untagged "error code=4" cannot be attributed to any
-						// of them. Two rounds were spent reading these as the newest
-						// note's failure without ever establishing that they were.
-						nativeLog(`[${noteTag}] error code=${el?.error?.code ?? '?'} ready=${el?.readyState} net=${el?.networkState}`);
-						setPlaybackError(describeVoiceNotePlaybackError(el?.error?.code, mimeType));
-					}}
-					className="hidden"
-				/>
 				<button
-					onClick={toggle}
+					onClick={onToggle}
 					aria-label={playing ? 'Pause voice note' : 'Play voice note'}
 					className={`flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center ${own ? 'bg-on-crease/20 text-on-crease' : 'bg-crease/15 text-crease'}`}
 				>
@@ -197,9 +139,154 @@ export const VoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) =>
 					})}
 				</div>
 
-				<span className={`flex-shrink-0 font-mono text-xs ${own ? 'text-on-crease-dim' : 'text-graphite-40'}`}>{formatDuration(duration)}</span>
+				<span className={`flex-shrink-0 font-mono text-xs ${own ? 'text-on-crease-dim' : 'text-graphite-40'}`}>{formatDuration(shown)}</span>
 			</div>
-			{playbackError && <p className="text-xs italic opacity-70">{playbackError}</p>}
+			{error && <p className="text-xs italic opacity-70">{error}</p>}
 		</div>
 	);
 };
+
+/**
+ * Mac: play in Swift, and render NO `<audio>` at all.
+ *
+ * That absence is the entire fix. On a Mac, WKWebView grants media loaders in a
+ * window tied to page load, capped at ~30 and never reclaimed within the page —
+ * so in a long conversation the tail simply never plays, and a note that ARRIVES
+ * after the page loaded never plays at all. Nothing arranged inside the web view
+ * changes that, because the web view is the constraint; ~60 trials across five
+ * conditions are recorded in docs/redesign/MAC_AUDIO_FINDINGS.md, along with the
+ * eleven models that were refuted on the way. An element rendered here, even one
+ * never played, would take a grant from the pool.
+ *
+ * Transport state lives in `voicePlayer` rather than here because the native
+ * player is a singleton: one `AVAudioPlayer` behind forty components.
+ */
+const NativeVoiceNote = ({ noteId, url, durationMs, own, mimeType }: VoiceNoteProps) => {
+	const [error, setError] = useState<string | null>(null);
+
+	// Subscribed PER NOTE, not to the store as a whole: progress ticks at ~10 Hz,
+	// and a store-wide notification would re-render every note in the
+	// conversation ten times a second to move one cursor.
+	const state = useSyncExternalStore(
+		useCallback((cb: () => void) => voicePlayer.subscribe(noteId, cb), [noteId]),
+		useCallback(() => voicePlayer.getState(noteId), [noteId])
+	);
+
+	const toggle = useCallback(() => {
+		setError(null);
+		// The loader is only called when the bytes are actually needed — resuming
+		// a note the plugin still holds sends no payload at all.
+		voicePlayer
+			.toggle(noteId, async () => new Uint8Array(await (await fetch(url)).arrayBuffer()))
+			.catch((err: unknown) => {
+				const message = err instanceof Error ? err.message : String(err);
+				nativeLog(`[${noteId}] native play failed: ${message}`);
+				setError(message || describeVoiceNotePlaybackError(undefined, mimeType));
+			});
+	}, [noteId, url, mimeType]);
+
+	return (
+		<VoiceNoteView
+			url={url}
+			durationMs={durationMs}
+			own={own}
+			playing={state.playing}
+			currentTime={state.currentTime}
+			duration={state.duration}
+			error={error}
+			onToggle={toggle}
+		/>
+	);
+};
+
+/**
+ * Everywhere else: the `<audio>` element, unchanged.
+ *
+ * Verified 2026-07-28 on a real iPhone that iOS does NOT have the Mac's loader
+ * cap — every note in the same 40-note conversation played. iOS is the shipped
+ * target, so this path is deliberately left alone rather than churned onto a
+ * backend that only one platform needs.
+ *
+ * `src` IS SET AT MOUNT. Attaching it on the play gesture instead was shipped
+ * and reverted twice (`dd31836`, `347944c`): it makes every load a late one,
+ * which is strictly worse. Do not re-try it without new evidence.
+ *
+ * Worth knowing how the Mac failure used to present here, because it cost two
+ * debugging rounds: the note that cannot get a slot HANGS — readyState 0,
+ * networkState 2, `error` null — while OTHER, already-loaded notes are evicted
+ * and report MEDIA_ERR_SRC_NOT_SUPPORTED (code 4). So the visible error belongs
+ * to a different note than the broken one, and code 4 reads as a codec problem
+ * when nothing is wrong with the codec.
+ */
+const WebVoiceNote = ({ url, durationMs, own, mimeType }: VoiceNoteProps) => {
+	const [el, setEl] = useState<HTMLAudioElement | null>(null);
+	const [playing, setPlaying] = useState(false);
+	const [currentTime, setCurrentTime] = useState(0);
+	const [duration, setDuration] = useState(durationMs ? durationMs / 1000 : 0);
+	const [error, setError] = useState<string | null>(null);
+
+	// A short, stable label for this note in the debug log. The blob URL's last
+	// segment is unique per note and carries no message content.
+	const noteTag = url.slice(-6);
+
+	const toggle = useCallback(() => {
+		if (!el) return;
+		nativeLog(`[${noteTag}] toggle paused=${el.paused} ready=${el.readyState} net=${el.networkState} err=${el.error?.code ?? '-'}`);
+		if (el.paused) {
+			void el.play().catch((err: unknown) => {
+				// AbortError is benign — pausing aborts a play() that has not started.
+				const name = err instanceof Error ? err.name : '';
+				if (name === 'AbortError') return;
+				nativeLog(`play() rejected: ${name}`);
+			});
+		} else {
+			el.pause();
+		}
+	}, [el, noteTag]);
+
+	return (
+		<>
+			<audio
+				ref={setEl}
+				src={url}
+				preload="metadata"
+				playsInline
+				onPlay={() => setPlaying(true)}
+				onPause={() => setPlaying(false)}
+				onEnded={() => {
+					setPlaying(false);
+					setCurrentTime(0);
+				}}
+				onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+				onLoadedMetadata={(e) => {
+					nativeLog(`[${noteTag}] loadedmetadata duration=${e.currentTarget.duration}`);
+					if (isFinite(e.currentTarget.duration)) setDuration(e.currentTarget.duration);
+				}}
+				onError={() => {
+					// Tagged, because a conversation renders one <audio> per note and
+					// an untagged "error code=4" cannot be attributed to any of them.
+					nativeLog(`[${noteTag}] error code=${el?.error?.code ?? '?'} ready=${el?.readyState} net=${el?.networkState}`);
+					setError(describeVoiceNotePlaybackError(el?.error?.code, mimeType));
+				}}
+				className="hidden"
+			/>
+			<VoiceNoteView
+				url={url}
+				durationMs={durationMs}
+				own={own}
+				playing={playing}
+				currentTime={currentTime}
+				duration={duration}
+				error={error}
+				onToggle={toggle}
+			/>
+		</>
+	);
+};
+
+// One component, two backends. The choice is a SYNCHRONOUS read of a flag the
+// native shell injects at document start — see `nativePlaybackSupported`. It has
+// to be synchronous: an async capability check would render the `<audio>` branch
+// first and spend the loader grant the native branch exists to avoid.
+export const VoiceNote = (props: VoiceNoteProps) =>
+	nativePlaybackSupported() ? <NativeVoiceNote {...props} /> : <WebVoiceNote {...props} />;

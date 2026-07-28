@@ -15,14 +15,10 @@ import { Login } from './pages/Login';
 // dist/client/assets/, which gen-sw-manifest.mjs pins wholesale, so they keep
 // the same app-shell integrity guarantee as the entry bundle.
 const Chat = lazy(() => import('./pages/Chat').then((m) => ({ default: m.Chat })));
-import { ExperimentAudio } from './components/debug/ExperimentAudio';
-import { useDebugRemountKey } from './components/debug/useDebugRemountKey';
 
 const Transparency = lazy(() => import('./pages/Transparency').then((m) => ({ default: m.Transparency })));
 
 function App() {
-	// DEBUG-only: lets a probe force the conversation view to remount.
-	const debugRemountKey = useDebugRemountKey();
 	// Mark the document as the native shell so native-only CSS applies (e.g.
 	// disabling the long-press text-selection callout). Set in an effect so the
 	// Capacitor bridge is guaranteed attached.
@@ -42,10 +38,6 @@ function App() {
 		// Outermost, so a throw in a provider or the router still shows something
 		// recoverable rather than a blank document.
 		<ErrorBoundary>
-			{/* DEBUG-only scaffolding for the Mac audio experiment. Renders
-			    nothing unless a probe asks and __flatfoldDebug is set, so it is
-			    inert on web and absent from TestFlight and the App Store. */}
-			<ExperimentAudio />
 			<ThemeProvider>
 				<ToastProvider>
 					<BrowserRouter>
@@ -63,7 +55,7 @@ function App() {
 											    mounted, so you can still reach the UI that would
 											    delete it. */}
 											<ErrorBoundary>
-												<Chat key={debugRemountKey} />
+												<Chat />
 											</ErrorBoundary>
 										</ProtectedRoute>
 									}

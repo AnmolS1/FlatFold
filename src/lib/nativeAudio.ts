@@ -215,7 +215,7 @@ export interface PlaybackState {
 }
 
 interface PlaybackPlugin {
-	playNote?: (o: { noteId: string; dataBase64: string; positionSeconds?: number }) => Promise<{ duration?: number }>;
+	playNote?: (o: { noteId: string; dataBase64?: string; positionSeconds?: number }) => Promise<{ duration?: number }>;
 	pauseNote?: () => Promise<{ currentTime?: number }>;
 	seekNote?: (o: { seconds: number }) => Promise<{ currentTime?: number }>;
 	stopNote?: () => Promise<void>;
@@ -230,12 +230,22 @@ function playback(): PlaybackPlugin | null {
 /**
  * Whether playback should go through Swift on this platform.
  *
- * Deliberately the SAME signal as recording: the plugin answers it natively,
- * because only native code can tell the two Mac shells apart. Any failure means
- * "no", so a missing plugin degrades to the <audio> path rather than breaking
- * playback everywhere.
+ * SYNCHRONOUS, DELIBERATELY, AND NOT THE RECORDING SIGNAL. Recording is decided
+ * on a user gesture and can afford the async round-trip to the plugin. Playback
+ * is decided at RENDER: if this resolved a tick late, every note would mount an
+ * `<audio src>` first and spend the very loader grant this exists to avoid.
+ * `MainViewController` injects the flag at document start, so it is set before
+ * React's first render. Two mechanisms because they answer at two different
+ * moments — do not re-alias them.
+ *
+ * CATALYST ONLY. The ~30-loader cap was measured there; the "Designed for iPad"
+ * shell was never tested for it, and Catalyst is the shell this branch migrates
+ * to. Anything that is not Catalyst keeps the `<audio>` path, which is verified
+ * working on a real iPhone.
  */
-export const nativePlaybackSupported = nativeRecordingSupported;
+export function nativePlaybackSupported(): boolean {
+	return (globalThis as unknown as { __flatfoldNativeAudio?: boolean }).__flatfoldNativeAudio === true;
+}
 
 /** Base64 for the bridge. Chunked — a naive spread on ~75 KB blows the stack. */
 export function bytesToBase64(bytes: Uint8Array): string {
@@ -248,10 +258,22 @@ export function bytesToBase64(bytes: Uint8Array): string {
 }
 
 export const nativePlayer = {
-	async play(noteId: string, bytes: Uint8Array, positionSeconds = 0): Promise<number> {
+	/**
+	 * Start `noteId`, or resume it when `bytes` is null.
+	 *
+	 * The null case sends no payload at all: the plugin still holds the player,
+	 * so pause→resume costs a bare bridge call instead of ~100 KB of base64. It
+	 * rejects with code `NEED_DATA` when it cannot honour that, which the caller
+	 * recovers from by supplying the bytes.
+	 */
+	async play(noteId: string, bytes: Uint8Array | null, positionSeconds = 0): Promise<number> {
 		const p = playback();
 		if (!p?.playNote) throw new Error('Native playback is unavailable in this build.');
-		const res = await p.playNote({ noteId, dataBase64: bytesToBase64(bytes), positionSeconds });
+		const res = await p.playNote({
+			noteId,
+			...(bytes ? { dataBase64: bytesToBase64(bytes) } : {}),
+			positionSeconds,
+		});
 		return res.duration ?? 0;
 	},
 	async pause(): Promise<number> {

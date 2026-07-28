@@ -101,10 +101,47 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDe
     /// term unnecessary — but only the Catalyst leg has actually been measured
     /// here, and the passthrough build is the one that ships today. The OR is
     /// correct under either reading; collapsing it rests on documentation alone.
-    private static var webViewLacksMediaDevices: Bool {
+    private static var webViewLacksMediaDevices: Bool { isMacShell }
+
+    /// "Is this app running on a Mac?" — one fact, two questions.
+    ///
+    /// The questions are RECORDING (is `navigator.mediaDevices` missing?) and
+    /// PLAYBACK (is the WebView's media-loader grant capped?). They happen to
+    /// share an answer, and naming the shared fact once is honest about that,
+    /// where aliasing one capability check to the other was not: it made an
+    /// unexamined claim about playback look like a measured one.
+    ///
+    /// Both Mac shells, deliberately. `isMacCatalystApp` is documented to cover
+    /// the "Designed for iPad" passthrough too, so the `||` is belt-and-braces —
+    /// but only the Catalyst leg has been measured here, and the OR is correct
+    /// under either reading while collapsing it rests on documentation alone.
+    /// The loader cap in particular was measured on Catalyst only; enabling
+    /// native playback on the passthrough shell is a judgement call, and the
+    /// reasoning is that it is the same WKWebView on the same OS, and the native
+    /// path cannot be worse than an element that will not load.
+    public static var isMacShell: Bool {
         let info = ProcessInfo.processInfo
         return info.isMacCatalystApp || info.isiOSAppOnMac
     }
+
+    /// Capacitor's hook for one-time setup.
+    ///
+    /// The observer is installed ONCE per process, not once per instance: the
+    /// player is `static` for the reason given above, so two observers would
+    /// report the same interruption twice and the web layer would see a
+    /// duplicate event for a single pause.
+    override public func load() {
+        guard !Self.interruptionObserved else { return }
+        Self.interruptionObserved = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAudioInterruption(_:)),
+            name: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance()
+        )
+    }
+
+    private static var interruptionObserved = false
 
     /// Only offered where the WebView route is missing. Everywhere else
     /// `getUserMedia` works and is the better path — it needs no native surface
@@ -160,6 +197,13 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDe
         // Stop anything already running rather than leaking a recorder — the UI
         // should not allow it, but a double-tap must not strand a file handle.
         cleanUp()
+
+        // Tear down native PLAYBACK too. The category is about to become
+        // `.playAndRecord`, which reconfigures the session under any live
+        // `AVAudioPlayer`; worse, `.mixWithOthers` means a note still playing out
+        // of the speaker would be recorded into the new note. Neither is
+        // hypothetical — this is the same session both features share.
+        stopPlayback()
 
         // Session configuration is the whole ballgame here, and the first version
         // got it wrong twice.
@@ -592,23 +636,48 @@ extension FlatFoldAudioPlugin {
 
     /// Start (or resume) a note. One player at a time: a conversation plays one
     /// note, and unlike the web view there is no cap here to ration.
+    ///
+    /// `dataBase64` IS OPTIONAL, and its absence means "resume the note you
+    /// already hold". A voice note is ~100 KB once base64'd, and re-shipping that
+    /// across the bridge on every pause/resume is pure waste while the player is
+    /// still sitting right here. When the request cannot be honoured — no player,
+    /// or a different note — this rejects with `NEED_DATA` rather than guessing,
+    /// and the web layer retries with the bytes.
     @objc func playNote(_ call: CAPPluginCall) {
-        guard let b64 = call.getString("dataBase64"), let data = Data(base64Encoded: b64) else {
-            call.reject("no audio data", "BAD_DATA")
-            return
-        }
         let noteId = call.getString("noteId") ?? ""
         let position = call.getDouble("positionSeconds") ?? 0
 
-        do {
-            // `.playback` and never deactivated. Deactivating with
-            // `.notifyOthersOnDeactivation` is a system-wide "everyone else
-            // resume" and previously killed WebView playback of other notes —
-            // do not reintroduce it.
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
-            try AVAudioSession.sharedInstance().setActive(true)
+        guard let b64 = call.getString("dataBase64") else {
+            guard let p = Self.player, Self.playingNoteId == noteId else {
+                call.reject("no loaded player to resume", "NEED_DATA")
+                return
+            }
+            do {
+                try activatePlaybackSession()
+            } catch {
+                call.reject("could not resume this voice note: \(error.localizedDescription)", "PLAY_FAILED")
+                return
+            }
+            p.currentTime = max(0, min(position, p.duration))
+            guard p.play() else {
+                call.reject("the audio system refused to resume playback", "PLAY_FAILED")
+                return
+            }
+            startProgressTimer()
+            Self.log.notice("[\(noteId, privacy: .public)] resume at=\(p.currentTime, privacy: .public)")
+            call.resolve(["duration": p.duration, "currentTime": p.currentTime])
+            return
+        }
 
-            Self.player?.stop()
+        guard let data = Data(base64Encoded: b64) else {
+            call.reject("no audio data", "BAD_DATA")
+            return
+        }
+
+        do {
+            try activatePlaybackSession()
+
+            stopPlayback()
             let p = try AVAudioPlayer(data: data)
             p.delegate = self
             p.prepareToPlay()
@@ -630,6 +699,24 @@ extension FlatFoldAudioPlugin {
         }
     }
 
+    /// `.playback` and never DEACTIVATED. Deactivating with
+    /// `.notifyOthersOnDeactivation` is a system-wide "everyone else resume" and
+    /// previously killed WebView playback of other notes — do not reintroduce it.
+    private func activatePlaybackSession() throws {
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+        try session.setActive(true)
+    }
+
+    /// Drop the player and the timer. Shared by `stopNote` and by the recorder,
+    /// which must not leave a note playing into the microphone.
+    fileprivate func stopPlayback() {
+        Self.player?.stop()
+        Self.player = nil
+        Self.playingNoteId = ""
+        stopProgressTimer()
+    }
+
     @objc func pauseNote(_ call: CAPPluginCall) {
         guard let p = Self.player else { call.resolve(["currentTime": 0]); return }
         p.pause()
@@ -646,10 +733,7 @@ extension FlatFoldAudioPlugin {
     }
 
     @objc func stopNote(_ call: CAPPluginCall) {
-        Self.player?.stop()
-        Self.player = nil
-        Self.playingNoteId = ""
-        stopProgressTimer()
+        stopPlayback()
         call.resolve()
     }
 
@@ -688,6 +772,39 @@ extension FlatFoldAudioPlugin {
     private func stopProgressTimer() {
         Self.progressTimer?.invalidate()
         Self.progressTimer = nil
+    }
+
+    /// Pause cleanly when the system takes the session away.
+    ///
+    /// KEEP THE PLAYER. An interruption is not the end of the note — holding the
+    /// `AVAudioPlayer` is what lets the web layer resume it later without
+    /// re-sending the audio (see `playNote`'s data-less path).
+    ///
+    /// Deliberately does NOT auto-resume on `.ended`. The UI will be showing a
+    /// paused note by then, and audio starting again on its own — after a call,
+    /// with the app possibly in the background — is worse than a note that waits
+    /// to be tapped.
+    ///
+    /// Worth knowing what this does NOT catch: the session is `.mixWithOthers`,
+    /// so another app starting music usually plays ALONGSIDE this rather than
+    /// interrupting it, and no notification fires. That is the intended
+    /// behaviour, not a gap — `.mixWithOthers` is load-bearing (see
+    /// `restorePlaybackSession`) and must not be dropped to make interruptions
+    /// more frequent.
+    @objc fileprivate func handleAudioInterruption(_ note: Notification) {
+        guard
+            let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+            AVAudioSession.InterruptionType(rawValue: raw) == .began,
+            let p = Self.player, p.isPlaying
+        else { return }
+
+        p.pause()
+        stopProgressTimer()
+        Self.log.notice("[\(Self.playingNoteId, privacy: .public)] interrupted at=\(p.currentTime, privacy: .public)")
+        notifyListeners("audioInterrupted", data: [
+            "noteId": Self.playingNoteId,
+            "currentTime": p.currentTime,
+        ])
     }
 
     public func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {

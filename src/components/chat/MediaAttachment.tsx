@@ -156,7 +156,10 @@ const MediaAttachmentComponent = ({ username, media, isOwnMessage }: MediaAttach
 	}
 
 	if (media.mediaKind === 'voice') {
-		return <VoiceNote url={objectUrl} durationMs={media.durationMs} own={isOwnMessage} mimeType={media.mimeType} />;
+		// `media.id`, not the blob URL: the URL is created and revoked by the
+		// effect above, so it is a new string on every remount, and the native
+		// player keys each note's saved position on this.
+		return <VoiceNote noteId={media.id} url={objectUrl} durationMs={media.durationMs} own={isOwnMessage} mimeType={media.mimeType} />;
 	}
 
 	// Generic file. Native: a button that opens the iOS share sheet (the

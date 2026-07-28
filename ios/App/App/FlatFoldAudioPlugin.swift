@@ -35,7 +35,7 @@ import CoreAudio
 // unplayable on every Apple device, on the RECEIVING end. Nothing downstream has
 // to special-case a Mac-recorded note, because the bytes are the same shape.
 @objc(FlatFoldAudioPlugin)
-public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDelegate {
+public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDelegate, AVAudioPlayerDelegate {
     public let identifier = "FlatFoldAudioPlugin"
     public let jsName = "FlatFoldAudio"
     public let pluginMethods: [CAPPluginMethod] = [
@@ -45,6 +45,11 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDe
         CAPPluginMethod(name: "stopRecording", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "discardRecording", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "debugLog", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "playNote", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "pauseNote", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "seekNote", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "stopNote", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getPlaybackState", returnType: CAPPluginReturnPromise),
     ]
 
     /// The MIME type the recorded bytes actually are. Kept in one place so it
@@ -59,6 +64,12 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDe
     private var pendingDurationMs = 0
     private var pendingPeakDb: Float = 0
     private var stopWatchdog: DispatchWorkItem?
+
+    // Playback state. Static because Capacitor may construct more than one
+    // plugin instance, and two live AVAudioPlayers would talk over each other.
+    fileprivate static var player: AVAudioPlayer?
+    fileprivate static var playingNoteId = ""
+    fileprivate static var progressTimer: Timer?
 
     /// `os.Logger`, not NSLog.
     ///
@@ -549,5 +560,142 @@ public class FlatFoldAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDe
             """)
         }
         #endif
+    }
+}
+
+// MARK: - Native playback (Mac Catalyst only)
+
+/// Voice-note PLAYBACK in Swift, for the platform where `<audio>` cannot work.
+///
+/// WHY: on Mac Catalyst, WKWebView grants media loaders in a window tied to
+/// page load, capped at ~30, and never reclaims them within that page. Measured
+/// over ~60 trials — a remount of the whole conversation grants zero, while a
+/// `webView.reload()` grants ~30 again. Consequences: the tail of a long
+/// conversation never plays, and a newly arrived note never plays at all until
+/// the app is relaunched. No arrangement of elements inside the web view fixes
+/// that, because the web view IS the constraint. Full record in
+/// docs/redesign/MAC_AUDIO_FINDINGS.md.
+///
+/// This is the same move that fixed RECORDING, which `navigator.mediaDevices`
+/// made impossible on this platform for the same class of reason.
+///
+/// SCOPED TO CATALYST DELIBERATELY. Verified 2026-07-28 on a real iPhone: every
+/// note in the same 40-note conversation plays on iOS. iOS and web keep the
+/// `<audio>` path — it works there, and churning it would risk the platform
+/// that actually ships.
+///
+/// PLAYS FROM MEMORY, NEVER FROM DISK. Decrypted voice-note audio is plaintext
+/// of an end-to-end encrypted message. `AVAudioPlayer(data:)` means those bytes
+/// never touch the filesystem — strictly better than the recorder, which must
+/// use a temp file and deletes it immediately after the send.
+extension FlatFoldAudioPlugin {
+
+    /// Start (or resume) a note. One player at a time: a conversation plays one
+    /// note, and unlike the web view there is no cap here to ration.
+    @objc func playNote(_ call: CAPPluginCall) {
+        guard let b64 = call.getString("dataBase64"), let data = Data(base64Encoded: b64) else {
+            call.reject("no audio data", "BAD_DATA")
+            return
+        }
+        let noteId = call.getString("noteId") ?? ""
+        let position = call.getDouble("positionSeconds") ?? 0
+
+        do {
+            // `.playback` and never deactivated. Deactivating with
+            // `.notifyOthersOnDeactivation` is a system-wide "everyone else
+            // resume" and previously killed WebView playback of other notes —
+            // do not reintroduce it.
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try AVAudioSession.sharedInstance().setActive(true)
+
+            Self.player?.stop()
+            let p = try AVAudioPlayer(data: data)
+            p.delegate = self
+            p.prepareToPlay()
+            if position > 0, position < p.duration { p.currentTime = position }
+            guard p.play() else {
+                call.reject("the audio system refused to start playback", "PLAY_FAILED")
+                return
+            }
+            Self.player = p
+            Self.playingNoteId = noteId
+            startProgressTimer()
+            Self.log.notice("""
+            [\(noteId, privacy: .public)] play dur=\(p.duration, privacy: .public) \
+            from=\(position, privacy: .public)
+            """)
+            call.resolve(["duration": p.duration, "currentTime": p.currentTime])
+        } catch {
+            call.reject("could not play this voice note: \(error.localizedDescription)", "PLAY_FAILED")
+        }
+    }
+
+    @objc func pauseNote(_ call: CAPPluginCall) {
+        guard let p = Self.player else { call.resolve(["currentTime": 0]); return }
+        p.pause()
+        stopProgressTimer()
+        Self.log.notice("[\(Self.playingNoteId, privacy: .public)] pause at=\(p.currentTime, privacy: .public)")
+        call.resolve(["currentTime": p.currentTime])
+    }
+
+    @objc func seekNote(_ call: CAPPluginCall) {
+        guard let p = Self.player else { call.resolve(); return }
+        let seconds = call.getDouble("seconds") ?? 0
+        p.currentTime = max(0, min(seconds, p.duration))
+        call.resolve(["currentTime": p.currentTime])
+    }
+
+    @objc func stopNote(_ call: CAPPluginCall) {
+        Self.player?.stop()
+        Self.player = nil
+        Self.playingNoteId = ""
+        stopProgressTimer()
+        call.resolve()
+    }
+
+    /// For the web layer to resync after a reload or a backgrounding.
+    @objc func getPlaybackState(_ call: CAPPluginCall) {
+        guard let p = Self.player else {
+            call.resolve(["noteId": "", "playing": false, "currentTime": 0, "duration": 0])
+            return
+        }
+        call.resolve([
+            "noteId": Self.playingNoteId,
+            "playing": p.isPlaying,
+            "currentTime": p.currentTime,
+            "duration": p.duration,
+        ])
+    }
+
+    // MARK: Progress and lifecycle
+
+    /// ~10 Hz, only while playing. Drives the waveform cursor; cheap enough
+    /// that it is not worth being clever, and it stops the moment playback does.
+    private func startProgressTimer() {
+        stopProgressTimer()
+        let t = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            guard let p = Self.player, p.isPlaying else { return }
+            self?.notifyListeners("audioProgress", data: [
+                "noteId": Self.playingNoteId,
+                "currentTime": p.currentTime,
+                "duration": p.duration,
+            ])
+        }
+        RunLoop.main.add(t, forMode: .common)
+        Self.progressTimer = t
+    }
+
+    private func stopProgressTimer() {
+        Self.progressTimer?.invalidate()
+        Self.progressTimer = nil
+    }
+
+    public func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        stopProgressTimer()
+        let ended = Self.playingNoteId
+        Self.player = nil
+        Self.playingNoteId = ""
+        Self.log.notice("[\(ended, privacy: .public)] ended ok=\(flag, privacy: .public)")
+        notifyListeners("audioEnded", data: ["noteId": ended])
     }
 }

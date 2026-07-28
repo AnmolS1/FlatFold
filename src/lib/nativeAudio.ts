@@ -189,3 +189,85 @@ export const recordNatively = {
 		};
 	},
 };
+
+// --- Native PLAYBACK (Mac Catalyst only) -----------------------------------
+//
+// On Mac Catalyst, WKWebView grants media loaders in a window tied to page
+// load, capped at ~30, and never reclaims them within that page. So the tail of
+// a long conversation never plays and a newly arrived note never plays at all
+// until relaunch. No arrangement of <audio> elements fixes that, because the
+// web view is the constraint — see docs/redesign/MAC_AUDIO_FINDINGS.md.
+//
+// Verified 2026-07-28 on a real iPhone that iOS is UNAFFECTED, so this is
+// scoped to Catalyst and iOS/web keep the <audio> path untouched.
+//
+// The bytes are base64'd across the bridge deliberately: a voice note is small
+// (~75 KB, so ~100 KB encoded) and it means the plaintext of an E2EE message is
+// never written to disk. The recorder's 104 KB payload once wedged the
+// WebContent process, but that was the RESULT direction with the payload
+// embedded as JS source; an argument in a plugin CALL is not the same path.
+
+export interface PlaybackState {
+	noteId: string;
+	playing: boolean;
+	currentTime: number;
+	duration: number;
+}
+
+interface PlaybackPlugin {
+	playNote?: (o: { noteId: string; dataBase64: string; positionSeconds?: number }) => Promise<{ duration?: number }>;
+	pauseNote?: () => Promise<{ currentTime?: number }>;
+	seekNote?: (o: { seconds: number }) => Promise<{ currentTime?: number }>;
+	stopNote?: () => Promise<void>;
+	getPlaybackState?: () => Promise<PlaybackState>;
+	addListener?: (event: string, cb: (data: unknown) => void) => void;
+}
+
+function playback(): PlaybackPlugin | null {
+	return (capacitor()?.Plugins?.FlatFoldAudio as PlaybackPlugin | undefined) ?? null;
+}
+
+/**
+ * Whether playback should go through Swift on this platform.
+ *
+ * Deliberately the SAME signal as recording: the plugin answers it natively,
+ * because only native code can tell the two Mac shells apart. Any failure means
+ * "no", so a missing plugin degrades to the <audio> path rather than breaking
+ * playback everywhere.
+ */
+export const nativePlaybackSupported = nativeRecordingSupported;
+
+/** Base64 for the bridge. Chunked — a naive spread on ~75 KB blows the stack. */
+export function bytesToBase64(bytes: Uint8Array): string {
+	let binary = '';
+	const CHUNK = 0x8000;
+	for (let i = 0; i < bytes.length; i += CHUNK) {
+		binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+	}
+	return btoa(binary);
+}
+
+export const nativePlayer = {
+	async play(noteId: string, bytes: Uint8Array, positionSeconds = 0): Promise<number> {
+		const p = playback();
+		if (!p?.playNote) throw new Error('Native playback is unavailable in this build.');
+		const res = await p.playNote({ noteId, dataBase64: bytesToBase64(bytes), positionSeconds });
+		return res.duration ?? 0;
+	},
+	async pause(): Promise<number> {
+		return (await playback()?.pauseNote?.())?.currentTime ?? 0;
+	},
+	async seek(seconds: number): Promise<void> {
+		await playback()?.seekNote?.({ seconds });
+	},
+	async stop(): Promise<void> {
+		await playback()?.stopNote?.();
+	},
+	async state(): Promise<PlaybackState | null> {
+		return (await playback()?.getPlaybackState?.()) ?? null;
+	},
+	/** Subscribe to native transport events. Returns nothing; listeners live for the app's lifetime. */
+	on(event: 'audioProgress' | 'audioEnded' | 'audioInterrupted', cb: (data: { noteId: string; currentTime?: number; duration?: number }) => void): void {
+		playback()?.addListener?.(event, (d) => cb(d as { noteId: string; currentTime?: number; duration?: number }));
+	},
+};

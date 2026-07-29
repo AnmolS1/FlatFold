@@ -261,6 +261,73 @@ class MainViewController: CAPBridgeViewController {
           }
         }
 
+        if (scene === 'login') {
+          // SIGN OUT FIRST if a different account is already signed in. The
+          // session token lives in the KEYCHAIN, which is per-app and survives
+          // wiping the app's data container — so a fresh container still comes
+          // up signed in as whoever was there before, with an empty local store.
+          // That produced a set of Mac screenshots showing the wrong username
+          // and "No conversations yet".
+          // No regex here: this JS lives inside a Swift multiline string, and a
+          // backslash escape has to survive Swift's literal parsing first. Swift
+          // rejects the common whitespace escape outright, in the code AND in a
+          // comment. Read the DOM instead.
+          const whoami = () => {
+            const el = [...document.querySelectorAll('span,div,p')]
+              .find(e => e.children.length === 0 && /connected/i.test(e.textContent || ''));
+            const line = el ? (el.parentElement?.textContent || el.textContent || '') : '';
+            const parts = line.split(/[·.]/).map(t => t.trim()).filter(Boolean);
+            return parts.length ? parts[parts.length - 1] : '';
+          };
+          // LET THE SESSION RESTORE FIRST. The app shows a login form for a
+          // moment on launch and only then restores the Keychain token, so
+          // deciding immediately sees "signed out", types the new credentials,
+          // and loses the race to the restore — the account that ends up signed
+          // in is the OLD one, while the probe reports success. Wait for it to
+          // settle before asking who is signed in.
+          for (let t = 0; t < 20; t++) {
+            await wait(1000);
+            if (whoami()) break;
+          }
+          window.__ffsw = { who0: whoami(), hasLoginForm: !!document.querySelector('input[autocomplete="username"]') };
+          if (!document.querySelector('input[autocomplete="username"]') && whoami() && whoami() !== arguments1) {
+            window.__ffsw.signOutAttempted = true;
+            const sb = document.querySelector('button[aria-label="Settings"]')
+              ?? [...document.querySelectorAll('button')].find(b => (b.textContent || '').trim() === 'Settings');
+            sb?.click();
+            await wait(2500);
+            const out = [...document.querySelectorAll('button')]
+              .find(b => (b.textContent || '').trim() === 'Sign out');
+            window.__ffsw.foundSignOut = !!out;
+            out?.click();
+            for (let t = 0; t < 40 && !document.querySelector('input[autocomplete="username"]'); t++) await wait(1000);
+            await wait(2000);
+          }
+
+          // Sign IN, not up. The same pair of accounts has to appear on every
+          // device in the screenshot set, and history is on-device only, so each
+          // device signs in and then the peer re-sends.
+          for (let t = 0; t < 30 && !document.querySelector('input[autocomplete="username"]'); t++) await wait(1000);
+          const tab = [...document.querySelectorAll('button')]
+            .find(b => (b.textContent || '').trim() === 'Login');
+          tab?.click();
+          await wait(800);
+          const u = document.querySelector('input[autocomplete="username"]');
+          const p = document.querySelector('input[autocomplete="current-password"]');
+          if (!u || !p) return 'FLATFOLD_SCENE ' + JSON.stringify({ scene, ok: false, note: 'login fields missing' });
+          setNative(u, arguments1); setNative(p, arguments2);
+          await wait(400);
+          (p.form || p.closest('form'))?.querySelector('button[type=submit]')?.click();
+          for (let t = 0; t < 90 && document.querySelector('input[autocomplete="current-password"]'); t++) await wait(1000);
+          await wait(5000);
+          document.activeElement?.blur?.();
+          return 'FLATFOLD_SCENE ' + JSON.stringify({
+            scene, ok: !document.querySelector('input[autocomplete="current-password"]'),
+            path: location.pathname, user: arguments1,
+            who: whoami(), dbg: window.__ffsw,
+          });
+        }
+
         if (scene === 'signup') {
           // Create a fresh account so the screenshots can show a real, SEEDED
           // conversation. Deliberately NOT a borrowed real account: history is

@@ -48,6 +48,7 @@ mkdir -p "$OUT"
 # picking a device, not the newest phone.
 DEVICES=(
   "iphone:${IPHONE_UDID:-FCBF8707-E13B-457F-A6C6-A9F5F6792B69}:1284x2778"
+  "ipad-13:${IPAD_UDID:-D9CE0BFD-048E-4F0B-BDB3-ABBBDF89D9E5}:2064x2752"
 )
 SCENES=("${@:-chat contacts settings transparency}")
 read -r -a SCENES <<< "${SCENES[*]}"
@@ -69,9 +70,19 @@ for entry in "${DEVICES[@]}"; do
   # Light appearance, and a clean status bar — Apple rejects a carrier name or a
   # half-empty battery in a marketing shot, and the default sim clock is not 9:41.
   xcrun simctl ui "$udid" appearance light >/dev/null 2>&1 || true
-  xcrun simctl status_bar "$udid" override \
-    --time "9:41" --batteryState charged --batteryLevel 100 \
-    --cellularMode active --cellularBars 4 --wifiMode active --wifiBars 3 >/dev/null 2>&1 || true
+  # iPad has no cellular status item on a wifi model, so those flags are dropped
+  # there — passing them is harmless but the override silently no-ops without a
+  # matching item, and an un-overridden bar shows the real clock and battery,
+  # which is what shipped in the first iPad set.
+  if [[ "$name" == ipad* ]]; then
+    xcrun simctl status_bar "$udid" override \
+      --time "9:41" --batteryState charged --batteryLevel 100 \
+      --wifiMode active --wifiBars 3 >/dev/null 2>&1 || true
+  else
+    xcrun simctl status_bar "$udid" override \
+      --time "9:41" --batteryState charged --batteryLevel 100 \
+      --cellularMode active --cellularBars 4 --wifiMode active --wifiBars 3 >/dev/null 2>&1 || true
+  fi
 
   build="ios/App/build/DDsim/Build/Products/Debug-iphonesimulator/App.app"
   [ -d "$build" ] || { echo "no simulator build at $build" >&2; exit 1; }

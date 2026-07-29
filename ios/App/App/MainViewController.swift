@@ -330,7 +330,17 @@ class MainViewController: CAPBridgeViewController {
           // you are signed in: a link on the login screen, and Settings → About
           // → "What the server stores" once you are. Handling only the first
           // broke this scene the moment the run became a logged-in one.
-          let a = [...document.querySelectorAll('a')]
+          // Navigate the ROUTER directly. Clicking a link meant finding it, and
+          // it lives in two different places depending on sign-in state — the
+          // login screen, or Settings → About. Pushing the route works from
+          // either, and from a state where neither is on screen.
+          if (!/transparency/.test(location.pathname)) {
+            history.pushState({}, '', '/transparency');
+            dispatchEvent(new PopStateEvent('popstate'));
+            for (let t = 0; t < 20 && !/transparency/.test(location.pathname); t++) await wait(400);
+            await wait(2500);
+          }
+          let a = /transparency/.test(location.pathname) ? true : [...document.querySelectorAll('a')]
             .find(x => /what the server stores/i.test(x.textContent || ''));
           if (!a) {
             const sb = document.querySelector('button[aria-label="Settings"]')
@@ -343,7 +353,7 @@ class MainViewController: CAPBridgeViewController {
             }
           }
           if (!a) return 'FLATFOLD_SCENE ' + JSON.stringify({ scene, ok: false, note: 'link not found' });
-          a.click();
+          if (a !== true) a.click();
           for (let t = 0; t < 30 && !/transparency/.test(location.pathname); t++) await wait(500);
           await wait(1500); // let the table paint
         }

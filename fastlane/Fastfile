@@ -67,6 +67,12 @@ platform :ios do
     # runner with no signed-in Xcode account. Force manual signing onto the match
     # profile so the ARCHIVE step (not just the export) uses it.
     update_code_signing_settings(
+      # SCOPED TO THE APP TARGET. Unscoped, this rewrites every target in the
+      # project: it set the UI-test target's PRODUCT_BUNDLE_IDENTIFIER to
+      # dev.flatfold (from dev.flatfold.uitests) and clobbered
+      # DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER. Harmless on a throwaway CI
+      # runner, damage to a working tree.
+      targets: ["App"],
       path: "ios/App/App.xcodeproj",
       use_automatic_signing: false,
       team_id: "G2KBQH7KWT",
@@ -147,16 +153,40 @@ platform :mac do
     ) + 1
     UI.important("Archiving macOS CFBundleVersion #{next_build}.")
 
+    # Force manual signing onto the CATALYST profile, same reason as iOS: the
+    # Capacitor project defaults to automatic signing, which cannot resolve on a
+    # machine with no signed-in Xcode account. The profile name carries a
+    # `catalyst` suffix — match names it separately from the iOS one because it
+    # IS a separate profile, and pinning the iOS name here would silently export
+    # with the wrong material.
+    update_code_signing_settings(
+      # SCOPED TO THE APP TARGET. Unscoped, this rewrites every target in the
+      # project: it set the UI-test target's PRODUCT_BUNDLE_IDENTIFIER to
+      # dev.flatfold (from dev.flatfold.uitests) and clobbered
+      # DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER. Harmless on a throwaway CI
+      # runner, damage to a working tree.
+      targets: ["App"],
+      path: "ios/App/App.xcodeproj",
+      use_automatic_signing: false,
+      team_id: "G2KBQH7KWT",
+      code_sign_identity: "Apple Distribution",
+      bundle_identifier: "dev.flatfold",
+      profile_name: "match AppStore dev.flatfold catalyst",
+    )
+
     build_app(
-      project: "ios/App/App.xcodeproj",
-      workspace: "ios/App/App.xcworkspace",
       scheme: "App",
       destination: "generic/platform=macOS,variant=Mac Catalyst",
       catalyst_platform: "macos",
       export_method: "app-store",
       output_directory: "build",
-      output_name: "FlatFold-macOS.pkg",
+      output_name: "FlatFold-macOS",
       xcargs: "CURRENT_PROJECT_VERSION=#{next_build}",
+      export_options: {
+        provisioningProfiles: {
+          "dev.flatfold" => "match AppStore dev.flatfold catalyst",
+        },
+      },
     )
 
     upload_to_testflight(

@@ -60,6 +60,14 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- REQUIRED FOR THE MAC APP STORE, ignored on iOS. Without it the upload is
+	     rejected by altool with error 90242 ("The product archive is invalid.
+	     The Info.plist must contain a LSApplicationCategoryType key") AFTER a
+	     completely successful archive, so it reads as a signing problem and is
+	     not one. Must stay consistent with the primary category on the App Store
+	     Connect record, which is Social Networking. -->
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.social-networking</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>

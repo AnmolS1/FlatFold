@@ -122,6 +122,26 @@ class MainViewController: CAPBridgeViewController {
             }
         }
 
+        // Can a SIMULATOR reach a logged-in state? STATUS.md records that it
+        // cannot — Argon2 and HPKE WebAssembly segfault there — and that claim
+        // gates every screenshot plan, because the simulator is the only thing
+        // that renders the real native chrome at exact device pixel sizes.
+        // Worth re-measuring rather than inheriting.
+        // `--scene=<name>`: park the app on a named screen and say when it is
+        // settled, so a screenshot run is deterministic instead of a sleep.
+        if let sceneArg = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--scene=") }) {
+            let scene = String(sceneArg.dropFirst("--scene=".count))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+                self?.showScene(scene, probe)
+            }
+        }
+
+        if ProcessInfo.processInfo.arguments.contains("--verify-login") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+                self?.verifyLogin(probe)
+            }
+        }
+
         if ProcessInfo.processInfo.arguments.contains("--verify-links") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
                 self?.verifyExternalLinks(probe)
@@ -181,6 +201,140 @@ class MainViewController: CAPBridgeViewController {
     /// `appReady`/`appTotal` are the app's OWN notes and are the trial's
     /// baseline: a trial without one is discarded, because a drained pool fails
     /// totally and is indistinguishable from any hypothesis being tested.
+    /// Park the app on a named screen for a screenshot, and report when it has
+    /// settled. Deterministic, so a capture never races the render.
+    ///
+    /// Only screens reachable WITHOUT an account are here. That is a real limit,
+    /// not a design choice — see the note in the screenshot script.
+    private func showScene(_ scene: String, _ probe: os.Logger) {
+        #if DEBUG
+        let js = """
+        try {
+        const wait = (ms) => new Promise(r => setTimeout(r, ms));
+        const scene = arguments0;
+        for (let t = 0; t < 30 && !document.querySelector('form, main, h1'); t++) await wait(500);
+
+        if (scene === 'transparency') {
+          const a = [...document.querySelectorAll('a')]
+            .find(x => /what the server stores/i.test(x.textContent || ''));
+          if (!a) return 'FLATFOLD_SCENE ' + JSON.stringify({ scene, ok: false, note: 'link not found' });
+          a.click();
+          for (let t = 0; t < 30 && !/transparency/.test(location.pathname); t++) await wait(500);
+          await wait(1500); // let the table paint
+        }
+
+        // Settled = a full frame has rendered with no pending layout work.
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+        return 'FLATFOLD_SCENE ' + JSON.stringify({
+          scene, ok: true, path: location.pathname,
+          title: (document.querySelector('h1,h2')?.textContent || '').trim().slice(0, 40),
+        });
+        } catch (e) {
+          return 'FLATFOLD_SCENE ' + JSON.stringify({ scene: arguments0, ok: false, note: String(e) });
+        }
+        """
+        bridge?.webView?.callAsyncJavaScript(js, arguments: ["arguments0": scene], in: nil, in: .page) { result in
+            switch result {
+            case .success(let v):
+                probe.notice("\(String(describing: v), privacy: .public)")
+                print("PROBE \(String(describing: v))")
+            case .failure(let e):
+                print("PROBE_FAIL \(String(describing: e))")
+            }
+        }
+        #endif
+    }
+
+    /// Drive a real login, and report how far it got.
+    ///
+    /// DEBUG-only, and it carries the same stated tradeoff as `--unlock-pw`: a
+    /// throwaway test credential reaches the web context, only when the operator
+    /// passes it explicitly, and it is never logged.
+    private func verifyLogin(_ probe: os.Logger) {
+        #if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        func value(_ name: String) -> String? {
+            if let a = args.first(where: { $0.hasPrefix("--\(name)=") }) {
+                return String(a.dropFirst(name.count + 3))
+            }
+            if let i = args.firstIndex(of: "--\(name)") { return args.dropFirst(i + 1).first }
+            return nil
+        }
+        let js = """
+        try {
+        const wait = (ms) => new Promise(r => setTimeout(r, ms));
+        // React owns these inputs, so assigning .value is not enough — go
+        // through the native setter and dispatch the event React listens for.
+        const setNative = (el, v) => {
+          const setter = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype, 'value').set;
+          setter.call(el, v);
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+        };
+        const stage = () => {
+          if (document.querySelector('input[autocomplete="username"]')) return 'login';
+          if (document.querySelector('input[type=password]')) return 'unlock';
+          if (document.querySelector('button[aria-label="Settings"]')) return 'chat';
+          if ([...document.querySelectorAll('button')].some(b => (b.textContent||'').trim() === 'Settings')) return 'chat';
+          return 'unknown';
+        };
+
+        for (let t = 0; t < 40 && stage() === 'unknown'; t++) await wait(1000);
+        const reached = [stage()];
+
+        const user = document.querySelector('input[autocomplete="username"]');
+        const pass = document.querySelector('input[autocomplete="current-password"]')
+          ?? document.querySelector('input[type=password]');
+        if (user && pass && arguments0 && arguments1) {
+          setNative(user, arguments0);
+          setNative(pass, arguments1);
+          await wait(400);
+          // Click the submit button INSIDE THE FORM. Two earlier attempts both
+          // reported "still on login, no error" — which reads as a rejected
+          // credential and is not: `requestSubmit()` did nothing, and matching
+          // a button by the text "Login" found the Login/Sign Up TAB, which
+          // appears earlier in the DOM and whose click just re-selects the tab
+          // that is already active. Scoping to the form is what distinguishes
+          // them; there is no text that does.
+          const form = pass.form || pass.closest('form');
+          const btn = form?.querySelector('button[type=submit]');
+          if (btn) btn.click();
+          else form?.requestSubmit?.();
+          // Argon2 is deliberately slow; give it room before calling it dead.
+          for (let t = 0; t < 60; t++) {
+            await wait(1000);
+            const st = stage();
+            if (st !== reached[reached.length - 1]) reached.push(st);
+            if (st === 'chat') break;
+          }
+        }
+        const err = [...document.querySelectorAll('p,div')]
+          .map(e => (e.textContent || '').trim())
+          .filter(t => t.length < 140 && /incorrect|failed|error|wrong|unable/i.test(t));
+        return 'FLATFOLD_LOGIN ' + JSON.stringify({
+          reached, stage: stage(), errors: err.slice(0, 2),
+          totp: !!document.querySelector('input[autocomplete="one-time-code"]'),
+        });
+        } catch (e) {
+          return 'FLATFOLD_LOGIN ' + JSON.stringify({ note: 'probe threw: ' + (e && e.message ? e.message : String(e)) });
+        }
+        """
+        bridge?.webView?.callAsyncJavaScript(
+            js, arguments: ["arguments0": value("login-user") ?? "", "arguments1": value("unlock-pw") ?? ""],
+            in: nil, in: .page
+        ) { result in
+            switch result {
+            case .success(let v):
+                probe.notice("\(String(describing: v), privacy: .public)")
+                print("PROBE \(String(describing: v))")
+            case .failure(let e):
+                probe.notice("FLATFOLD_LOGIN_FAIL \(String(describing: e), privacy: .public)")
+                print("PROBE_FAIL \(String(describing: e))")
+            }
+        }
+        #endif
+    }
+
     /// Does an external link strand the WebView?
     ///
     /// THE RISK, stated precisely: in a `capacitor://localhost` WebView an

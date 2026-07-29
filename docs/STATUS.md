@@ -9,6 +9,7 @@ Read in this order:
 | --- | --- | --- |
 | 1 | **this file** | what is true today, and the "Deliberate behaviours" list — several of the most surprising behaviours in the app are intentional and already documented. Do not file them. |
 | 2 | `redesign/HANDOFF_2026-07-28.md` | **the current handoff.** Mac voice notes and the build mechanics. Its "half-fixed" framing is superseded — the fix landed and is verified. |
+| 2a | `ASC_SUBMISSION_CHECKLIST.md` | **copy-paste ready: exactly what to put in every App Store Connect field**, incl. the review notes, the privacy answers, the accessibility claims and the custom EULA. |
 | 2b | `redesign/HANDOFF_SUBMISSION_AUDIT.md` | **App Store state, read from the ASC API 2026-07-28.** Two hard blockers (no screenshots on either platform, no macOS build ever uploaded) and five judgement calls. Start here for anything submission-shaped. |
 | 3 | `redesign/HANDOFF_STEP6_CONTINUATION.md` | **authoritative for the hard constraints** (the frozen files). Otherwise historical — its status section is stale. |
 | 4 | whatever the task needs | the D1–D7 design specs, `FULL_AUDIT_2.md`, `NATIVE_MACOS_PLAN.md`, `ENCRYPTION_COMPLIANCE.md`, `THREAT_MODEL.md` |
@@ -211,10 +212,15 @@ one, argue the tradeoff rather than reporting it as a defect.
   PWA replaces it with the app name.
 - **The app-switcher shows a branded cover instead of your chat.** Intentional, so
   message content cannot leak into an iOS snapshot. Residual #23.
-- **The iOS simulator cannot reach a logged-in state.** Argon2 and HPKE WebAssembly
-  segfault there. Use a real device for anything past the login screen. The
-  simulator is still fine for launch-time work, which is how TLS pinning was
-  verified.
+- **The iOS simulator cannot reach a logged-in state** — but the recorded reason
+  is wrong, and it matters. Re-measured 2026-07-28: the app **launches, renders
+  and stays alive** in the simulator; it does not segfault. What actually blocks
+  a logged-in state is that a fresh install has no session, and message history
+  is on-device only, so even a correct login shows an empty app. (The run that
+  produced the original claim is unknown; a login attempt that day returned
+  `401 /api/auth/login`, i.e. a credential failure.) The simulator IS usable for
+  anything reachable without an account, including exact-size screenshots —
+  `scripts/screenshots.sh`.
 - **The message list only renders the last 150 messages.** A deliberate cap with a
   "Load earlier" control, chosen over a virtualization dependency.
 - **`manualChunks` is deliberately absent.** For a bundled `capacitor://` app it

@@ -1,5 +1,9 @@
 # FlatFold — France (ANSSI) encryption declaration content
 
+> **FILED, AND ACCEPTED BY ANSSI ON 2026-07-25. France compliance is CLOSED.**
+> What follows is the content that was submitted, kept for the record and for
+> re-filing if the declarant ever changes (e.g. to an LLC). It is not a to-do.
+
 The substantive content for FlatFold's French encryption declaration under Décret n°2007-663 (déclaration for the *supply* of a means of cryptology using standard algorithms). Drop this into whichever channel your App Store Connect account presents — the native ASC France encryption flow, or the ANSSI form emailed to `controle@ssi.gouv.fr` with the completed form uploaded to ASC. Confirm the exact fields in the live flow; this covers everything either one asks for.
 
 **Filing as:** Anmol Saxena (individual), matching the Apple Developer account.

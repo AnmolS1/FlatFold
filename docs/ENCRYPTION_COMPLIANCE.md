@@ -41,7 +41,18 @@ Record of the answers to give, consistent with the determination above:
 
 **Important:** the US exemption above does **not** cover France. France is a separate requirement (next section) triggered by distributing an encryption app to French users, regardless of the US answer.
 
-## 4. France (ANSSI) — declaration required, and we're doing it
+## 4. France (ANSSI) — FILED AND ACCEPTED 2026-07-25. Nothing to do.
+
+> **STATUS: DONE.** The déclaration was filed and **ANSSI accepted it on
+> 2026-07-25**. France compliance is closed. Do not re-raise it as an open item,
+> and do not drop France from the territory list.
+>
+> This banner exists because the rest of this section is written in the future
+> tense — "we're doing it", "file before you need the France release live" —
+> and reads as pending to anyone who lands here without also reading
+> `STATUS.md`. That has now cost several people the same wrong conclusion.
+
+### How it was done, for the record
 
 France (Décret n°2007-663) requires a declaration to ANSSI to *supply* a means of cryptology to French users. FlatFold provides secure communications and secure storage, which are controlled categories (no banking/medical exemption applies). Because every algorithm is **standard**, FlatFold needs a **déclaration** (the lighter path), not a *demande d'autorisation* (which is only for non-standard cryptography).
 
@@ -50,7 +61,7 @@ The declaration content is drafted in `FRANCE_ENCRYPTION_DECLARATION.md`. Submis
 - Newer path: submit the encryption declaration directly through **App Store Connect's** France encryption flow.
 - Traditional path: complete the ANSSI declaration form and email it to **controle@ssi.gouv.fr** (post is also accepted), then upload the completed form in App Store Connect when submitting the app. Apple wants the completed form, not the acknowledgement.
 
-Whichever your account presents, the substantive content is the same and is in the France doc. Historically ANSSI takes roughly a month, so file before you need the France release live.
+Whichever your account presents, the substantive content is the same and is in the France doc. Historically ANSSI takes roughly a month. (Filed and accepted 2026-07-25 — see the banner above.)
 
 ## 5. Changing to the LLC later
 

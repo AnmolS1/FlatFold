@@ -82,11 +82,6 @@ attributes — fetch versions per app.
    `demoAccountName` is a single field and holds one account; the second, and
    the explanation, have nowhere to live except the notes. **Submitting as-is
    invites a rejection that the repo already knows how to prevent.**
-5. **France is in the 175 available territories, and the ANSSI declaration is
-   drafted but not filed** — `docs/ENCRYPTION_COMPLIANCE.md` §4 and
-   `docs/FRANCE_ENCRYPTION_DECLARATION.md`. That doc says ANSSI historically
-   takes about a month. Confirm the filing status before submitting to France,
-   or drop France from the territory list until it clears.
 6. **`PrivacyInfo.xcprivacy` and `D6_app_privacy_label.md` disagree.** The
    manifest declares exactly one collected type, `NSPrivacyCollectedDataTypeUserID`
    (linked, App Functionality). D6 says the **push token** should also be
@@ -142,7 +137,12 @@ Verify, in roughly this order — the first two gate everything else:
    stores". That is a checkable claim: read `/transparency` against
    `worker/` and the D1 schema, and confirm the list is complete.
 5. **The review notes**, per §2.4.
-6. **Encryption and France**, per §2.5 — filing status, not the drafting.
+6. ~~Encryption and France~~ — **NOTHING TO DO.** The ANSSI déclaration was
+   filed and **accepted 2026-07-25**; France is closed and stays in the
+   territory list. Noted rather than deleted because this has been wrongly
+   raised as open more than once, always by reading `ENCRYPTION_COMPLIANCE.md`
+   §4 (written in the future tense) without `STATUS.md`, which has said
+   "ANSSI declaration accepted" all along. §4 now leads with a status banner.
 7. **The macOS path end to end**: signing, archive, upload, and whether the Mac
    build is worth submitting at all given the known Catalyst gaps.
 

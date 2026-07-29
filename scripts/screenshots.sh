@@ -41,12 +41,21 @@ mkdir -p "$OUT"
 # name:udid:expected-pixels. Sizes are what App Store Connect asks for; the
 # expectation is asserted after every capture, because a silently wrong-sized
 # screenshot is rejected at upload time and the run looks successful here.
+# 1284x2778 is one of the four sizes App Store Connect accepts for iPhone
+# (1242x2688, 2688x1242, 1284x2778, 2778x1284). An iPhone 14 Plus simulator IS
+# that resolution natively, so nothing is scaled. A 6.9" device (1320x2868) is
+# NOT on that list and was the first attempt here — check the slot in ASC before
+# picking a device, not the newest phone.
 DEVICES=(
-  "iphone-6.9:F27642A1-E169-4D1C-8695-4638E2931F58:1320x2868"
-  "ipad-13:D9CE0BFD-048E-4F0B-BDB3-ABBBDF89D9E5:2064x2752"
+  "iphone:${IPHONE_UDID:-FCBF8707-E13B-457F-A6C6-A9F5F6792B69}:1284x2778"
 )
-SCENES=("${@:-login transparency}")
+SCENES=("${@:-chat contacts settings transparency}")
 read -r -a SCENES <<< "${SCENES[*]}"
+
+# The keystore re-locks on every relaunch (the key is derived from the password
+# and never stored), so every scene past the gate needs it.
+SEED_PW="${SEED_PW:-}"
+SEED_REPLY="${SEED_REPLY:-}"
 
 APP_ID="dev.flatfold"
 
@@ -71,10 +80,11 @@ for entry in "${DEVICES[@]}"; do
   for scene in "${SCENES[@]}"; do
     xcrun simctl terminate "$udid" "$APP_ID" >/dev/null 2>&1 || true
     log="$(mktemp)"
-    xcrun simctl launch --console-pty "$udid" "$APP_ID" "--scene=$scene" >"$log" 2>&1 &
+    xcrun simctl launch --console-pty "$udid" "$APP_ID" "--scene=$scene" \
+      ${SEED_PW:+"--seed-pw=$SEED_PW"} ${SEED_REPLY:+"--seed-reply=$SEED_REPLY"} >"$log" 2>&1 &
 
     # Wait for the app's own "settled" signal rather than sleeping.
-    for _ in $(seq 1 60); do
+    for _ in $(seq 1 150); do
       grep -q "FLATFOLD_SCENE" "$log" 2>/dev/null && break
       sleep 1
     done

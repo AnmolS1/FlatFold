@@ -214,9 +214,134 @@ class MainViewController: CAPBridgeViewController {
         const scene = arguments0;
         for (let t = 0; t < 30 && !document.querySelector('form, main, h1'); t++) await wait(500);
 
+        const setNative = (el, v) => {
+          const setter = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype, 'value').set;
+          setter.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true }));
+        };
+
+        // Unlock the keystore if the gate is up. A relaunch always re-locks it —
+        // the key is derived from the password and never stored — so every scene
+        // after a signup needs this, and the first attempt at a chat screenshot
+        // photographed the unlock gate instead.
+        if (scene !== 'signup' && scene !== 'login' && scene !== 'transparency' && arguments2) {
+          // POLL for the gate. Checking once ran before the gate had rendered,
+          // skipped the unlock entirely, and photographed the unlock screen —
+          // the third time in this session that a single timed check has been
+          // mistaken for a missing element.
+          window.__ffdbg = { pwLen: String(arguments2 || '').length };
+          let gate = null;
+          for (let t = 0; t < 40 && !gate; t++) {
+            gate = document.querySelector('input[type=password]');
+            if (!gate && document.querySelector('button[aria-label="Settings"]')) break; // already unlocked
+            if (!gate) await wait(500);
+          }
+          // "Is this the unlock gate or the login form?" cannot be answered by
+          // the PRESENCE of a username field: the unlock gate deliberately
+          // carries a HIDDEN one so password managers will autofill it. Ask
+          // whether it is visible instead. This cost a build cycle and three
+          // screenshots of the unlock screen.
+          const uname = document.querySelector('input[autocomplete="username"]');
+          const unameVisible = !!uname && uname.offsetParent !== null;
+          window.__ffdbg.gate = !!gate;
+          window.__ffdbg.unameVisible = unameVisible;
+          if (gate && !unameVisible) {
+            setNative(gate, arguments2);
+            await wait(300);
+            const sb = (gate.form || gate.closest('form'))?.querySelector('button[type=submit]');
+            window.__ffdbg.filled = gate.value.length;
+            window.__ffdbg.btn = !!sb;
+            window.__ffdbg.btnDisabled = sb ? sb.disabled : null;
+            sb?.click();
+            for (let t = 0; t < 60 && document.querySelector('input[type=password]'); t++) await wait(1000);
+            // Drop focus, or the software keyboard stays up and eats half the
+            // screenshot.
+            document.activeElement?.blur?.();
+            await wait(3000);
+          }
+        }
+
+        if (scene === 'signup') {
+          // Create a fresh account so the screenshots can show a real, SEEDED
+          // conversation. Deliberately NOT a borrowed real account: history is
+          // on-device only (so a real login shows an empty app anyway), and a
+          // marketing screenshot should never carry someone's actual messages.
+          const tab = [...document.querySelectorAll('button')]
+            .find(b => (b.textContent || '').trim() === 'Sign Up');
+          tab?.click();
+          await wait(800);
+          const u = document.querySelector('input[autocomplete="username"]');
+          const p = document.querySelector('input[autocomplete="new-password"]');
+          if (!u || !p) return 'FLATFOLD_SCENE ' + JSON.stringify({ scene, ok: false, note: 'signup fields missing' });
+          setNative(u, arguments1); setNative(p, arguments2);
+          await wait(400);
+          // The submit button INSIDE the form — matching on the text "Sign Up"
+          // finds the tab, which sits earlier in the DOM.
+          (p.form || p.closest('form'))?.querySelector('button[type=submit]')?.click();
+          for (let t = 0; t < 90; t++) {
+            await wait(1000);
+            if (!document.querySelector('input[autocomplete="new-password"]')) break;
+          }
+          await wait(4000);
+          return 'FLATFOLD_SCENE ' + JSON.stringify({
+            scene, ok: !document.querySelector('input[autocomplete="new-password"]'),
+            path: location.pathname, user: arguments1,
+          });
+        }
+
+        if (scene === 'chat' || scene === 'contacts' || scene === 'settings') {
+          const byText = (t) => [...document.querySelectorAll('button')]
+            .find(b => (b.textContent || '').trim() === t);
+          for (let t = 0; t < 30 && !byText('Chats') && !document.querySelector('button[aria-label="Settings"]'); t++) await wait(1000);
+          if (scene === 'contacts') { byText('Contacts')?.click(); await wait(2000); }
+          if (scene === 'settings') {
+            (document.querySelector('button[aria-label="Settings"]') ?? byText('Settings'))?.click();
+            await wait(2500);
+          }
+          if (scene === 'chat') {
+            byText('Chats')?.click(); await wait(1200);
+            const skip = /search|panic|settings|new message|chats|contacts|theme/i;
+            const row = [...document.querySelectorAll('button')]
+              .find(b => (b.textContent || '').trim().length > 2 && !skip.test(b.textContent || ''));
+            row?.click(); await wait(2500);
+            // Reply, so the screenshot shows BOTH bubble styles. A one-sided
+            // conversation reads as an empty app in a store listing.
+            if (arguments3) {
+              const box = document.querySelector('textarea');
+              if (box) {
+                const setter = Object.getOwnPropertyDescriptor(
+                  window.HTMLTextAreaElement.prototype, 'value').set;
+                for (const line of arguments3.split('|')) {
+                  setter.call(box, line);
+                  box.dispatchEvent(new Event('input', { bubbles: true }));
+                  await wait(500);
+                  (box.form || box.closest('form'))?.querySelector('button[type=submit]')?.click();
+                  await wait(2500);
+                }
+                box.blur();
+                await wait(2500);
+              }
+            }
+          }
+        }
+
         if (scene === 'transparency') {
-          const a = [...document.querySelectorAll('a')]
+          // Reachable from TWO places, and which one exists depends on whether
+          // you are signed in: a link on the login screen, and Settings → About
+          // → "What the server stores" once you are. Handling only the first
+          // broke this scene the moment the run became a logged-in one.
+          let a = [...document.querySelectorAll('a')]
             .find(x => /what the server stores/i.test(x.textContent || ''));
+          if (!a) {
+            const sb = document.querySelector('button[aria-label="Settings"]')
+              ?? [...document.querySelectorAll('button')].find(b => (b.textContent || '').trim() === 'Settings');
+            sb?.click();
+            for (let t = 0; t < 20 && !a; t++) {
+              await wait(800);
+              a = [...document.querySelectorAll('a')]
+                .find(x => /what the server stores/i.test(x.textContent || ''));
+            }
+          }
           if (!a) return 'FLATFOLD_SCENE ' + JSON.stringify({ scene, ok: false, note: 'link not found' });
           a.click();
           for (let t = 0; t < 30 && !/transparency/.test(location.pathname); t++) await wait(500);
@@ -228,12 +353,23 @@ class MainViewController: CAPBridgeViewController {
         return 'FLATFOLD_SCENE ' + JSON.stringify({
           scene, ok: true, path: location.pathname,
           title: (document.querySelector('h1,h2')?.textContent || '').trim().slice(0, 40),
+          dbg: window.__ffdbg,
         });
         } catch (e) {
           return 'FLATFOLD_SCENE ' + JSON.stringify({ scene: arguments0, ok: false, note: String(e) });
         }
         """
-        bridge?.webView?.callAsyncJavaScript(js, arguments: ["arguments0": scene], in: nil, in: .page) { result in
+        let args2 = ProcessInfo.processInfo.arguments
+        func val(_ n: String) -> String {
+            (args2.first(where: { $0.hasPrefix("--\(n)=") }).map { String($0.dropFirst(n.count + 3)) }) ?? ""
+        }
+        bridge?.webView?.callAsyncJavaScript(
+            js, arguments: [
+                "arguments0": scene, "arguments1": val("seed-user"),
+                "arguments2": val("seed-pw"), "arguments3": val("seed-reply"),
+            ],
+            in: nil, in: .page
+        ) { result in
             switch result {
             case .success(let v):
                 probe.notice("\(String(describing: v), privacy: .public)")

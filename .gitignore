@@ -85,3 +85,9 @@ ios/App/Pods/
 
 # Machine state for the audio-trial harness — not source.
 .audio-last-quit
+
+# fastlane's export directory (Gymfile `output_directory: "build"`): the .ipa,
+# the .pkg, the dSYM zips and an unpacked App.app, rewritten by every release
+# run. It also carried Capacitor's vendored native-bridge.js into `npm run lint`,
+# which reported an error from a framework resource rather than from source.
+/build/

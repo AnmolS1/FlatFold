@@ -24,14 +24,14 @@ afterEach(cleanup);
 
 describe('VoiceNote renders', () => {
 	it('mounts without throwing and shows a play control', () => {
-		render(<VoiceNote url="blob:one" durationMs={4200} own={false} />);
+		render(<VoiceNote noteId="note-one" url="blob:one" durationMs={4200} own={false} />);
 		expect(screen.getByLabelText(/play voice note/i)).toBeTruthy();
 	});
 
 	// The regression that killed playback: an element outside the document never
 	// loads in WebKit. In JSX it is attached by construction — assert that.
 	it('puts its media element IN THE DOCUMENT', () => {
-		const { container } = render(<VoiceNote url="blob:one" durationMs={4200} own={false} />);
+		const { container } = render(<VoiceNote noteId="note-one" url="blob:one" durationMs={4200} own={false} />);
 		const audio = container.querySelector('audio');
 		expect(audio).not.toBeNull();
 		expect(audio!.isConnected).toBe(true);
@@ -50,19 +50,19 @@ describe('VoiceNote renders', () => {
 	// Lazy attachment therefore makes EVERY note a late load, and playback broke
 	// for all of them rather than just for newly arrived ones.
 	it('attaches its source AT MOUNT, because a late load never completes', () => {
-		const { container } = render(<VoiceNote url="blob:one" durationMs={4200} own={false} />);
+		const { container } = render(<VoiceNote noteId="note-one" url="blob:one" durationMs={4200} own={false} />);
 		const audio = container.querySelector('audio')!;
 		expect(audio.getAttribute('src')).toBe('blob:one');
 		expect(audio.getAttribute('preload')).toBe('metadata');
 	});
 
 	it('renders exactly ONE media element per note', () => {
-		const { container } = render(<VoiceNote url="blob:one" durationMs={4200} own={false} />);
+		const { container } = render(<VoiceNote noteId="note-one" url="blob:one" durationMs={4200} own={false} />);
 		expect(container.querySelectorAll('audio')).toHaveLength(1);
 	});
 
 	it('shows the sender-provided duration without needing the element to load', () => {
-		render(<VoiceNote url="blob:one" durationMs={65000} own={false} />);
+		render(<VoiceNote noteId="note-long" url="blob:one" durationMs={65000} own={false} />);
 		expect(screen.getByText('1:05')).toBeTruthy();
 	});
 
@@ -72,7 +72,7 @@ describe('VoiceNote renders', () => {
 		const { container } = render(
 			<>
 				{Array.from({ length: 12 }, (_, i) => (
-					<VoiceNote key={i} url={`blob:${i}`} durationMs={1000} own={false} />
+					<VoiceNote key={i} noteId={`note-${i}`} url={`blob:${i}`} durationMs={1000} own={false} />
 				))}
 			</>
 		);

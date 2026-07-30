@@ -67,6 +67,12 @@ platform :ios do
     # runner with no signed-in Xcode account. Force manual signing onto the match
     # profile so the ARCHIVE step (not just the export) uses it.
     update_code_signing_settings(
+      # SCOPED TO THE APP TARGET. Unscoped, this rewrites every target in the
+      # project: it set the UI-test target's PRODUCT_BUNDLE_IDENTIFIER to
+      # dev.flatfold (from dev.flatfold.uitests) and clobbered
+      # DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER. Harmless on a throwaway CI
+      # runner, damage to a working tree.
+      targets: ["App"],
       path: "ios/App/App.xcodeproj",
       use_automatic_signing: false,
       team_id: "G2KBQH7KWT",
@@ -92,6 +98,100 @@ platform :ios do
     # asynchronously, so the runner isn't billed for the wait.
     upload_to_testflight(
       api_key: key,
+      skip_waiting_for_build_processing: true,
+    )
+  end
+end
+
+# --- macOS (Mac Catalyst) ----------------------------------------------------
+#
+# DELIBERATELY A SEPARATE PLATFORM BLOCK, on a separate tag (`mac-v*`), so it
+# cannot destabilise the iOS pipeline — which is proven and has shipped builds.
+# If the Catalyst lane fails, iOS releases keep working untouched.
+#
+# UNVERIFIED: this lane has never completed a run. The first `mac-v*` tag IS the
+# test. Three things are most likely to need adjusting, and all three are stated
+# here rather than discovered at 2am:
+#
+#  1. THE POD MODE IS STATEFUL AND MUST BE `catalyst`. `pod install` without
+#     FLATFOLD_CATALYST=1 includes @capacitor/filesystem, which ships no
+#     maccatalyst slice, and the build fails with a misleading
+#     "Unable to resolve module dependency: 'IONFilesystemLib'". The workflow
+#     sets it; if you ever run this lane by hand, set it too.
+#  2. THE BUNDLE IDENTIFIER MAY GAIN A `maccatalyst.` PREFIX. Xcode derives
+#     `maccatalyst.dev.flatfold` for Catalyst unless
+#     DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER=NO. Whichever it resolves to,
+#     the App Store Connect record, the match profile and `export_options` must
+#     all name the SAME id. If the first run fails on provisioning, this is why.
+#  3. MATCH NEEDS CATALYST MATERIAL, which is a Mac App Store distribution
+#     certificate and profile — different objects from the iOS ones, even for
+#     the same app. Mint them ONCE, from a human machine, with `certs_mac`.
+platform :mac do
+  desc "Mint/sync Mac Catalyst App Store signing material. Run by a human, never in CI."
+  lane :certs_mac do
+    match(
+      type: "appstore",
+      platform: "catalyst",
+      additional_cert_types: ["mac_installer_distribution"],
+      api_key: asc_api_key,
+      readonly: false,
+    )
+  end
+
+  desc "Build the signed Mac Catalyst app and upload it to TestFlight (CI: on a mac-v* tag)"
+  lane :beta_mac do
+    setup_ci if ENV["CI"]
+    key = asc_api_key
+
+    # readonly, exactly as iOS: CI must never mint signing material.
+    match(type: "appstore", platform: "catalyst", readonly: true, api_key: key)
+
+    # Build numbers are per-platform on App Store Connect, so ask for the macOS
+    # one specifically — reusing the iOS number would either collide or skip.
+    next_build = latest_testflight_build_number(
+      api_key: key, app_identifier: "dev.flatfold", platform: "osx", initial_build_number: 0
+    ) + 1
+    UI.important("Archiving macOS CFBundleVersion #{next_build}.")
+
+    # Force manual signing onto the CATALYST profile, same reason as iOS: the
+    # Capacitor project defaults to automatic signing, which cannot resolve on a
+    # machine with no signed-in Xcode account. The profile name carries a
+    # `catalyst` suffix — match names it separately from the iOS one because it
+    # IS a separate profile, and pinning the iOS name here would silently export
+    # with the wrong material.
+    update_code_signing_settings(
+      # SCOPED TO THE APP TARGET. Unscoped, this rewrites every target in the
+      # project: it set the UI-test target's PRODUCT_BUNDLE_IDENTIFIER to
+      # dev.flatfold (from dev.flatfold.uitests) and clobbered
+      # DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER. Harmless on a throwaway CI
+      # runner, damage to a working tree.
+      targets: ["App"],
+      path: "ios/App/App.xcodeproj",
+      use_automatic_signing: false,
+      team_id: "G2KBQH7KWT",
+      code_sign_identity: "Apple Distribution",
+      bundle_identifier: "dev.flatfold",
+      profile_name: "match AppStore dev.flatfold catalyst",
+    )
+
+    build_app(
+      scheme: "App",
+      destination: "generic/platform=macOS,variant=Mac Catalyst",
+      catalyst_platform: "macos",
+      export_method: "app-store",
+      output_directory: "build",
+      output_name: "FlatFold-macOS",
+      xcargs: "CURRENT_PROJECT_VERSION=#{next_build}",
+      export_options: {
+        provisioningProfiles: {
+          "dev.flatfold" => "match AppStore dev.flatfold catalyst",
+        },
+      },
+    )
+
+    upload_to_testflight(
+      api_key: key,
+      app_platform: "osx",
       skip_waiting_for_build_processing: true,
     )
   end

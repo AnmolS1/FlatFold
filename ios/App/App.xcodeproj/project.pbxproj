@@ -3,15 +3,12 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 60;
+	objectVersion = 54;
 	objects = {
 
 /* Begin PBXBuildFile section */
-		14C1AD5E526AB3DC5F9F5B1A /* AppIcon-Graphite@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = 014644997B0E493490CB5D7D /* AppIcon-Graphite@3x.png */; };
 		2185EFB4E0F5881BBC490CE1 /* MainViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09349178F6F52136FFB785A5 /* MainViewController.swift */; };
 		2FAD9763203C412B000D30F8 /* config.xml in Resources */ = {isa = PBXBuildFile; fileRef = 2FAD9762203C412B000D30F8 /* config.xml */; };
-		398AEB0F2F9BEB388F2213EC /* AppIcon-Graphite@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = 5EAFCBAA61D515F46C8CC02D /* AppIcon-Graphite@2x.png */; };
-		4D22ABE92AF431CB00220026 /* CapApp-SPM in Frameworks */ = {isa = PBXBuildFile; productRef = 4D22ABE82AF431CB00220026 /* CapApp-SPM */; };
 		50379B232058CBB4000EE86E /* capacitor.config.json in Resources */ = {isa = PBXBuildFile; fileRef = 50379B222058CBB4000EE86E /* capacitor.config.json */; };
 		504EC3081FED79650016851F /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 504EC3071FED79650016851F /* AppDelegate.swift */; };
 		504EC30D1FED79650016851F /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30B1FED79650016851F /* Main.storyboard */; };
@@ -19,13 +16,11 @@
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
 		78D6BFAC1677973284258BEE /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6FFE2F4D873352777D54E7A7 /* Foundation.framework */; };
-		7FE1640951EDDB033B907091 /* AppIcon-Midnight@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = 46322DD561511810027474F4 /* AppIcon-Midnight@3x.png */; };
-		7FEB12A521FCF86199AC40FE /* AppIcon-Vellum@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = 4CB44D810A878BA123663F72 /* AppIcon-Vellum@3x.png */; };
 		8302A2A19907738D1F8A7A47 /* FlatFoldBiometricPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4738881198B3CB49ED3D1D4 /* FlatFoldBiometricPlugin.swift */; };
 		907AA455139B286A146EC448 /* FlatFoldAppIconPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72964A5BE3AC0C57EF337A1D /* FlatFoldAppIconPlugin.swift */; };
 		C45E121A56BAC0BC20BAB95F /* FlatFoldFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94A17C7A37620B868DDD3CD5 /* FlatFoldFlowUITests.swift */; };
-		D4BE40E86ED97DC21E9C2847 /* AppIcon-Midnight@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = E179FE4512E8218E14D4BA96 /* AppIcon-Midnight@2x.png */; };
-		E12079C2411F2405EBF88D7B /* AppIcon-Vellum@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = A5936FE4AF6A0E6B12B289CA /* AppIcon-Vellum@2x.png */; };
+		E6D90B37ED3157462BDA848F /* Pods_App.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F9A04F7BD96FC913C61675B4 /* Pods_App.framework */; };
+		FB24DB867EEAE3A434B6E92E /* FlatFoldAudioPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AF74C73FEDCC76DC87C9CD0 /* FlatFoldAudioPlugin.swift */; };
 		FF0000000000000000000002 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = FF0000000000000000000001 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
@@ -40,12 +35,10 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		014644997B0E493490CB5D7D /* AppIcon-Graphite@3x.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; name = "AppIcon-Graphite@3x.png"; path = "AltIcons/AppIcon-Graphite@3x.png"; sourceTree = "<group>"; };
 		09349178F6F52136FFB785A5 /* MainViewController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MainViewController.swift; sourceTree = "<group>"; };
 		2FAD9762203C412B000D30F8 /* config.xml */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = config.xml; sourceTree = "<group>"; };
-		46322DD561511810027474F4 /* AppIcon-Midnight@3x.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; name = "AppIcon-Midnight@3x.png"; path = "AltIcons/AppIcon-Midnight@3x.png"; sourceTree = "<group>"; };
+		3C93E21DFF3CDF593630713A /* Pods-App.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-App.release.xcconfig"; path = "Target Support Files/Pods-App/Pods-App.release.xcconfig"; sourceTree = "<group>"; };
 		49C790E2EF576220A2127B93 /* AppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		4CB44D810A878BA123663F72 /* AppIcon-Vellum@3x.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; name = "AppIcon-Vellum@3x.png"; path = "AltIcons/AppIcon-Vellum@3x.png"; sourceTree = "<group>"; };
 		50379B222058CBB4000EE86E /* capacitor.config.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = capacitor.config.json; sourceTree = "<group>"; };
 		504EC3041FED79650016851F /* App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = App.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		504EC3071FED79650016851F /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
@@ -54,15 +47,15 @@
 		504EC3111FED79650016851F /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		504EC3131FED79650016851F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		50B271D01FEDC1A000F3C39B /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
-		5EAFCBAA61D515F46C8CC02D /* AppIcon-Graphite@2x.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; name = "AppIcon-Graphite@2x.png"; path = "AltIcons/AppIcon-Graphite@2x.png"; sourceTree = "<group>"; };
+		6AF74C73FEDCC76DC87C9CD0 /* FlatFoldAudioPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FlatFoldAudioPlugin.swift; sourceTree = "<group>"; };
 		6FFE2F4D873352777D54E7A7 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		72964A5BE3AC0C57EF337A1D /* FlatFoldAppIconPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FlatFoldAppIconPlugin.swift; sourceTree = "<group>"; };
 		94A17C7A37620B868DDD3CD5 /* FlatFoldFlowUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FlatFoldFlowUITests.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
-		A5936FE4AF6A0E6B12B289CA /* AppIcon-Vellum@2x.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; name = "AppIcon-Vellum@2x.png"; path = "AltIcons/AppIcon-Vellum@2x.png"; sourceTree = "<group>"; };
 		A89901378AD9AEDA07CCA03E /* App.debug.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = App.debug.entitlements; sourceTree = "<group>"; };
 		D4738881198B3CB49ED3D1D4 /* FlatFoldBiometricPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FlatFoldBiometricPlugin.swift; sourceTree = "<group>"; };
-		E179FE4512E8218E14D4BA96 /* AppIcon-Midnight@2x.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; name = "AppIcon-Midnight@2x.png"; path = "AltIcons/AppIcon-Midnight@2x.png"; sourceTree = "<group>"; };
+		E9D00455A7FC052FC9E648D5 /* Pods-App.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-App.debug.xcconfig"; path = "Target Support Files/Pods-App/Pods-App.debug.xcconfig"; sourceTree = "<group>"; };
+		F9A04F7BD96FC913C61675B4 /* Pods_App.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_App.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		FF0000000000000000000001 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -71,7 +64,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				4D22ABE92AF431CB00220026 /* CapApp-SPM in Frameworks */,
+				E6D90B37ED3157462BDA848F /* Pods_App.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -90,8 +83,18 @@
 			isa = PBXGroup;
 			children = (
 				E4D4C31DC63399285635BEE1 /* iOS */,
+				F9A04F7BD96FC913C61675B4 /* Pods_App.framework */,
 			);
 			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		3DFBA5C38F33A96122415623 /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				E9D00455A7FC052FC9E648D5 /* Pods-App.debug.xcconfig */,
+				3C93E21DFF3CDF593630713A /* Pods-App.release.xcconfig */,
+			);
+			path = Pods;
 			sourceTree = "<group>";
 		};
 		4E61E32366027B6C7693E555 /* AppUITests */ = {
@@ -99,7 +102,6 @@
 			children = (
 				94A17C7A37620B868DDD3CD5 /* FlatFoldFlowUITests.swift */,
 			);
-			name = AppUITests;
 			path = AppUITests;
 			sourceTree = "<group>";
 		};
@@ -111,6 +113,7 @@
 				504EC3051FED79650016851F /* Products */,
 				381846E633B67692FA067657 /* Frameworks */,
 				4E61E32366027B6C7693E555 /* AppUITests */,
+				3DFBA5C38F33A96122415623 /* Pods */,
 			);
 			sourceTree = "<group>";
 		};
@@ -137,24 +140,11 @@
 				50B271D01FEDC1A000F3C39B /* public */,
 				D4738881198B3CB49ED3D1D4 /* FlatFoldBiometricPlugin.swift */,
 				09349178F6F52136FFB785A5 /* MainViewController.swift */,
-				C129D914F0C754C4E37FE05B /* AltIcons */,
 				72964A5BE3AC0C57EF337A1D /* FlatFoldAppIconPlugin.swift */,
+				6AF74C73FEDCC76DC87C9CD0 /* FlatFoldAudioPlugin.swift */,
 				A89901378AD9AEDA07CCA03E /* App.debug.entitlements */,
 			);
 			path = App;
-			sourceTree = "<group>";
-		};
-		C129D914F0C754C4E37FE05B /* AltIcons */ = {
-			isa = PBXGroup;
-			children = (
-				A5936FE4AF6A0E6B12B289CA /* AppIcon-Vellum@2x.png */,
-				4CB44D810A878BA123663F72 /* AppIcon-Vellum@3x.png */,
-				5EAFCBAA61D515F46C8CC02D /* AppIcon-Graphite@2x.png */,
-				014644997B0E493490CB5D7D /* AppIcon-Graphite@3x.png */,
-				E179FE4512E8218E14D4BA96 /* AppIcon-Midnight@2x.png */,
-				46322DD561511810027474F4 /* AppIcon-Midnight@3x.png */,
-			);
-			name = AltIcons;
 			sourceTree = "<group>";
 		};
 		E4D4C31DC63399285635BEE1 /* iOS */ = {
@@ -190,18 +180,17 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 504EC3161FED79650016851F /* Build configuration list for PBXNativeTarget "App" */;
 			buildPhases = (
+				0D373F96B57D816E267C033B /* [CP] Check Pods Manifest.lock */,
 				504EC3001FED79650016851F /* Sources */,
 				504EC3011FED79650016851F /* Frameworks */,
 				504EC3021FED79650016851F /* Resources */,
+				C84F3D0A0978D6113E953179 /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			name = App;
-			packageProductDependencies = (
-				4D22ABE82AF431CB00220026 /* CapApp-SPM */,
-			);
 			productName = App;
 			productReference = 504EC3041FED79650016851F /* App.app */;
 			productType = "com.apple.product-type.application";
@@ -232,9 +221,6 @@
 				Base,
 			);
 			mainGroup = 504EC2FB1FED79650016851F;
-			packageReferences = (
-				D4C12C0A2AAA248700AAC8A2 /* XCLocalSwiftPackageReference "CapApp-SPM" */,
-			);
 			productRefGroup = 504EC3051FED79650016851F /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -264,16 +250,71 @@
 				50379B232058CBB4000EE86E /* capacitor.config.json in Resources */,
 				504EC30D1FED79650016851F /* Main.storyboard in Resources */,
 				2FAD9763203C412B000D30F8 /* config.xml in Resources */,
-				E12079C2411F2405EBF88D7B /* AppIcon-Vellum@2x.png in Resources */,
-				7FEB12A521FCF86199AC40FE /* AppIcon-Vellum@3x.png in Resources */,
-				398AEB0F2F9BEB388F2213EC /* AppIcon-Graphite@2x.png in Resources */,
-				14C1AD5E526AB3DC5F9F5B1A /* AppIcon-Graphite@3x.png in Resources */,
-				D4BE40E86ED97DC21E9C2847 /* AppIcon-Midnight@2x.png in Resources */,
-				7FE1640951EDDB033B907091 /* AppIcon-Midnight@3x.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		0D373F96B57D816E267C033B /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-App-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+		C84F3D0A0978D6113E953179 /* [CP] Embed Pods Frameworks */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-App/Pods-App-frameworks.sh",
+				"${BUILT_PRODUCTS_DIR}/AparajitaCapacitorSecureStorage/AparajitaCapacitorSecureStorage.framework",
+				"${BUILT_PRODUCTS_DIR}/Capacitor/Capacitor.framework",
+				"${BUILT_PRODUCTS_DIR}/CapacitorApp/CapacitorApp.framework",
+				"${BUILT_PRODUCTS_DIR}/CapacitorCordova/Cordova.framework",
+				"${BUILT_PRODUCTS_DIR}/CapacitorHaptics/CapacitorHaptics.framework",
+				"${BUILT_PRODUCTS_DIR}/CapacitorKeyboard/CapacitorKeyboard.framework",
+				"${BUILT_PRODUCTS_DIR}/CapacitorLocalNotifications/CapacitorLocalNotifications.framework",
+				"${BUILT_PRODUCTS_DIR}/CapacitorPushNotifications/CapacitorPushNotifications.framework",
+				"${BUILT_PRODUCTS_DIR}/CapacitorShare/CapacitorShare.framework",
+				"${BUILT_PRODUCTS_DIR}/KeychainSwift/KeychainSwift.framework",
+			);
+			name = "[CP] Embed Pods Frameworks";
+			outputPaths = (
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/AparajitaCapacitorSecureStorage.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/Capacitor.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/CapacitorApp.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/Cordova.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/CapacitorHaptics.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/CapacitorKeyboard.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/CapacitorLocalNotifications.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/CapacitorPushNotifications.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/CapacitorShare.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/KeychainSwift.framework",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-App/Pods-App-frameworks.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		3ACDA442D8DA73CE1759D095 /* Sources */ = {
@@ -292,6 +333,7 @@
 				8302A2A19907738D1F8A7A47 /* FlatFoldBiometricPlugin.swift in Sources */,
 				2185EFB4E0F5881BBC490CE1 /* MainViewController.swift in Sources */,
 				907AA455139B286A146EC448 /* FlatFoldAppIconPlugin.swift in Sources */,
+				FB24DB867EEAE3A434B6E92E /* FlatFoldAudioPlugin.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -453,10 +495,14 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 958DCC722DB07C7200EA8C5F /* debug.xcconfig */;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "Graphite Midnight Vellum";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = App/App.debug.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = App/App.maccatalyst.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				INFOPLIST_FILE = App/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = FlatFold;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
@@ -469,6 +515,7 @@
 				OTHER_SWIFT_FLAGS = "$(inherited) \"-D\" \"COCOAPODS\" \"-DDEBUG\"";
 				PRODUCT_BUNDLE_IDENTIFIER = dev.flatfold;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTS_MACCATALYST = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -477,11 +524,16 @@
 		};
 		504EC3181FED79650016851F /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 3C93E21DFF3CDF593630713A /* Pods-App.release.xcconfig */;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "Graphite Midnight Vellum";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = App/App.maccatalyst.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				INFOPLIST_FILE = App/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = FlatFold;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
@@ -493,6 +545,7 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.flatfold;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTS_MACCATALYST = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -502,7 +555,6 @@
 		9C72F5553D6FB17AC13403DF /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				CLANG_ENABLE_OBJC_WEAK = NO;
 				CODE_SIGNING_ALLOWED = NO;
 				DEVELOPMENT_TEAM = G2KBQH7KWT;
@@ -521,7 +573,6 @@
 		C40D8D1154ED5E683443D1F3 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				CLANG_ENABLE_OBJC_WEAK = NO;
 				CODE_SIGNING_ALLOWED = NO;
 				DEVELOPMENT_TEAM = G2KBQH7KWT;
@@ -569,21 +620,6 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-
-/* Begin XCLocalSwiftPackageReference section */
-		D4C12C0A2AAA248700AAC8A2 /* XCLocalSwiftPackageReference "CapApp-SPM" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = "CapApp-SPM";
-		};
-/* End XCLocalSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		4D22ABE82AF431CB00220026 /* CapApp-SPM */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = D4C12C0A2AAA248700AAC8A2 /* XCLocalSwiftPackageReference "CapApp-SPM" */;
-			productName = "CapApp-SPM";
-		};
-/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 504EC2FC1FED79650016851F /* Project object */;
 }

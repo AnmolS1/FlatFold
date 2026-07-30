@@ -6,7 +6,12 @@
 # the Xcode project. Signing comes from match (App Store profile for dev.flatfold)
 # — see the beta lane in Fastfile.
 scheme("App")
-project("ios/App/App.xcodeproj")
+# THE WORKSPACE, not the project. This said `project(...)` from the SwiftPM era;
+# the Mac Catalyst migration moved the app to CocoaPods, and a pods project only
+# links through the workspace. Passing both is a hard fastlane error
+# ("You can only pass either a workspace or a project path, not both"), so this
+# is the single place it can be set.
+workspace("ios/App/App.xcworkspace")
 export_method("app-store")
 clean(true)
 output_directory("build")

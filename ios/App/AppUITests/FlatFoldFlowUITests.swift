@@ -25,6 +25,24 @@ final class FlatFoldFlowUITests: XCTestCase {
         add(a)
     }
 
+    /// Launch-only smoke test, safe to run repeatedly.
+    ///
+    /// Exists so the Mac build can be launched and inspected from the command
+    /// line at all. `open` rejects the iphoneos bundle and `devicectl` cannot
+    /// address the local Mac, so `xcodebuild test` is the ONLY way to start a
+    /// "Designed for iPad" build without a human pressing Run in Xcode — which
+    /// is what made every Mac bug in this round a round-trip.
+    ///
+    /// Deliberately does NOT sign up: the existing flow test creates a real
+    /// account on the live backend, which is not something to do on every run.
+    func testMacSmoke() throws {
+        let app = XCUIApplication(bundleIdentifier: "dev.flatfold")
+        app.launch()
+        snap(app, "mac-smoke-launch")
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30),
+                      "the app did not reach the foreground")
+    }
+
     func testStep1Evidence() throws {
         let app = XCUIApplication(bundleIdentifier: "dev.flatfold")
         app.launch()

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Fingerprint } from 'lucide-react';
-import { biometricAvailable } from '../../lib/biometric';
+import { biometricAvailable, biometryLabel } from '../../lib/biometric';
 import { enrollBiometric, disableBiometric, isBiometricEnrolled } from '../../keystore';
 
 // D7 §5 — Settings biometric unlock. Only renders on a device with biometric
@@ -27,7 +27,7 @@ export function BiometricSection({ username }: { username: string }) {
 		};
 	}, [username]);
 
-	const label = type === 'faceId' ? 'Face ID' : type === 'touchId' ? 'Touch ID' : 'biometrics';
+	const label = biometryLabel(type);
 
 	const toggle = useCallback(async () => {
 		setBusy(true);

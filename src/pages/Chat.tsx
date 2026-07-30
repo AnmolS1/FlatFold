@@ -28,7 +28,7 @@ import {
 	sealedFirstContactEnvelope,
 } from '../lib/messaging';
 import { apiRegisterSealToken } from '../lib/api';
-import { isNativePlatform, wsOrigin } from '../lib/platform';
+import { isIOSAppOnMac, isNativePlatform, wsOrigin } from '../lib/platform';
 import { clearUnread, surfaceInboundActivity } from '../lib/webNotify';
 import { replenishPreKeysIfLow } from '../lib/prekeyReplenish';
 import { cachedNativeToken } from '../lib/nativeToken';
@@ -121,10 +121,11 @@ export const Chat = () => {
 	//
 	// So the whole keyboard-compensation mechanism is gated, not just its
 	// transition: no listeners, no height subtraction, where there is no software
-	// keyboard. maxTouchPoints is the discriminator — 5 on iPhone/iPad, 0 on a Mac
-	// — so a real iPad keeps today's behaviour, including the accessory-bar height
-	// it correctly reports when a hardware keyboard is attached.
-	const hasSoftwareKeyboard = native && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0;
+	// keyboard. The signal is `ProcessInfo.isiOSAppOnMac`, injected natively —
+	// NOT navigator.maxTouchPoints, which was the first attempt and did not fix
+	// it. A real iPad keeps today's behaviour, including the accessory-bar height
+	// iPadOS correctly reports when a hardware keyboard is attached.
+	const hasSoftwareKeyboard = native && !isIOSAppOnMac();
 	const [activeTab, setActiveTab] = useState<NativeTab>('chats');
 	// True while the Chats list's "New message" compose bar is open. Hides the
 	// tab bar so the add-username input is the bottom-most element above the

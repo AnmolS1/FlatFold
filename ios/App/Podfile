@@ -1,0 +1,112 @@
+require_relative '../../node_modules/@capacitor/ios/scripts/pods_helpers'
+
+platform :ios, '15.0'
+use_frameworks!
+
+# Input/output paths are left ENABLED on purpose.
+#
+# Capacitor's generated Podfile sets `:disable_input_output_paths => true`, and
+# that is precisely what makes Xcode warn:
+#
+#   "[CP] Embed Pods Frameworks will be run during every build because it does
+#    not specify any outputs"
+#
+# Without those paths Xcode cannot do dependency analysis on the script phase, so
+# it re-runs the framework embed on every single build. Leaving them on removes
+# the warning and the wasted work.
+
+def capacitor_pods
+  pod 'Capacitor', :path => '../../node_modules/@capacitor/ios'
+  pod 'CapacitorCordova', :path => '../../node_modules/@capacitor/ios'
+  pod 'AparajitaCapacitorSecureStorage', :path => '../../node_modules/@aparajita/capacitor-secure-storage'
+  pod 'CapacitorApp', :path => '../../node_modules/@capacitor/app'
+  pod 'CapacitorHaptics', :path => '../../node_modules/@capacitor/haptics'
+  pod 'CapacitorKeyboard', :path => '../../node_modules/@capacitor/keyboard'
+  pod 'CapacitorLocalNotifications', :path => '../../node_modules/@capacitor/local-notifications'
+  pod 'CapacitorPushNotifications', :path => '../../node_modules/@capacitor/push-notifications'
+  pod 'CapacitorShare', :path => '../../node_modules/@capacitor/share'
+  # @capacitor/filesystem is EXCLUDED for Catalyst, deliberately and explicitly.
+  #
+  # It depends on IONFilesystemLib, a PREBUILT binary
+  # (`vendored_frameworks: IONFilesystemLib.xcframework`) with no maccatalyst
+  # slice, so a Catalyst build fails with:
+  #
+  #   IONFilesystemLib.xcframework: Unable to find matching slice in
+  #   'ios-arm64 ios-arm64_x86_64-simulator' ... platform (-maccatalyst)
+  #
+  # Same root cause as Capacitor's own SwiftPM problem. Capacitor was fixable by
+  # building from source; a vendored third-party framework is not.
+  #
+  # It is used in exactly ONE place — MediaAttachment's native file save — and on
+  # Catalyst the real macOS WKWebView should handle `<a download>` directly, so
+  # the plugin is probably unnecessary there. Until that is confirmed, this stays
+  # an explicit switch rather than a silent omission:
+  #
+  #   pod install                       # iOS (default) — filesystem INCLUDED
+  #   FLATFOLD_CATALYST=1 pod install   # Mac Catalyst  — filesystem EXCLUDED
+  unless ENV['FLATFOLD_CATALYST'] == '1'
+    pod 'CapacitorFilesystem', :path => '../../node_modules/@capacitor/filesystem'
+  end
+end
+
+target 'App' do
+  capacitor_pods
+end
+
+post_install do |installer|
+  assertDeploymentTarget(installer)
+
+  # Record which pod set is installed, and say so LOUDLY.
+  #
+  # The Catalyst exclusion below is stateful: whichever `pod install` ran last
+  # decides what Xcode builds against, and nothing on screen says which. Building
+  # the Catalyst destination against the iOS set fails deep inside a vendor pod
+  # with `Unable to resolve module dependency: 'IONFilesystemLib'`, which reads
+  # like a broken dependency rather than the wrong install mode. It has now
+  # cost two rounds.
+  mode = ENV['FLATFOLD_CATALYST'] == '1' ? 'catalyst' : 'ios'
+  File.write(File.join(installer.sandbox.root, '.flatfold-pod-mode'), mode)
+  puts ''
+  puts '  ┌────────────────────────────────────────────────────────────┐'
+  puts format('  │  Pods installed for: %-38s│', mode.upcase)
+  if mode == 'ios'
+    puts '  │  @capacitor/filesystem INCLUDED — Mac Catalyst will FAIL.  │'
+    puts '  │  For Catalyst:  FLATFOLD_CATALYST=1 pod install            │'
+  else
+    puts '  │  @capacitor/filesystem EXCLUDED — iOS loses native file    │'
+    puts '  │  save. For iOS:  pod install                               │'
+  end
+  puts '  └────────────────────────────────────────────────────────────┘'
+  puts ''
+
+  # THE POINT OF THIS MIGRATION.
+  #
+  # SwiftPM ships Capacitor as a prebuilt xcframework with only `ios-arm64` and
+  # `ios-arm64_x86_64-simulator` slices, so a Catalyst build cannot link. Pods
+  # compile from SOURCE, and that source was measured to typecheck for
+  # arm64-apple-ios-macabi with a delta of ZERO against plain iOS across
+  # Capacitor core and every plugin. See ios/CATALYST.md.
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      config.build_settings['SUPPORTS_MACCATALYST'] = 'YES'
+      config.build_settings['DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER'] = 'NO'
+
+      # CapacitorCordova's public headers use double-quoted includes
+      # (`#include "CDVPlugin.h"`), which is fine in a static library and warns
+      # in a FRAMEWORK — and `use_frameworks!` makes every pod a framework. The
+      # SwiftPM setup did not build them this way, so these warnings are new to
+      # the migration and not new to the code. They are vendor headers we do not
+      # control, and there are ~22 of them on every build, which buries anything
+      # that actually matters.
+      config.build_settings['CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER'] = 'NO'
+
+      # And the module verifier, which is a SEPARATE compile with its own flags.
+      # It ignores the setting above and re-reports the same vendor-header issues
+      # as hard errors — but only on builds where it runs (signing turned it on
+      # here), so an unsigned build passes and a signed one fails on code that
+      # did not change. Capacitor's own headers also use `@import` in a framework
+      # header, which the verifier rejects outright.
+      config.build_settings['ENABLE_MODULE_VERIFIER'] = 'NO'
+    end
+  end
+end

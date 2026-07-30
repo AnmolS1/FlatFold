@@ -5,6 +5,7 @@ import * as keystore from '../../keystore';
 import { ackMediaFetched, downloadAndDecryptMedia } from '../../lib/media';
 import { VoiceNote } from './VoiceNote';
 import { isNativePlatform } from '../../lib/platform';
+import { nativeLog } from '../../lib/nativeLog';
 
 // Chunked base64 (spreading a large Uint8Array into fromCharCode overflows the
 // call stack). Used to hand file bytes to @capacitor/filesystem.
@@ -72,6 +73,7 @@ const MediaAttachmentComponent = ({ username, media, isOwnMessage }: MediaAttach
 			const buffer = new ArrayBuffer(bytes.byteLength);
 			new Uint8Array(buffer).set(bytes);
 			const url = URL.createObjectURL(new Blob([buffer], { type: safeType }));
+			nativeLog(`[${url.slice(-6)}] objectUrl CREATED kind=${media.mediaKind}`);
 			urlRef.current = url;
 			if (isNativePlatform() && media.mediaKind === 'file') bytesRef.current = bytes;
 			setObjectUrl(url);
@@ -111,6 +113,7 @@ const MediaAttachmentComponent = ({ username, media, isOwnMessage }: MediaAttach
 			cancelled = true;
 			bytesRef.current = null;
 			if (urlRef.current) {
+				nativeLog(`[${urlRef.current.slice(-6)}] objectUrl REVOKED`);
 				URL.revokeObjectURL(urlRef.current);
 				urlRef.current = null;
 			}
@@ -153,7 +156,10 @@ const MediaAttachmentComponent = ({ username, media, isOwnMessage }: MediaAttach
 	}
 
 	if (media.mediaKind === 'voice') {
-		return <VoiceNote url={objectUrl} durationMs={media.durationMs} own={isOwnMessage} mimeType={media.mimeType} />;
+		// `media.id`, not the blob URL: the URL is created and revoked by the
+		// effect above, so it is a new string on every remount, and the native
+		// player keys each note's saved position on this.
+		return <VoiceNote noteId={media.id} url={objectUrl} durationMs={media.durationMs} own={isOwnMessage} mimeType={media.mimeType} />;
 	}
 
 	// Generic file. Native: a button that opens the iOS share sheet (the

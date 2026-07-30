@@ -5,6 +5,10 @@ import type { DisplayMessage } from '../../types';
 import { haptic } from '../../lib/haptics';
 import { replySnippet } from '../../lib/reply';
 import { isApplePlayable, pickRecordingMimeType } from '../../lib/audioFormat';
+import { describeMicrophoneError, microphoneUnavailableReason, readMediaEnvironment } from '../../lib/mediaErrors';
+import { nativeRecordingSupported, recordNatively } from '../../lib/nativeAudio';
+import { nativeLog, timed } from '../../lib/nativeLog';
+import { isIOSAppOnMac } from '../../lib/platform';
 
 interface MessageInputProps {
 	onSendMessage: (text: string) => Promise<void>;
@@ -51,6 +55,9 @@ const MessageInputComponent = ({
 	}, []);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const recorderRef = useRef<MediaRecorder | null>(null);
+	// Live native recording session (Mac only, where the WebView has no
+	// mediaDevices); null on every other platform, which uses recorderRef above.
+	const nativeSessionRef = useRef<{ stop: () => Promise<{ bytes: Uint8Array; mimeType: string; durationMs: number }> } | null>(null);
 	const recordStartRef = useRef<number>(0);
 	// Double-submit guard. A ref, not the `sending` state: two synchronous
 	// submits (Enter held down, a double-tap on Send) both read the same stale
@@ -89,6 +96,32 @@ const MessageInputComponent = ({
 
 	const startRecording = useCallback(async () => {
 		setError(null);
+
+		// Mac first: there `navigator.mediaDevices` does not exist at all, so the
+		// only route to the microphone is the native plugin. Everywhere else
+		// getUserMedia works and stays the path — it needs no native surface.
+		if (await nativeRecordingSupported()) {
+			try {
+				const session = await recordNatively.start();
+				nativeSessionRef.current = session;
+				recordStartRef.current = Date.now();
+				setRecording(true);
+			} catch (err) {
+				setError(err instanceof Error ? err.message : 'Could not start recording.');
+			}
+			return;
+		}
+
+		// Capability BEFORE permission. On the Mac build `navigator.mediaDevices`
+		// is absent entirely, so the old code threw a bare TypeError here and the
+		// failure looked like a permission problem for several rounds. See
+		// lib/mediaErrors; SafetyNumberDialog has guarded its camera path this way
+		// all along.
+		const unavailable = microphoneUnavailableReason(readMediaEnvironment(navigator, window));
+		if (unavailable) {
+			setError(unavailable);
+			return;
+		}
 		try {
 			const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 			// Pick the container explicitly. Left to the browser, Chrome picks WebM,
@@ -125,16 +158,45 @@ const MessageInputComponent = ({
 			recordStartRef.current = Date.now();
 			recorder.start();
 			setRecording(true);
-		} catch {
-			setError('Could not access the microphone.');
+		} catch (err) {
+			// Name the failure. A bare catch here made the Mac microphone bug
+			// undiagnosable for several rounds — see lib/mediaErrors.
+			setError(describeMicrophoneError(err, isIOSAppOnMac()));
 		}
 	}, [onSendMedia]);
 
 	const stopRecording = useCallback(() => {
+		// Native path (Mac): the plugin hands back finished bytes, which then go
+		// down exactly the same send path as a browser-recorded note.
+		const session = nativeSessionRef.current;
+		if (session) {
+			nativeSessionRef.current = null;
+			setRecording(false);
+			void (async () => {
+				setSending(true);
+				try {
+					const rec = await timed('session.stop', () => session.stop());
+					nativeLog(`got ${rec.bytes.length} bytes`);
+					await timed('onSendMedia', () =>
+						onSendMedia({
+							bytes: rec.bytes,
+							mimeType: rec.mimeType,
+							mediaKind: 'voice',
+							durationMs: rec.durationMs || Date.now() - recordStartRef.current,
+						})
+					);
+				} catch (err) {
+					setError(err instanceof Error ? err.message : 'Failed to send voice note');
+				} finally {
+					setSending(false);
+				}
+			})();
+			return;
+		}
 		recorderRef.current?.stop();
 		recorderRef.current = null;
 		setRecording(false);
-	}, []);
+	}, [onSendMedia]);
 
 	const handleSubmit = useCallback(
 		async (e: FormEvent<HTMLFormElement>) => {

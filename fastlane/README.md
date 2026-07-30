@@ -41,6 +41,27 @@ Build the signed app and upload it to TestFlight (CI: on a v* tag)
 
 ----
 
+
+## Mac
+
+### mac certs_mac
+
+```sh
+[bundle exec] fastlane mac certs_mac
+```
+
+Mint/sync Mac Catalyst App Store signing material. Run by a human, never in CI.
+
+### mac beta_mac
+
+```sh
+[bundle exec] fastlane mac beta_mac
+```
+
+Build the signed Mac Catalyst app and upload it to TestFlight (CI: on a mac-v* tag)
+
+----
+
 This README.md is auto-generated and will be re-generated every time [_fastlane_](https://fastlane.tools) is run.
 
 More information about _fastlane_ can be found on [fastlane.tools](https://fastlane.tools).

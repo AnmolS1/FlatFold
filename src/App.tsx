@@ -15,6 +15,7 @@ import { Login } from './pages/Login';
 // dist/client/assets/, which gen-sw-manifest.mjs pins wholesale, so they keep
 // the same app-shell integrity guarantee as the entry bundle.
 const Chat = lazy(() => import('./pages/Chat').then((m) => ({ default: m.Chat })));
+
 const Transparency = lazy(() => import('./pages/Transparency').then((m) => ({ default: m.Transparency })));
 
 function App() {

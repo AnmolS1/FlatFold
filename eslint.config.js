@@ -6,7 +6,10 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-	globalIgnores(['dist', 'ios', 'worker-configuration.d.ts', '.remember', '.wrangler']),
+	// 'build' is fastlane's export directory. It holds an unpacked App.app, and
+	// linting Capacitor's vendored native-bridge.js inside it reported an error
+	// from a framework resource — for a rule this config does not even define.
+	globalIgnores(['dist', 'ios', 'build', 'worker-configuration.d.ts', '.remember', '.wrangler']),
 	{
 		files: ['**/*.{ts,tsx}'],
 		extends: [

@@ -20,6 +20,28 @@
 				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
 			</array>
 		</dict>
+		<!-- The push token. Linked, because `apns_subscriptions` genuinely
+		     stores a device token against a username so a notification can be
+		     routed; App Functionality, because that is all it does — the push
+		     payload names no sender and carries no message text.
+
+		     Disclosed rather than treated as ephemeral. Under-disclosing is the
+		     failure mode that gets an end-to-end-encrypted app challenged, and
+		     the honest answer costs nothing here. This entry must stay in step
+		     with the App Privacy label in App Store Connect; the label is filled
+		     in by hand and nothing checks the two against each other. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeDeviceID</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
 	</array>
 	<key>NSPrivacyAccessedAPITypes</key>
 	<array>

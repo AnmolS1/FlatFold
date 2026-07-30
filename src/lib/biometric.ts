@@ -20,6 +20,24 @@ export interface BiometricAvailability {
 	biometryType: string; // 'faceId' | 'touchId' | 'unknown' | 'none'
 }
 
+/**
+ * What to CALL the biometric on this device, in UI text.
+ *
+ * Never hardcode "Face ID". The same build runs on iPhone (Face ID), older
+ * iPhones and Macs (Touch ID), and Mac Catalyst — where a Mac without Touch ID
+ * falls back to the watch or the device password entirely. `LAContext
+ * .biometryType` is the only thing that knows, and the plugin already reports
+ * it; the unlock gate simply was not asking, so a Mac was told to use Face ID.
+ *
+ * Falls back to "biometrics" rather than guessing, which reads acceptably in
+ * every sentence it appears in.
+ */
+export function biometryLabel(biometryType: string): string {
+	if (biometryType === 'faceId') return 'Face ID';
+	if (biometryType === 'touchId') return 'Touch ID';
+	return 'biometrics';
+}
+
 export async function biometricAvailable(): Promise<BiometricAvailability> {
 	if (!isNativePlatform()) return { available: false, biometryType: 'none' };
 	try {

@@ -1,0 +1,140 @@
+# Building FlatFold for Mac Catalyst
+
+## Open the WORKSPACE, not the project
+
+    open ios/App/App.xcworkspace     # correct
+    open ios/App/App.xcodeproj       # WRONG — pods are invisible
+
+If Xcode already has the PROJECT open, opening the workspace is not enough —
+quit Xcode first. Xcode keeps building whatever window is open, and the two have
+separate DerivedData directories, so the stale one keeps reproducing the same
+errors after the workspace is fixed:
+
+    osascript -e 'quit app "Xcode"'
+    rm -rf ~/Library/Developer/Xcode/DerivedData/App-*
+    open ios/App/App.xcworkspace
+
+The tell is the DerivedData hash in the error text. If it differs from the one a
+workspace build reports, the project is being built.
+
+This is the single most likely thing to go wrong. Building the `.xcodeproj`
+fails with `Unable to resolve module dependency: 'Capacitor'` and a list of
+`Search path ... not found` warnings naming every pod, because the project alone
+has no idea the pods exist. If you have built the project before, its stale
+DerivedData will keep producing those warnings — delete that DerivedData
+directory (the hash differs from the workspace's).
+
+## The two configurations — YOU MUST RE-RUN pod install WHEN SWITCHING
+
+    FLATFOLD_CATALYST=1 pod install   # Mac Catalyst — filesystem EXCLUDED
+    pod install                       # iOS — @capacitor/filesystem INCLUDED
+
+**This is stateful.** Whichever ran last decides what Xcode builds against, and
+building the wrong one fails deep inside a vendor pod:
+
+    Unable to resolve module dependency: 'IONFilesystemLib'
+
+which reads like a broken dependency rather than the wrong install mode. It has
+cost two rounds already. `pod install` now prints a banner naming the mode and
+writes `ios/App/Pods/.flatfold-pod-mode`, so the current state is checkable:
+
+    cat ios/App/Pods/.flatfold-pod-mode
+
+If it says `ios` and you are building Catalyst, that error is why.
+
+### Why the switch exists at all
+
+`IONFilesystemLib` ships ONLY `ios-arm64` and `ios-arm64_x86_64-simulator`, and
+the pod contains no source — just the `.xcframework` and a LICENSE. It cannot be
+rebuilt for Catalyst, so exclusion is the only option. CocoaPods cannot include a
+pod conditionally per SDK within one target, which is why this is an env var and
+not something automatic. It is a wart caused by an upstream binary-only
+dependency, not a design choice.
+
+`@capacitor/filesystem` depends on `IONFilesystemLib`, a PREBUILT binary
+(`vendored_frameworks: IONFilesystemLib.xcframework`) with no `maccatalyst`
+slice. This is the same root cause that made the original SwiftPM setup unable to
+target Catalyst — except Capacitor itself was fixable by building from source,
+and a vendored third-party framework is not.
+
+It is used in exactly ONE place: `MediaAttachment`'s native file save. On
+Catalyst the real macOS WKWebView should handle `<a download>` directly, which
+would make the plugin unnecessary there — unconfirmed, and the reason the
+exclusion is an explicit switch rather than a silent omission.
+
+## Required build setting — already set in the project
+
+`ENABLE_USER_SCRIPT_SANDBOXING = NO`, on the App target, both configurations.
+Nothing to do; recorded because it is not obvious and it is easy to lose.
+
+CocoaPods' `[CP] Embed Pods Frameworks` phase rsyncs frameworks into the bundle,
+which the script sandbox forbids. It surfaces in two different disguises
+depending on where it trips:
+
+    Sandbox: bash(...) deny(1) file-read-data .../Pods-App-frameworks.sh
+
+    rsync: AparajitaCapacitorSecureStorage.framework/...: utimensat (2):
+    Operation not permitted
+
+Neither says "sandbox setting". If a wall of rsync `Operation not permitted`
+lines appears after a change to build settings, this is the first thing to check.
+
+## Vendor header warnings
+
+`use_frameworks!` builds every pod as a framework, and CapacitorCordova's public
+headers use double-quoted includes (`#include "CDVPlugin.h"`), which warns in a
+framework but not in a static library. SwiftPM did not build them as frameworks,
+so ~22 of these warnings are NEW to this migration and not new to the code.
+
+They are vendor headers we do not control, and that volume buries anything that
+matters, so `CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = NO` is set on the
+pod targets in `post_install`. It is scoped to pods — FlatFold's own code keeps
+the warning.
+
+## Verified 2026-07-26
+
+| target | pods | warnings | result |
+| --- | --- | --- | --- |
+| Mac Catalyst (filesystem excluded) | 9 | 0 | BUILD SUCCEEDED, `platform MACCATALYST` |
+| iOS (filesystem included) | 10 | 0 | BUILD SUCCEEDED |
+
+Pod counts are part of the assertion: removing dependencies makes a build MORE
+likely to succeed, so `BUILD SUCCEEDED` alone means little on a migration.
+
+`Pods/` and `App.xcworkspace/` are gitignored; `pod install` regenerates both.
+
+## Regression-testing voice notes on this platform
+
+```bash
+open -n ios/App/build/DDcat/Build/Products/Debug-maccatalyst/App.app \
+  --args --verify-audio --unlock-pw="$PW"
+/usr/bin/log show --last 4m --info --debug \
+  --predicate 'subsystem == "dev.flatfold"' --style compact
+```
+
+`--verify-audio` (DEBUG only) unlocks from the DOM, opens the conversation by
+accessible name, plays every note, and runs the pause/switch/resume sequence.
+It is the only thing that exercises the `NEED_DATA` resume fallback on real
+hardware, and it is what would catch a regression in native playback. Results
+and the two probe bugs it took to trust it:
+`docs/redesign/verify/NATIVE_AUDIO_PLAYBACK.md`.
+
+Adding `--verify-new-note` **sends a real voice note** to the open conversation.
+That is the only way to test a note that ARRIVES, and the reason it is a
+separate flag.
+
+`--verify-links` (same launch pattern) clicks every external link in Settings →
+About and reads `location.href` across each, answering whether an external link
+navigates the WebView away and strands the user with no chrome to come back
+from. Re-run it whenever the Settings layout or those links move. Note it has to
+find Settings in **either** of its two homes — a header glyph when the window is
+wide, a bottom tab-bar item when it is not.
+
+## Not yet done
+
+Launching and signing it, and confirming the actual payoff: that the real macOS
+WKWebView exposes `navigator.mediaDevices`. That is the test that would justify
+deleting `FlatFoldAudioPlugin` (~280 lines of Swift plus its transport, finalize
+handling and audio-session juggling) and the ghost-row hack in
+`MainViewController`. Unlike "Designed for iPad", a Catalyst app CAN be launched
+and UI-tested from the command line, so that feedback loop opens up too.

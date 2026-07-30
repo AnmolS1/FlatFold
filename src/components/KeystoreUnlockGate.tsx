@@ -5,6 +5,7 @@ import { LogoMark } from './common/Brand';
 import { useAuth } from '../hooks/useAuth';
 import { requestPanicWipe } from '../lib/panicWipe';
 import { isBiometricEnrolled, isPasskeyUnlockEnrolled } from '../keystore';
+import { biometricAvailable, biometryLabel } from '../lib/biometric';
 import { isNativePlatform } from '../lib/platform';
 
 interface KeystoreUnlockGateProps {
@@ -21,6 +22,9 @@ export const KeystoreUnlockGate = ({ children }: KeystoreUnlockGateProps) => {
 	const [error, setError] = useState<string | null>(null);
 	const [unlocking, setUnlocking] = useState(false);
 	const [bioEnrolled, setBioEnrolled] = useState(false);
+	// Neutral until the device tells us. "biometrics" is correct everywhere and
+	// wrong nowhere, which is what a default in a security prompt should be.
+	const [bioLabel, setBioLabel] = useState('biometrics');
 	const [passkeyEnrolled, setPasskeyEnrolled] = useState(false);
 	const navigate = useNavigate();
 
@@ -42,6 +46,10 @@ export const KeystoreUnlockGate = ({ children }: KeystoreUnlockGateProps) => {
 		void (async () => {
 			if (!(await isBiometricEnrolled(username)) || cancelled) return;
 			setBioEnrolled(true);
+			// Ask the device what its biometric is actually called. This button
+			// used to say "Face ID" unconditionally, which is wrong on every Mac.
+			const { biometryType } = await biometricAvailable();
+			if (!cancelled) setBioLabel(biometryLabel(biometryType));
 			await unlockWithBiometric(); // resolves 'cancelled' silently → stay on password
 		})();
 		return () => {
@@ -113,7 +121,7 @@ export const KeystoreUnlockGate = ({ children }: KeystoreUnlockGateProps) => {
 						onClick={() => void tryBiometric()}
 						className="w-full mb-3 flex items-center justify-center gap-2 border border-crease-line-bold text-graphite rounded-lg px-4 py-2 hover:border-crease transition-colors"
 					>
-						<Fingerprint className="w-5 h-5" /> Unlock with Face ID
+						<Fingerprint className="w-5 h-5" /> Unlock with {bioLabel}
 					</button>
 				)}
 				{passkeyEnrolled && (

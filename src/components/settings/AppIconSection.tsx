@@ -2,11 +2,13 @@ import { useState, useEffect, useCallback } from 'react';
 import { AppWindow, Check } from 'lucide-react';
 import { appIconSupported, getAppIcon, setAppIcon, type AppIconName } from '../../lib/appIcon';
 
-// Each option's [ground, border, fold] preview colors, matching the generated
-// alternate icons (ios/App/App/AltIcons). 'default' shows the Paper look and is
-// the ONLY one that auto-switches light/dark: it comes from the asset catalog,
-// which carries a `luminosity: dark` appearance. The named alternates are
-// file-based and cannot carry appearances, so they are fixed by construction.
+// Each option's [ground, border, fold] preview colors, matching the alternate
+// icon sets in ios/App/App/Assets.xcassets. 'default' shows the Paper look and
+// is the only one that auto-switches light/dark, because its icon set is the
+// only one carrying a `luminosity: dark` appearance. The named three ship a
+// single 1024 each, so they are fixed — a choice, not a limit: they were loose
+// PNGs until 2026-07-29 (which is what raised ITMS-90892, no iPad sizes), and
+// now that they are catalog sets they COULD carry dark variants if drawn.
 const OPTIONS: { name: AppIconName; label: string; colors: [string, string, string] }[] = [
 	{ name: 'default', label: 'Default', colors: ['#EEF0EC', '#2E5E8C', '#E84A27'] },
 	{ name: 'Vellum', label: 'Vellum', colors: ['#EFE7D6', '#8A4B2A', '#B23A1B'] },
@@ -84,12 +86,11 @@ export function AppIconSection() {
 					);
 				})}
 			</div>
-			{/* The tradeoff is invisible otherwise. "Default" is the asset-catalog
-			    icon, which carries a `luminosity: dark` variant and so follows the
-			    system appearance on its own (iOS 18+). The named ones are file-based
-			    alternates (CFBundleAlternateIcons), and that mechanism cannot carry
-			    appearance variants at all — so choosing one silently opts out of
-			    light/dark switching. Say so rather than let it look broken. */}
+			{/* The tradeoff is invisible otherwise. "Default" carries a
+			    `luminosity: dark` variant and so follows the system appearance on
+			    its own (iOS 18+); the named three are drawn in one appearance
+			    only, so choosing one silently opts out of light/dark switching.
+			    Say so rather than let it look broken. */}
 			<p className="text-xs text-graphite-40 mt-2">
 				Default follows your system appearance, switching itself between light and dark. The named icons are fixed —
 				picking one turns that off. iOS will ask you to confirm each change.

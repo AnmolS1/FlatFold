@@ -301,3 +301,97 @@ The Mac screenshots have a separate blocker: a default-sized Catalyst window
 renders the **phone** tab bar (`chatChrome.ts` takes the narrow branch), so a
 2880×1800 capture would show a Mac app wearing phone chrome. The wide layout has
 to be fixed before Mac shots are worth taking.
+
+---
+
+## 8. ITMS-90892 (the iPad icon warning)
+
+The email after the first two uploads said the bundle had **no alternate app
+icon for iPad at 152×152 or 167×167**. It is a warning, not a rejection — build
+1 (macOS) and build 3 (iOS) both validated and went to review with it — but the
+next build should not carry it. It is about the **iOS** build: the Catalyst
+archive gets an `AppIcon.icns` and is never asked for iPad sizes.
+
+**It was not only cosmetic.** `UIApplication.supportsAlternateIcons` is false
+when the running idiom has no alternates declared, and `AppIconSection` renders
+`null` when it is false — so on **iPad, the app-icon picker did not appear at
+all** in the shipped build. Measured, not deduced: the pre-fix build on an iPad
+Pro simulator reports `ICONS: unsupported on this platform`, and the post-fix
+build on the same simulator sets all three icons with the name reading back
+correctly.
+
+**What was actually wrong.** The primary icon has always been an asset-catalog
+icon set, so `actool` renders every size Apple asks for. The three *alternates*
+(Graphite / Midnight / Vellum, the picker in Settings) were not: they were loose
+PNGs in `App/AltIcons/`, listed by hand under `CFBundleIcons` →
+`CFBundleAlternateIcons` → `CFBundleIconFiles`. Loose icons ship exactly the
+sizes you draw, and only the two iPhone sizes were ever drawn:
+
+```
+AppIcon-Graphite@2x.png   120×120
+AppIcon-Graphite@3x.png   180×180
+```
+
+`TARGETED_DEVICE_FAMILY = "1,2"`, so the app claims iPad, and the store looked
+for the iPad pair and found nothing. Confirmed in the uploaded archive itself —
+its `Info.plist` had a `CFBundleIcons` dict but no `CFBundleIcons~ipad`.
+
+**The fix.** The alternates are now asset-catalog icon sets like the primary:
+`Assets.xcassets/{Graphite,Midnight,Vellum}.appiconset`, one 1024 PNG each,
+rendered from the `brand/app-icon-*-source.svg` files they already came from
+(verified pixel-identical to the retired PNGs before switching). They are
+declared with
+
+```
+ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "Graphite Midnight Vellum"
+```
+
+and the hand-written `CFBundleIcons` block is **gone from `Info.plist`** —
+`actool` now writes the whole thing, including the `CFBundleIcons~ipad` variant
+that was missing. Verified in a fresh build's `Info.plist`.
+
+**Why this needed a runtime check too.** The icon set's name is what
+`setAlternateIconName` resolves against, and it used to be the plist key — so
+the strings `src/lib/appIcon.ts` sends ("Graphite", "Midnight", "Vellum") had to
+be re-proved, not assumed. `--verify-icons` (MainViewController, DEBUG only)
+walks all three plus the restore-to-default and reads the icon back:
+
+```
+ICONS: __BOGUS__ FAILED — The file doesn't exist.
+ICONS: Graphite no completion after 6s, but reads back Graphite OK
+ICONS: Midnight no completion after 6s, but reads back Midnight OK
+ICONS: Vellum   no completion after 6s, but reads back Vellum OK
+ICONS: default  no completion after 6s, but reads back default OK
+```
+
+Two traps worth keeping:
+
+- **`simctl launch` only forwards launch arguments with `--console-pty`.**
+  Without it the app starts fine and every `--verify-*` / `--scene=` flag is
+  silently absent from `ProcessInfo.arguments`, so a working probe reads as a
+  probe that found nothing. The probe now logs its own `arguments` at launch so
+  the two are distinguishable.
+- **A completion handler that never arrives is not a failed icon change.** On
+  the iPad Pro (M4) simulator, a call that genuinely changes the icon did not
+  call back within 6s, while the deliberate `__BOGUS__` control failed
+  immediately with "The file doesn't exist" — so the API was answering, and
+  reading `alternateIconName` back showed every change had in fact taken. That
+  read-back, not the callback, is what the Home Screen acts on.
+- **That silence used to lock the picker, and the fix is what exposed it.**
+  `FlatFoldAppIconPlugin.setIcon` resolved inside the completion handler, and
+  `AppIconSection` sets `busy` before awaiting it and clears it in a `finally` —
+  so every button stayed disabled, with no error, until relaunch. Measured on
+  the iPad simulator as `ICONS-JS Graphite -> NEVER SETTLED after 8002ms`. It
+  was never reachable on iPad before, precisely because there was no picker
+  there; making the icons work is what made the hang possible.
+
+  **So `setIcon` now polls the read-back** and resolves when
+  `alternateIconName` equals what was asked for, keeping the callback as the
+  fast path, treating a read-back that still shows the old icon as "not landed
+  yet" rather than failure, and rejecting after ten seconds so a genuinely
+  stuck call surfaces as an error instead of a lie. Same probe, after:
+  `Graphite -> resolved after 1058ms`. A real failure still rejects promptly
+  with the real reason — on an iPhone 17 Pro simulator, whose icon subsystem
+  refuses *everything* including the bogus control ("Resource temporarily
+  unavailable"), it comes back in 5ms rather than hanging for ten seconds.
+  **Still untested on real hardware**, where the callback may simply work.

@@ -10,44 +10,14 @@
 	<string>FlatFold</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
-	<key>CFBundleIcons</key>
-	<dict>
-		<key>CFBundleAlternateIcons</key>
-		<dict>
-			<key>Graphite</key>
-			<dict>
-				<key>CFBundleIconFiles</key>
-				<array>
-					<string>AppIcon-Graphite</string>
-				</array>
-				<key>UIPrerenderedIcon</key>
-				<false/>
-			</dict>
-			<key>Midnight</key>
-			<dict>
-				<key>CFBundleIconFiles</key>
-				<array>
-					<string>AppIcon-Midnight</string>
-				</array>
-				<key>UIPrerenderedIcon</key>
-				<false/>
-			</dict>
-			<key>Vellum</key>
-			<dict>
-				<key>CFBundleIconFiles</key>
-				<array>
-					<string>AppIcon-Vellum</string>
-				</array>
-				<key>UIPrerenderedIcon</key>
-				<false/>
-			</dict>
-		</dict>
-		<key>CFBundlePrimaryIcon</key>
-		<dict>
-			<key>CFBundleIconName</key>
-			<string>AppIcon</string>
-		</dict>
-	</dict>
+	<!-- No CFBundleIcons here on purpose. The primary icon and the three
+	     alternates (Graphite / Midnight / Vellum) are asset-catalog icon sets,
+	     and actool writes the whole CFBundleIcons dict at build time from
+	     ASSETCATALOG_COMPILER_APPICON_NAME + _ALTERNATE_APPICON_NAMES.
+	     They used to be loose PNGs listed here, which is why the App Store
+	     raised ITMS-90892: loose alternate icons ship only the sizes you hand
+	     it, and only the two iPhone sizes were ever drawn. The catalog renders
+	     every size the store asks for, iPad's 152 and 167 included. -->
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>

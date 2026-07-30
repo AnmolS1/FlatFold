@@ -85,6 +85,17 @@ class MainViewController: CAPBridgeViewController {
         isMacCatalystApp=\(info.isMacCatalystApp, privacy: .public) \
         home=\(NSHomeDirectory(), privacy: .public)
         """)
+        // Every probe below keys off launch arguments, so print them: a probe
+        // that never fires and an argument that never arrived look identical
+        // from the outside, and telling them apart by guesswork costs an hour.
+        //
+        // Redacted, because screenshots.sh passes `--seed-pw=...` and this line
+        // would otherwise write a real account password into the unified log.
+        let shownArgs = info.arguments
+            .map { $0.hasPrefix("--seed-pw") ? "--seed-pw=<redacted>" : $0 }
+            .joined(separator: " ")
+        probe.notice("args \(shownArgs, privacy: .public)")
+        print("ARGS \(shownArgs)")
         // The audio-budget harness (docs/redesign/MAC_AUDIO_FINDINGS.md).
         // Launched with:
         //
@@ -151,6 +162,12 @@ class MainViewController: CAPBridgeViewController {
         if ProcessInfo.processInfo.arguments.contains("--verify-audio") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
                 self?.verifyNativeAudio(probe)
+            }
+        }
+
+        if ProcessInfo.processInfo.arguments.contains("--verify-icons") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+                self?.verifyAlternateIcons(probe)
             }
         }
 
@@ -874,6 +891,123 @@ class MainViewController: CAPBridgeViewController {
                 probe.notice("FLATFOLD_VERIFY_FAIL \(String(describing: e), privacy: .public)")
                 print("PROBE_FAIL \(String(describing: e))")
             }
+        }
+        #endif
+    }
+
+    /// Walks the app-icon picker's whole vocabulary through the real UIKit call.
+    ///
+    /// The three alternates used to be loose PNGs named in `CFBundleIconFiles`;
+    /// they are now asset-catalog icon sets listed in
+    /// `ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES`, which is what fixed
+    /// ITMS-90892 (loose alternates shipped only the two iPhone sizes, so the
+    /// store found no iPad 152 or 167). That move also changes the string
+    /// `setAlternateIconName` resolves against — plist key before, icon-set name
+    /// now — so the names `appIcon.ts` sends have to be re-proved, not assumed.
+    /// A silent break here shows up as an icon picker that does nothing.
+    private func verifyAlternateIcons(_ probe: os.Logger) {
+        #if DEBUG
+        // "__BOGUS__" first, deliberately: it is the control. If a name that
+        // cannot possibly resolve comes back with an error, the API answers on
+        // this platform and any later silence belongs to the real names. If even
+        // the bogus one goes quiet, the API itself is not answering here and the
+        // run says nothing about the icons.
+        let names: [String?] = ["__BOGUS__", "Graphite", "Midnight", "Vellum", nil]
+        guard UIApplication.shared.supportsAlternateIcons else {
+            probe.notice("ICONS: unsupported on this platform (expected on Catalyst)")
+            print("ICONS: unsupported on this platform")
+            return
+        }
+        // Sequential, not a loop: each call is async and the NEXT one is only
+        // meaningful once the previous has landed.
+        func step(_ i: Int) {
+            guard i < names.count else {
+                probe.notice("ICONS: native walk done")
+                print("ICONS: native walk done")
+                // The native call is only half the story. AppIconSection sets
+                // `busy` before `await setAppIcon(...)` and clears it in a
+                // `finally`, so a promise that never SETTLES leaves every button
+                // in the picker disabled for the life of the app — with no error
+                // shown. Since the completion handler is exactly what
+                // FlatFoldAppIconPlugin resolves on, that path has to be driven
+                // through the real bridge, not inferred from the native result.
+                self.verifyIconBridge(probe)
+                return
+            }
+            let want = names[i]
+            // Logged BEFORE the call, because the completion handler is the only
+            // other thing that speaks here: without this line, "never called" and
+            // "called, never answered" are the same silence.
+            probe.notice("ICONS: setting \(want ?? "default", privacy: .public)")
+            print("ICONS: setting \(want ?? "default")")
+            // A completion that never arrives would otherwise stall the whole
+            // walk on step 0 and report nothing about steps 1..n.
+            var answered = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+                guard !answered else { return }
+                // The callback is not the icon. Ask UIKit what the icon actually
+                // IS now — that is the fact the Home Screen will act on, and a
+                // missing callback says nothing about it either way.
+                let now = UIApplication.shared.alternateIconName
+                let ok = now == want
+                probe.notice("ICONS: \(want ?? "default", privacy: .public) no completion after 6s, but reads back \(now ?? "default", privacy: .public) \(ok ? "OK" : "MISMATCH", privacy: .public)")
+                print("ICONS: \(want ?? "default") no completion after 6s, reads back \(now ?? "default") \(ok ? "OK" : "MISMATCH")")
+                step(i + 1)
+            }
+            UIApplication.shared.setAlternateIconName(want) { error in
+                answered = true
+                let got = UIApplication.shared.alternateIconName
+                let label = want ?? "default"
+                if let error = error {
+                    probe.notice("ICONS: \(label, privacy: .public) FAILED — \(error.localizedDescription, privacy: .public)")
+                    print("ICONS: \(label) FAILED — \(error.localizedDescription)")
+                } else {
+                    // Read back rather than trusting a nil error: the name the
+                    // system reports is the one the Home Screen will use.
+                    let ok = got == want
+                    probe.notice("ICONS: \(label, privacy: .public) set -> reads back \(got ?? "default", privacy: .public) \(ok ? "OK" : "MISMATCH", privacy: .public)")
+                    print("ICONS: \(label) set -> reads back \(got ?? "default") \(ok ? "OK" : "MISMATCH")")
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { step(i + 1) }
+            }
+        }
+        step(0)
+        #endif
+    }
+
+    /// Drive the icon picker's own code path: JS -> plugin -> UIKit -> promise.
+    ///
+    /// Races the plugin call against a timeout, because "hangs forever" is the
+    /// failure mode that matters here and an un-raced await would simply never
+    /// report. `Capacitor.Plugins.FlatFoldAppIcon` is the same object
+    /// `src/lib/appIcon.ts` calls.
+    private func verifyIconBridge(_ probe: os.Logger) {
+        #if DEBUG
+        let js = """
+        const p = Capacitor.Plugins.FlatFoldAppIcon;
+        const out = [];
+        for (const name of ['Graphite', 'default']) {
+          const t0 = Date.now();
+          const r = await Promise.race([
+            p.setIcon({ name }).then(() => 'resolved', (e) => 'rejected: ' + e),
+            new Promise((res) => setTimeout(() => res('NEVER SETTLED'), 8000)),
+          ]);
+          out.push(name + ' -> ' + r + ' after ' + (Date.now() - t0) + 'ms');
+        }
+        const now = await p.getIcon();
+        return out.join(' | ') + ' | getIcon=' + now.name;
+        """
+        bridge?.webView?.callAsyncJavaScript(js, arguments: [:], in: nil, in: .page) { result in
+            switch result {
+            case .success(let v):
+                probe.notice("ICONS-JS \(String(describing: v), privacy: .public)")
+                print("ICONS-JS \(String(describing: v))")
+            case .failure(let e):
+                probe.notice("ICONS-JS failed \(String(describing: e), privacy: .public)")
+                print("ICONS-JS failed \(String(describing: e))")
+            }
+            probe.notice("ICONS: done")
+            print("ICONS: done")
         }
         #endif
     }

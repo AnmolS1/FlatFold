@@ -56,7 +56,9 @@ side.
 - Preview (own worker + own D1, safe to test against): see `PREVIEW_ORIGIN` in
   `.env.asc` — the hostname carries a personal account handle, so it stays out of
   a doc that FULL_AUDIT_2 P1 proposes tracking in a public repo.
-- iOS: TestFlight, build 2 (version 1.0)
+- iOS + macOS: submitted to the App Store and **in review** (stamped 2026-07-30).
+  Both platforms went in together off the Catalyst merge; TestFlight build 2
+  (version 1.0) was the last pre-submission state.
 - Source: https://github.com/AnmolS1/FlatFold
 
 Stack: React + Vite + TypeScript + Tailwind v4 on the front end, Capacitor 8
@@ -89,7 +91,8 @@ as `bd367c6`, so all 17 pre-squash originals still look unmerged. Compare agains
 | TLS pinning | Shipped and proven with both controls. See `TLS_PINNING.md`. |
 | Release pipeline | Working. A `v*` tag builds and uploads to TestFlight via CI. |
 | Compliance | US: nothing to file (public source is not subject to the EAR). France: ANSSI declaration accepted. |
-| macOS, Android | **Not built.** Android never started. macOS is not merely unstarted — Mac Catalyst was spiked and is **blocked**; see open item 2. |
+| macOS | **Shipped 2026-07-29** (`02550a7`). Mac Catalyst, native voice notes, and the store submission. Was blocked; see open item 2 for how, and why the escape was the one the spike predicted. |
+| Android | **Not built.** Never started. |
 
 Tests: 662 passing across 63 files (2026-07-26). `tsc -b` and eslint are clean.
 
@@ -286,19 +289,30 @@ per-feature evidence is described in the commit messages and in
    The interesting part for a reviewer is the ordering: secrets are persisted
    locally before the public halves are published, so a crash can never leave a
    published key whose secret was lost.
-2. **macOS is BLOCKED, not merely unstarted. Do not start a Catalyst attempt
-   without reading this.** Only the iOS app exists; iPadOS comes free through the
-   universal build, and a Mac can run the iPad app ("Designed for iPad"). Mac
-   Catalyst was spiked on 2026-07-26 and **cannot link**: Capacitor 8's SwiftPM
-   distribution of `Capacitor.xcframework` ships only `ios-arm64` and
-   `ios-arm64_x86_64-simulator`, with no `maccatalyst` slice. Recorded on branch
-   `spike/mac-catalyst` (`5bc798e`), not merged. The only escape is migrating the
-   build to CocoaPods, which compiles from source. `ios/CATALYST.md` lays
-   out five options and argues the decision turns on **secure storage** — the
-   master key currently lives in a Secure-Enclave-gated Keychain item, and the
-   Tauri routes move that custody onto single-maintainer community plugins. The
-   passthrough Mac build also has **no microphone** (open item 7). Android was
-   never started.
+2. ~~**macOS is BLOCKED, not merely unstarted.**~~ **RESOLVED 2026-07-29**
+   (`02550a7`, merging `feat/mac-catalyst` to `prod`). Kept in full because the
+   diagnosis is what made the fix findable, and because the failure recurs for
+   any Capacitor app that wants a Mac build.
+
+   The block: Mac Catalyst was spiked on 2026-07-26 and **could not link**.
+   Capacitor 8's SwiftPM distribution of `Capacitor.xcframework` ships only
+   `ios-arm64` and `ios-arm64_x86_64-simulator`, with **no `maccatalyst` slice**.
+   No amount of build-setting work gets around a missing slice.
+
+   The escape was the one the spike named: **migrate the build to CocoaPods**,
+   which compiles from source and therefore produces the slice. Done on
+   2026-07-26 (`build(macos): Mac Catalyst BUILDS — CocoaPods migration`).
+   `ios/App/` now carries a `Podfile`, `Pods/`, and `App.xcworkspace` alongside
+   the older `CapApp-SPM`. The secure-storage worry that `ios/CATALYST.md`
+   argued the decision turned on did **not** materialise: CocoaPods keeps the
+   Capacitor plugin model, so the master key still lives in the same
+   Secure-Enclave-gated Keychain item and no custody moved to community plugins.
+   That risk applied to the Tauri routes, which were not taken.
+
+   The microphone gap (old open item 7) was fixed separately and independently
+   by `FlatFoldAudioPlugin`, so it was never actually gating this.
+
+   Android was never started and still is not.
 3. **App Store submission items:** the D5 store copy and the D6 privacy label are
    drafted but not submitted. The review demo accounts now EXIST: `flatfold_review1`
    and `flatfold_review2` on prod, created and sign-in-verified 2026-07-25, sharing

@@ -479,6 +479,55 @@ right tool. The `/transparency` page says this to users directly.
       because a reviewer has to be able to read the no-tolerance clause inside
       the app; that also means it is readable offline and cannot be changed out
       from under a user without an app update.
+26. **Abuse reports are the ONLY readable message text on the server, and they
+    are there because a user put them there.** App Review 1.2 requires a way to
+    flag content and act on it within 24 hours. The server cannot read messages,
+    so it cannot be asked to look up what was reported — there is nothing to look
+    up. Migration 0011 adds `abuse_reports`, whose `evidence` column holds the
+    specific messages the REPORTER selected, uploaded from their own device after
+    an explicit consent step (`src/components/chat/ReportDialog.tsx`).
+    - **This does not weaken E2EE, and the distinction matters.** Only a
+      participant can ever disclose their own copy of a conversation — that has
+      always been true of any messenger and is not a capability the server gains.
+      What the server cannot do is unchanged: it cannot read arbitrary traffic,
+      cannot scan, and cannot retrieve a message nobody chose to send it.
+    - **Consent is real, not a checkbox.** Nothing is attached by default, only
+      the reported party's messages are eligible, and the disclosure sits above
+      the button in plain words. A report with no messages attached is one click
+      and is explicitly supported. **If a future change makes attachment
+      automatic or default-on, it has broken the promise the rest of the app
+      rests on.**
+    - **Bounded by construction:** ≤50 messages and ≤64 KiB per report,
+      rate-limited to 10/hour per reporter, and swept at 90 days on every insert
+      (there is no cron on this Worker; a retention promise enforced by someone
+      remembering is not a promise). Disclosed on `/transparency`, and
+      `LEGAL_ANSWER` was corrected — it previously said "no readable messages"
+      without qualification, which this makes false.
+27. **Blocking is enforced server-side, with one honest gap.** Migration 0012
+    adds `blocks`; `worker/mailbox.ts` `deliverTo` refuses the delivery before
+    anything is queued or pushed, so a blocked account cannot reach the device at
+    all, on every device, surviving a reinstall. The sender is told nothing — a
+    block that announced itself would just tell an abuser to return from a new
+    account.
+    - **The gap: a SEALED (sender-hidden) send cannot be filtered here**, because
+      the server does not know who sent it. That is the feature working, not a
+      bug. Those are caught by the client-side list (`src/lib/blocklist.ts`) on
+      receipt, which sees the sender after decryption. Every send is covered by
+      one layer or the other, and neither layer alone covers both.
+28. **Account termination ejects; it does not permanently bar, and must not be
+    described as if it did.** `users.disabled_at` fails authentication on every
+    path including sessions already open (`readAuthenticatedUsername`), so
+    actioning an abusive account does not wait out its 14-day token.
+    `banned_usernames` retires the handle so the account someone was being abused
+    by cannot be re-created.
+    - **Both failures reuse the EXISTING generic errors** — "Invalid username or
+      password" and "That username is taken." A distinct "this account was
+      banned" reply would be an enumeration oracle and would tell an abuser
+      precisely which of their accounts had been actioned.
+    - **Residual, stated rather than glossed:** identity here is a username with
+      no email, no phone and deliberately no IP logging, so a determined person
+      can register again. Signal and Session have exactly the same property.
+      Apple's wording is "eject the user", which is what this does.
 
 ---
 

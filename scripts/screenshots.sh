@@ -84,7 +84,7 @@ for entry in "${DEVICES[@]}"; do
       --cellularMode active --cellularBars 4 --wifiMode active --wifiBars 3 >/dev/null 2>&1 || true
   fi
 
-  build="ios/App/build/DDsim/Build/Products/Debug-iphonesimulator/App.app"
+  build="ios/App/build/DDsim/Build/Products/Debug-iphonesimulator/FlatFold.app"
   [ -d "$build" ] || { echo "no simulator build at $build" >&2; exit 1; }
   xcrun simctl install "$udid" "$build" >/dev/null
 

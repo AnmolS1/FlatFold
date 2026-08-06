@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- DEBUG Mac Catalyst entitlements. Identical to App.maccatalyst.entitlements
+	     except for aps-environment, exactly as App.debug.entitlements is to
+	     App.entitlements on iOS. If you add or remove a sandbox key, change BOTH
+	     files or a Debug run stops reproducing what Release ships.
+	     See App.maccatalyst.entitlements for why there is no camera entitlement
+	     and why the sandbox keys do not unlock navigator.mediaDevices. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+
+	<key>com.apple.security.network.client</key>
+	<true/>
+
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+
+	<!-- development: a locally-built/Xcode-run Mac app gets a SANDBOX device
+	     token. The Release file says production. -->
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>

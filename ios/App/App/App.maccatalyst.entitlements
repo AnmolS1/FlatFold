@@ -3,20 +3,30 @@
 <plist version="1.0">
 <dict>
 	<!-- Catalyst apps run in the macOS App Sandbox, and the iOS entitlements file
-	     says nothing about it. Without these, WebKit does not expose
-	     navigator.mediaDevices at all — which is why the Catalyst build reported
-	     the same "no mediaDevices" as the passthrough despite being a real Mac
-	     app. Same symptom, genuinely different cause. -->
+	     says nothing about it, so the sandbox keys have to live here.
+	     NOTE: adding these did NOT make WebKit expose navigator.mediaDevices —
+	     that was the hypothesis, and it was refuted. On a Mac the WebView has no
+	     mediaDevices at all, entitlements or not, which is precisely why voice
+	     notes are recorded natively (ios/App/App/FlatFoldAudioPlugin.swift).
+	     Do not re-add a media entitlement expecting to unlock a web API. -->
 	<key>com.apple.security.app-sandbox</key>
 	<true/>
 
-	<!-- THE ONE THIS IS ALL ABOUT: microphone, for voice notes. -->
+	<!-- Microphone, for voice notes. Consumed by FlatFoldAudioPlugin (AVAudio),
+	     NOT by the WebView — see the note above. -->
 	<key>com.apple.security.device.audio-input</key>
 	<true/>
 
-	<!-- Camera, for scanning a contact's safety-number QR code. -->
-	<key>com.apple.security.device.camera</key>
-	<true/>
+	<!-- NO CAMERA ENTITLEMENT, DELIBERATELY. App Review rejected the first macOS
+	     build under Guideline 2.4.5(i) for shipping com.apple.security.device.camera
+	     with no matching functionality, and they were right: the only camera path
+	     is the safety-number QR scanner in SafetyNumberDialog.tsx, which is gated
+	     on `navigator.mediaDevices?.getUserMedia` and therefore never renders on a
+	     Mac. There is no Capacitor camera plugin and no AVCapture code. QR scanning
+	     is unaffected on iOS, where camera access comes from
+	     NSCameraUsageDescription rather than a sandbox entitlement. If a Mac camera
+	     feature is ever built natively, add the entitlement back in the SAME commit
+	     as the feature. -->
 
 	<!-- REQUIRED once sandboxed, and easy to forget: without it every API call
 	     and the WebSocket fail, which looks like a broken backend rather than a
@@ -28,7 +38,16 @@
 	<key>com.apple.security.files.user-selected.read-write</key>
 	<true/>
 
+	<!-- PRODUCTION, because this file is the RELEASE Catalyst entitlements and a
+	     Mac App Store build must mint production device tokens. Debug Catalyst
+	     builds use App.maccatalyst.debug.entitlements instead — the pair mirrors
+	     the iOS split (App.entitlements / App.debug.entitlements), which existed
+	     long before this file did.
+	     This was WRONG until 2026-08-05: one file served both configs and said
+	     `development`, so the shipped Mac build registered against the APNs
+	     sandbox. Nothing failed at build, upload or review; the only symptom was
+	     production push never arriving. Keep the two files in step. -->
 	<key>aps-environment</key>
-	<string>development</string>
+	<string>production</string>
 </dict>
 </plist>

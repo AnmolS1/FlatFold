@@ -38,7 +38,16 @@
 	<key>com.apple.security.files.user-selected.read-write</key>
 	<true/>
 
+	<!-- PRODUCTION, because this file is the RELEASE Catalyst entitlements and a
+	     Mac App Store build must mint production device tokens. Debug Catalyst
+	     builds use App.maccatalyst.debug.entitlements instead — the pair mirrors
+	     the iOS split (App.entitlements / App.debug.entitlements), which existed
+	     long before this file did.
+	     This was WRONG until 2026-08-05: one file served both configs and said
+	     `development`, so the shipped Mac build registered against the APNs
+	     sandbox. Nothing failed at build, upload or review; the only symptom was
+	     production push never arriving. Keep the two files in step. -->
 	<key>aps-environment</key>
-	<string>development</string>
+	<string>production</string>
 </dict>
 </plist>

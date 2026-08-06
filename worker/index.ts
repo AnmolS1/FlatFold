@@ -20,7 +20,9 @@ import {
 	createUser,
 	getRecoveryParams,
 	getUser,
+	hasAcceptedTerms,
 	setBackupCodeHashes,
+	setTermsAccepted,
 	setRecovery,
 	setTotp,
 	setTotpLastStep,
@@ -29,6 +31,7 @@ import {
 	type UserRow,
 } from './db';
 import { decryptTotpSecret, encryptTotpSecret, hashBackupCode, verifyTotp } from './totp';
+import { TERMS_VERSION } from '../shared/terms';
 
 // Auth rate limits. Keyed by the TARGET username, not an IP — FlatFold
 // deliberately does not log IPs (invariant #5), so per-actor throttling isn't
@@ -150,7 +153,10 @@ async function handleSignup(request: Request, env: Env): Promise<Response> {
 	await createUser(env.DB, { username, passwordVerifier, createdAt });
 
 	const token = await signSessionToken(username, env.SESSION_SECRET, 0); // fresh user ⇒ epoch 0
-	return authResponse({ username }, token, isNativeClient(request));
+	// A brand-new account has never accepted anything, so this is unconditionally
+	// false. Reported here so the client can raise the gate immediately rather
+	// than only on the next cold start.
+	return authResponse({ username, termsAccepted: false }, token, isNativeClient(request));
 }
 
 async function handleLogin(request: Request, env: Env): Promise<Response> {
@@ -192,7 +198,11 @@ async function handleLogin(request: Request, env: Env): Promise<Response> {
 	}
 
 	const token = await signSessionToken(username, env.SESSION_SECRET, user.token_epoch);
-	return authResponse({ username }, token, isNativeClient(request));
+	return authResponse(
+		{ username, termsAccepted: hasAcceptedTerms(user, TERMS_VERSION) },
+		token,
+		isNativeClient(request)
+	);
 }
 
 async function handleMe(request: Request, env: Env): Promise<Response> {
@@ -207,10 +217,28 @@ async function handleMe(request: Request, env: Env): Promise<Response> {
 	if (!user || user.token_epoch !== payload.epoch) return json({ error: 'Not authenticated.' }, { status: 401 });
 	const refreshed = await signSessionToken(payload.sub, env.SESSION_SECRET, user.token_epoch, payload.iat);
 	return authResponse(
-		{ username: payload.sub, sessionCreatedAt: payload.iat, twoFactorEnabled: user.totp_secret !== null },
+		{
+			username: payload.sub,
+			sessionCreatedAt: payload.iat,
+			twoFactorEnabled: user.totp_secret !== null,
+			// App Review 1.2: the client gates the whole app surface on this. It is
+			// reported on every /me, so a re-gate (TERMS_VERSION bump) takes effect on
+			// the next app open without needing a sign-out.
+			termsAccepted: hasAcceptedTerms(user, TERMS_VERSION),
+		},
 		refreshed,
 		readBearerToken(request) !== null
 	);
+}
+
+// App Review 1.2: record acceptance of the terms. Authenticated, and the version
+// written is the SERVER's constant — any `version` in the body is ignored, so a
+// caller cannot store a future revision to skip the next re-gate.
+async function handleAcceptTerms(env: Env, username: string): Promise<Response> {
+	// Coarsened to the minute, matching `created_at` (migrations/0001_init.sql).
+	const acceptedAt = Math.floor(Date.now() / 60_000) * 60;
+	await setTermsAccepted(env.DB, username, acceptedAt, TERMS_VERSION);
+	return json({ ok: true, termsVersion: TERMS_VERSION });
 }
 
 function handleLogout(): Response {
@@ -544,6 +572,16 @@ async function route(request: Request, env: Env): Promise<Response> {
 			if (!doResp.ok) return json({ error: 'Could not register token.' }, { status: 400 });
 			await setUserSealToken(env.DB, username, body.token);
 			return json({ ok: true });
+		}
+
+		// App Review 1.2: accept the in-app terms. No re-auth — this is a consent
+		// record, not a security-sensitive mutation, and requiring the password
+		// again immediately after sign-in would be friction with no threat behind
+		// it (the worst a hijacked session can do here is agree to terms).
+		if (pathname === '/api/account/accept-terms' && method === 'POST') {
+			const username = await readAuthenticatedUsername(request, env);
+			if (!username) return json({ error: 'Not authenticated.' }, { status: 401 });
+			return handleAcceptTerms(env, username);
 		}
 
 		// Account deletion (invariant #6). Auth-gated AND password-reauthed

@@ -44,6 +44,8 @@ export const SERVER_STATE: PersistedStore[] = [
 			{ name: 'totp_secret', description: 'Only if you turned on two-factor. Your authenticator’s shared secret, encrypted at rest so a database read alone can’t use it. Needed to check the 6-digit codes when you sign in.' },
 			{ name: 'backup_code_hashes', description: 'Only if you turned on two-factor. Salted hashes of your one-time backup codes — never the codes themselves. Each is erased the moment it’s used.' },
 			{ name: 'totp_last_step', description: 'Only if you turned on two-factor. A counter of the last accepted code’s time slot, so the same code can’t be replayed. Just a number.' },
+			{ name: 'terms_accepted_at', description: 'When you agreed to the terms, rounded to the minute. It is stored because the agreement has to apply to everyone, and the only way to know you have not been asked yet is to record that you have.' },
+			{ name: 'terms_version', description: 'Which revision of the terms you agreed to. If the terms change in a way that matters, this is how the app knows to ask you again.' },
 		],
 	},
 	{
@@ -140,7 +142,7 @@ export const SEALED_SENDER: SealedSenderFacts = {
 // What a legal request (subpoena) could compel. This is the honest, complete
 // answer — deliberately short.
 export const LEGAL_ANSWER: string[] = [
-	'Your username and the date you signed up.',
+	'Your username, the date you signed up, and the date you agreed to the terms.',
 	'Your public key material: identity key, prekeys, the sealed-sender delivery token. All public by design.',
 	'Any encrypted text still queued because someone was offline, which the server cannot decrypt, and which gets deleted on delivery or after 14 days anyway.',
 	'That is it. No readable messages, no contact lists, no read receipts, no typing indicators, no IP logs, no history. None of it exists on the server to hand over.',

@@ -31,7 +31,9 @@ describe('auth', () => {
 			body: JSON.stringify({ username: 'alice_vitest', password: 'correcthorsebattery' }),
 		});
 		expect(loginRes.status).toBe(200);
-		expect(await loginRes.json()).toEqual({ username: 'alice_vitest' });
+		// `termsAccepted` rides along so the client can raise the 1.2 gate without a
+		// second round trip. This account never accepted, hence false.
+		expect(await loginRes.json()).toEqual({ username: 'alice_vitest', termsAccepted: false });
 	});
 
 	it('rejects signup for a username that already exists', async () => {

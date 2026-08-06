@@ -24,6 +24,10 @@ const stubAuth: AuthContextType = {
 	username: 'alice',
 	loading: false,
 	keystoreLocked: false,
+	// Not what these tests are about — accepted, so the 1.2 terms gate stays out
+	// of the way of the behaviour under test.
+	termsAccepted: true,
+	acceptTerms: vi.fn(),
 	signup: vi.fn(),
 	login: vi.fn(),
 	logout: vi.fn(),

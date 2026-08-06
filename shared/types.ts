@@ -14,6 +14,11 @@ export interface AuthContextType {
 	// identity at all. See src/contexts/AuthContext.tsx for why unlocking
 	// the keystore is a separate step from the server session.
 	keystoreLocked: boolean;
+	// App Review 1.2: false until this account has accepted the CURRENT terms.
+	// Independent of `keystoreLocked` — this is about the SERVER session, so the
+	// gate applies after sign-in whether or not the keystore is unlocked.
+	termsAccepted: boolean;
+	acceptTerms: () => Promise<void>;
 	signup: (username: string, password: string) => Promise<void>;
 	// Resolves 'two-factor-required' when the account has 2FA on and no code was
 	// given — the caller then re-invokes with the authenticator/backup code.

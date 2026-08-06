@@ -28,15 +28,16 @@ async function captureNativeToken(body: unknown): Promise<void> {
 	if (typeof token === 'string' && token.length > 0) await setNativeToken(token);
 }
 
-export async function apiSignup(username: string, password: string): Promise<{ username: string }> {
+export async function apiSignup(username: string, password: string): Promise<{ username: string; termsAccepted: boolean }> {
 	const response = await apiFetch('/api/auth/signup', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ username, password }),
 	});
-	const body = (await parseJsonOrThrow(response)) as { username: string; token?: string };
+	const body = (await parseJsonOrThrow(response)) as { username: string; token?: string; termsAccepted?: boolean };
 	await captureNativeToken(body);
-	return { username: body.username };
+	// `!== false` so an older Worker (no field) reads as accepted — see MeResponse.
+	return { username: body.username, termsAccepted: body.termsAccepted !== false };
 }
 
 // Login, 2FA-aware. When the account has 2FA on, a password-only attempt returns
@@ -46,7 +47,7 @@ export async function apiLogin(
 	username: string,
 	password: string,
 	code?: string
-): Promise<{ username: string } | 'two-factor-required'> {
+): Promise<{ username: string; termsAccepted: boolean } | 'two-factor-required'> {
 	const response = await apiFetch('/api/auth/login', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
@@ -57,9 +58,9 @@ export async function apiLogin(
 		if (body?.twoFactorRequired) return 'two-factor-required';
 		throw new Error(body?.error ?? 'Invalid username or password.');
 	}
-	const body = (await parseJsonOrThrow(response)) as { username: string; token?: string };
+	const body = (await parseJsonOrThrow(response)) as { username: string; token?: string; termsAccepted?: boolean };
 	await captureNativeToken(body);
-	return { username: body.username };
+	return { username: body.username, termsAccepted: body.termsAccepted !== false };
 }
 
 // Turn on TOTP two-factor (D7 §4). Password-reauthed; the server verifies the
@@ -88,6 +89,11 @@ export interface MeResponse {
 	username: string;
 	sessionCreatedAt?: number; // unix seconds — the token's iat
 	twoFactorEnabled?: boolean; // D7 §4 — drives the Settings 2FA section
+	// App Review 1.2 — whether this account has accepted the CURRENT terms.
+	// Absent from an older Worker ⇒ treated as accepted, not as gated: a client
+	// deployed ahead of the Worker must not lock every existing user out of the
+	// app with a gate whose accept endpoint does not exist yet.
+	termsAccepted?: boolean;
 }
 
 export async function apiMe(): Promise<MeResponse | null> {
@@ -101,7 +107,22 @@ export async function apiMe(): Promise<MeResponse | null> {
 	}
 	const body = (await parseJsonOrThrow(response)) as MeResponse & { token?: string };
 	await captureNativeToken(body); // native: sliding refresh returns a fresh token
-	return { username: body.username, sessionCreatedAt: body.sessionCreatedAt, twoFactorEnabled: body.twoFactorEnabled };
+	return {
+		username: body.username,
+		sessionCreatedAt: body.sessionCreatedAt,
+		twoFactorEnabled: body.twoFactorEnabled,
+		termsAccepted: body.termsAccepted,
+	};
+}
+
+// App Review 1.2: record that this account accepted the terms. The version is
+// decided by the server — deliberately not sent from here.
+export async function apiAcceptTerms(): Promise<void> {
+	const response = await apiFetch('/api/account/accept-terms', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+	});
+	await parseJsonOrThrow(response);
 }
 
 export async function apiLogout(): Promise<void> {

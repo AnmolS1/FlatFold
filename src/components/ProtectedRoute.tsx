@@ -1,6 +1,7 @@
 import { Navigate } from 'react-router';
 import { LogoMark } from './common/Brand';
 import { KeystoreUnlockGate } from './KeystoreUnlockGate';
+import { TermsGate } from './TermsGate';
 import { PanicWipe } from './PanicWipe';
 import { useAuth } from '../hooks/useAuth';
 
@@ -25,13 +26,20 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
 		return <Navigate to="/login" replace />;
 	}
 
-	// PanicWipe sits OUTSIDE the unlock gate so its chord + confirm dialog work
-	// even while the keystore is locked (the gate otherwise renders only its
-	// own unlock screen). The wipe itself is key-independent.
+	// PanicWipe sits OUTSIDE both gates so its chord + confirm dialog work even
+	// while the keystore is locked or the terms are unaccepted (a gate otherwise
+	// renders only its own screen). The wipe itself is key-independent.
+	//
+	// TermsGate is OUTSIDE KeystoreUnlockGate: acceptance is a property of the
+	// server session, so it must apply regardless of unlock state — App Review
+	// 1.2 asks for an agreement before the app is usable, and "usable" starts at
+	// sign-in, not at unlock.
 	return (
 		<>
 			<PanicWipe />
-			<KeystoreUnlockGate>{children}</KeystoreUnlockGate>
+			<TermsGate>
+				<KeystoreUnlockGate>{children}</KeystoreUnlockGate>
+			</TermsGate>
 		</>
 	);
 };

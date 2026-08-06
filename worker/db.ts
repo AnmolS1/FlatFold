@@ -28,6 +28,29 @@ export interface UserRow {
 	totp_secret: string | null;
 	backup_code_hashes: string | null;
 	totp_last_step: number | null;
+	// In-app terms acceptance (migration 0010). NULL until accepted, including for
+	// every account that existed before the migration — the gate is retroactive on
+	// purpose. `terms_version` is written by the server from shared/terms.ts, never
+	// from the request, so acceptance of an older revision can be re-gated.
+	terms_accepted_at: number | null;
+	terms_version: string | null;
+}
+
+// Record that this user accepted the terms. `version` is the SERVER's constant —
+// the caller must not pass anything client-supplied here, or an account could
+// store a future version and skip the next re-gate.
+export async function setTermsAccepted(db: D1Database, username: string, acceptedAt: number, version: string): Promise<void> {
+	await db
+		.prepare('UPDATE users SET terms_accepted_at = ?, terms_version = ? WHERE username = ?')
+		.bind(acceptedAt, version, username)
+		.run();
+}
+
+// Whether this user has accepted the CURRENT terms. An older accepted version
+// counts as not accepted — that is what makes bumping TERMS_VERSION re-gate
+// everyone rather than being decorative.
+export function hasAcceptedTerms(user: UserRow, currentVersion: string): boolean {
+	return user.terms_accepted_at !== null && user.terms_version === currentVersion;
 }
 
 // L3: bump the user's session epoch, invalidating every token issued before now.

@@ -15,6 +15,7 @@ import migration0006 from '../migrations/0006_token_epoch.sql?raw';
 import migration0007 from '../migrations/0007_apns.sql?raw';
 import migration0008 from '../migrations/0008_recovery.sql?raw';
 import migration0009 from '../migrations/0009_totp.sql?raw';
+import migration0010 from '../migrations/0010_terms.sql?raw';
 
 const migrationSql = [
 	migration0001,
@@ -26,6 +27,7 @@ const migrationSql = [
 	migration0007,
 	migration0008,
 	migration0009,
+	migration0010,
 ].join('\n');
 
 // D1Database.exec() treats each NEWLINE as a statement boundary (it does

@@ -32,7 +32,7 @@ TRIAL="${2:?usage: audio-trial.sh <condition> <trial-n>}"
 
 COOLDOWN=${COOLDOWN:-900}          # seconds; generous vs the ~5 min observed
 SETTLE=${SETTLE:-140}               # unlock + open chat + condition, after a slow boot
-APP="ios/App/build/DDcat/Build/Products/Debug-maccatalyst/App.app"
+APP="ios/App/build/DDcat/Build/Products/Debug-maccatalyst/FlatFold.app"
 STAMP=".audio-last-quit"           # gitignored: machine state, not source
 OUT="docs/redesign/verify/audio-trials.jsonl"
 
@@ -50,9 +50,9 @@ fi
 SINCE_QUIT=$([ -f "$STAMP" ] && echo $(( $(date +%s) - $(cat "$STAMP") )) || echo -1)
 
 # --- Launch ------------------------------------------------------------------
-osascript -e 'quit app "App"' >/dev/null 2>&1 || true
+osascript -e 'quit app "FlatFold"' >/dev/null 2>&1 || true
 sleep 3
-pkill -f "Debug-maccatalyst/App.app" 2>/dev/null || true
+pkill -f "Debug-maccatalyst/FlatFold.app" 2>/dev/null || true
 sleep 1
 
 START=$(date +%s)

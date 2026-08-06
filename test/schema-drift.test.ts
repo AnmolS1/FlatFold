@@ -18,6 +18,8 @@ import migration0007 from '../migrations/0007_apns.sql?raw';
 import migration0008 from '../migrations/0008_recovery.sql?raw';
 import migration0009 from '../migrations/0009_totp.sql?raw';
 import migration0010 from '../migrations/0010_terms.sql?raw';
+import migration0011 from '../migrations/0011_reports.sql?raw';
+import migration0012 from '../migrations/0012_blocks_and_termination.sql?raw';
 
 const ALL_MIGRATIONS = [
 	migration0001,
@@ -30,6 +32,8 @@ const ALL_MIGRATIONS = [
 	migration0008,
 	migration0009,
 	migration0010,
+	migration0011,
+	migration0012,
 ].join('\n');
 
 // Extract { table -> [columns] } from CREATE TABLE statements. Deliberately

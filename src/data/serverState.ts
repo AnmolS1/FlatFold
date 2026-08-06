@@ -46,6 +46,7 @@ export const SERVER_STATE: PersistedStore[] = [
 			{ name: 'totp_last_step', description: 'Only if you turned on two-factor. A counter of the last accepted code’s time slot, so the same code can’t be replayed. Just a number.' },
 			{ name: 'terms_accepted_at', description: 'When you agreed to the terms, rounded to the minute. It is stored because the agreement has to apply to everyone, and the only way to know you have not been asked yet is to record that you have.' },
 			{ name: 'terms_version', description: 'Which revision of the terms you agreed to. If the terms change in a way that matters, this is how the app knows to ask you again.' },
+			{ name: 'disabled_at', description: 'Empty for everyone except an account that has been terminated for abuse. If it is set, that account can no longer sign in or send anything.' },
 		],
 	},
 	{
@@ -98,6 +99,45 @@ export const SERVER_STATE: PersistedStore[] = [
 		],
 	},
 	{
+		name: 'abuse_reports',
+		storage: 'D1',
+		purpose:
+			'Only if someone files a report. This is the one place on the server where readable message text can exist — and it is only ever there because a person deliberately put it there. Messages are end-to-end encrypted, so the server cannot read them and cannot go looking; a report therefore has to carry its own evidence, chosen by the reporter, from their own device, after they are shown exactly what is being sent. Deleted once the report has been reviewed, and in any case after 90 days.',
+		driftChecked: true,
+		fields: [
+			{ name: 'id', description: 'Row identifier.' },
+			{ name: 'reported_username', description: 'The account being reported.' },
+			{ name: 'reporter_username', description: 'Who filed it. Kept so a report can be followed up, and so a person cannot flood the same account with reports anonymously.' },
+			{ name: 'created_at', description: 'When it was filed, rounded to the minute.' },
+			{ name: 'reason', description: 'What the reporter said was wrong, in their own words. Optional.' },
+			{ name: 'status', description: 'Whether it has been reviewed yet. Reports are reviewed within 24 hours.' },
+			{ name: 'evidence', description: 'The specific messages the reporter picked out, and nothing else — never the whole conversation, never anything collected automatically. Erased when the report is closed, and after 90 days regardless.' },
+		],
+	},
+	{
+		name: 'blocks',
+		storage: 'D1',
+		purpose:
+			'Who you have blocked. This is here so a block actually stops delivery at the server instead of only hiding things on one device — it works on all your devices, and it survives a reinstall. It is a list of usernames and nothing else.',
+		driftChecked: true,
+		fields: [
+			{ name: 'blocker', description: 'You.' },
+			{ name: 'blocked', description: 'The account you blocked.' },
+			{ name: 'created_at', description: 'When you blocked them, rounded to the minute.' },
+		],
+	},
+	{
+		name: 'banned_usernames',
+		storage: 'D1',
+		purpose:
+			'Handles that have been retired after an account was terminated for abuse, so the same name cannot be taken again. Just the name and the date — the account itself is gone.',
+		driftChecked: true,
+		fields: [
+			{ name: 'username', description: 'The retired handle.' },
+			{ name: 'banned_at', description: 'When it was retired.' },
+		],
+	},
+	{
 		name: 'Mailbox (Durable Object storage)',
 		storage: 'Durable Object',
 		purpose: 'Your personal mailbox. It holds encrypted envelopes only while you are offline. The moment your device confirms it got them, they are deleted, and anything still sitting there after 14 days is deleted anyway, no exceptions.',
@@ -145,5 +185,6 @@ export const LEGAL_ANSWER: string[] = [
 	'Your username, the date you signed up, and the date you agreed to the terms.',
 	'Your public key material: identity key, prekeys, the sealed-sender delivery token. All public by design.',
 	'Any encrypted text still queued because someone was offline, which the server cannot decrypt, and which gets deleted on delivery or after 14 days anyway.',
-	'That is it. No readable messages, no contact lists, no read receipts, no typing indicators, no IP logs, no history. None of it exists on the server to hand over.',
+	'If someone filed an abuse report and included messages with it, those specific messages, until the report is closed or 90 days pass. Nothing there was collected — a person chose to send it. It is the only readable message text on the server, and if nobody has reported anything there is none at all.',
+	'That is it. No other readable messages, no contact lists, no read receipts, no typing indicators, no IP logs, no history. None of it exists on the server to hand over.',
 ];

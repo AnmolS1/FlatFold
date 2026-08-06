@@ -1,11 +1,16 @@
 import { Link } from 'react-router';
-import { Info, ExternalLink, ShieldCheck, Mail, LifeBuoy, Lock, FileText } from 'lucide-react';
+import { Info, ExternalLink, ShieldCheck, Mail, LifeBuoy, Lock, FileText, Flag } from 'lucide-react';
 import { APP_VERSION } from '../../version';
 import { BUILD_ID, BUILT_AT } from '../../buildInfo';
 import { isIOSAppOnMac, isNativePlatform } from '../../lib/platform';
 
 const SOURCE_URL = 'https://github.com/AnmolS1/FlatFold';
+// Three addresses, three distinct purposes — App Review 1.2 requires in-app
+// contact info for reporting inappropriate activity, and a security-disclosure
+// address is not that. `report@` is also surfaced inside the reporting flow.
 const SECURITY_EMAIL = 'security@flatfold.ponderance.dev';
+const SUPPORT_EMAIL = 'support@flatfold.ponderance.dev';
+const REPORT_EMAIL = 'report@flatfold.ponderance.dev';
 // The product page, not the support index — someone opening this from inside
 // FlatFold is asking about FlatFold.
 const SUPPORT_URL = 'https://ponderance.dev/support/flatfold';
@@ -67,10 +72,22 @@ export function AboutSection() {
 						<ShieldCheck className="w-4 h-4" /> What the server stores
 					</Link>
 					<a
+						href={`mailto:${REPORT_EMAIL}`}
+						className="flex items-center gap-2 text-crease hover:text-crane-ink transition-colors"
+					>
+						<Flag className="w-4 h-4" /> Report abuse or inappropriate content
+					</a>
+					<a
+						href={`mailto:${SUPPORT_EMAIL}`}
+						className="flex items-center gap-2 text-crease hover:text-crane-ink transition-colors"
+					>
+						<Mail className="w-4 h-4" /> Email support
+					</a>
+					<a
 						href={`mailto:${SECURITY_EMAIL}`}
 						className="flex items-center gap-2 text-crease hover:text-crane-ink transition-colors"
 					>
-						<Mail className="w-4 h-4" /> Report a security issue
+						<ShieldCheck className="w-4 h-4" /> Report a security issue
 					</a>
 					{/* Support, Privacy and Terms live HERE because the login screen was
 					    the only place that linked Privacy and Terms — so every user past

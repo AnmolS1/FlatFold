@@ -34,6 +34,11 @@ export interface UserRow {
 	// from the request, so acceptance of an older revision can be re-gated.
 	terms_accepted_at: number | null;
 	terms_version: string | null;
+	// Account termination (migration 0012). NULL for every ordinary account. When
+	// set, authentication fails everywhere immediately — including sessions that
+	// were already open, so actioning an abusive account does not wait out its
+	// token. The handle is retired separately, in `banned_usernames`.
+	disabled_at: number | null;
 }
 
 // Record that this user accepted the terms. `version` is the SERVER's constant —

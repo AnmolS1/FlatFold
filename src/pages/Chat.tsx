@@ -58,6 +58,7 @@ import {
 	hasSeeded,
 } from '../lib/contactRequests';
 import { replyRefFrom } from '../lib/reply';
+import { apiReport, apiBlock, apiUnblock, type ReportEvidenceMessage } from '../lib/api';
 import { orderedVisibleMessages } from '../lib/messageOrder';
 import { haptic } from '../lib/haptics';
 import { createSessionOpChain, routeInboundFrame, type SessionOpChain } from '../lib/inboundDispatch';
@@ -79,6 +80,7 @@ import { ThemeToggle } from '../components/common/ThemeToggle';
 import { TabBar, type NativeTab } from '../components/native/TabBar';
 import { ContactsPane } from '../components/native/ContactsPane';
 import { MessageRequests } from '../components/chat/MessageRequests';
+import { ReportDialog } from '../components/chat/ReportDialog';
 
 export const Chat = () => {
 	const { username, logout } = useAuth();
@@ -164,10 +166,17 @@ export const Chat = () => {
 	// Same idiom as blockVersion: localStorage isn't reactive, so a counter is
 	// what makes the request lists and the accepted-contact filter re-render.
 	const [requestVersion, setRequestVersion] = useState(0);
+	// App Review 1.2: which contact the report dialog is open for, if any.
+	const [reportingContact, setReportingContact] = useState<string | null>(null);
 
 	const handleBlock = useCallback(
 		(contactUsername: string) => {
 			blockContact(username ?? '', contactUsername);
+			// Server-side too, so the block stops DELIVERY rather than only hiding
+			// what already arrived. Best-effort: the local block is authoritative for
+			// this device either way, and a failed sync must not make Block look
+			// broken. The list re-syncs on the next successful call.
+			void apiBlock(contactUsername).catch(() => {});
 			setBlockVersion((v) => v + 1);
 			// Close the conversation if it's the one being blocked (it's now hidden).
 			setActiveContact((prev) => (prev === contactUsername ? null : prev));
@@ -180,6 +189,7 @@ export const Chat = () => {
 	const handleUnblock = useCallback(
 		(contactUsername: string) => {
 			unblockContact(username ?? '', contactUsername);
+			void apiUnblock(contactUsername).catch(() => {});
 			setBlockVersion((v) => v + 1);
 		},
 		[username]
@@ -1846,6 +1856,7 @@ export const Chat = () => {
 										contactUsername={activeContactRecord.username}
 										onRemoveContact={() => void handleRemoveContact(activeContactRecord.username)}
 										onBlockContact={() => handleBlock(activeContactRecord.username)}
+										onReportContact={() => setReportingContact(activeContactRecord.username)}
 									/>
 								</div>
 							</div>
@@ -1954,6 +1965,23 @@ export const Chat = () => {
 					onSelectResult={(contact) => {
 						setSearchOpen(false);
 						void handleSelectContact(contact);
+					}}
+				/>
+			)}
+
+			{/* App Review 1.2: reporting. Blocking happens in the SAME step — the
+			    plan calls for it, and someone who has just reported abuse should not
+			    have to go find a second menu to make it stop. */}
+			{reportingContact && (
+				<ReportDialog
+					reported={reportingContact}
+					messages={messagesByContact[reportingContact] ?? []}
+					onClose={() => setReportingContact(null)}
+					onSubmit={async (reason: string, evidence: ReportEvidenceMessage[]) => {
+						await apiReport(reportingContact, reason, evidence);
+						handleBlock(reportingContact);
+						setReportingContact(null);
+						showToast('Report sent. Reports are reviewed within 24 hours.', 'success');
 					}}
 				/>
 			)}

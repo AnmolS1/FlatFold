@@ -225,6 +225,51 @@ export async function apiDeleteAccount(password: string): Promise<void> {
 	await parseJsonOrThrow(response);
 }
 
+// App Review 1.2: file an abuse report. `evidence` is ONLY ever the messages the
+// reporter explicitly selected, after the consent step in ReportDialog — never
+// the conversation, never anything gathered automatically. The server cannot
+// read messages, so this is the only way a report can carry what it is about.
+export interface ReportEvidenceMessage {
+	from: string;
+	ts: number;
+	text: string;
+}
+
+export async function apiReport(
+	reported: string,
+	reason: string,
+	evidence: ReportEvidenceMessage[]
+): Promise<void> {
+	const response = await apiFetch('/api/report', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ reported, reason, evidence }),
+	});
+	await parseJsonOrThrow(response);
+}
+
+// App Review 1.2: server-side blocking. The local list in lib/blocklist.ts stays
+// — it is what catches a SEALED send, which the server cannot filter because it
+// does not know who sent it. These keep the server copy in step so a block also
+// stops delivery, applies on every device, and survives a reinstall.
+export async function apiBlock(username: string): Promise<void> {
+	const response = await apiFetch('/api/blocks', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ username }),
+	});
+	await parseJsonOrThrow(response);
+}
+
+export async function apiUnblock(username: string): Promise<void> {
+	const response = await apiFetch('/api/blocks', {
+		method: 'DELETE',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ username }),
+	});
+	await parseJsonOrThrow(response);
+}
+
 export async function apiPublishKeys(request: PublishKeysRequest): Promise<void> {
 	const response = await apiFetch('/api/keys/publish', {
 		method: 'POST',

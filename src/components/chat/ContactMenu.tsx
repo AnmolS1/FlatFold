@@ -5,13 +5,16 @@ interface ContactMenuProps {
 	contactUsername: string;
 	onRemoveContact: () => void;
 	onBlockContact: () => void;
+	// App Review 1.2 requires a flagging mechanism reachable from the conversation
+	// itself, not buried in settings.
+	onReportContact: () => void;
 }
 
 // Conversation-header overflow menu. Minimal by design — its one action today
 // is removing the contact (which rotates my sealed-sender delivery token and
 // purges local conversation state). Hand-rolled dropdown (no dep), with an
 // inline confirm because removal deletes conversation history on this device.
-export function ContactMenu({ contactUsername, onRemoveContact, onBlockContact }: ContactMenuProps) {
+export function ContactMenu({ contactUsername, onRemoveContact, onBlockContact, onReportContact }: ContactMenuProps) {
 	const [open, setOpen] = useState(false);
 	const [confirming, setConfirming] = useState(false);
 	const ref = useRef<HTMLDivElement>(null);
@@ -61,6 +64,16 @@ export function ContactMenu({ contactUsername, onRemoveContact, onBlockContact }
 								className="w-full text-left text-sm text-graphite px-3 py-2 rounded hover:bg-inset transition-colors"
 							>
 								Block contact
+							</button>
+							<button
+								role="menuitem"
+								onClick={() => {
+									close();
+									onReportContact();
+								}}
+								className="w-full text-left text-sm text-graphite px-3 py-2 rounded hover:bg-inset transition-colors"
+							>
+								Report contact
 							</button>
 							<button
 								role="menuitem"

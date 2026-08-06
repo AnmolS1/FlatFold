@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { ChevronLeft, LogOut, Search, Settings, ShieldAlert, ShieldCheck, ShieldOff, Users } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
@@ -38,7 +38,25 @@ import type { ChatPayload } from '../lib/chatPayload';
 import { requestPanicWipe } from '../lib/panicWipe';
 import { encryptAndUploadMedia, type MediaUploadInput } from '../lib/media';
 import { summaryFromMessage, summariesEqual, isUnread } from '../lib/conversationSummary';
-import { isBlocked, blockContact, unblockContact } from '../lib/blocklist';
+// `isBlocked` is no longer read here: the block check now lives inside
+// `gateInbound`, so the inbound path has ONE decision point rather than two that
+// could disagree.
+import { blockContact, unblockContact } from '../lib/blocklist';
+import {
+	gateInbound,
+	isAccepted,
+	isGroupAccepted,
+	acceptSender,
+	declineSender,
+	acceptGroup,
+	declineGroup,
+	addPendingSender,
+	addPendingGroup,
+	getPendingSenders,
+	getPendingGroups,
+	seedAcceptedFromExisting,
+	hasSeeded,
+} from '../lib/contactRequests';
 import { replyRefFrom } from '../lib/reply';
 import { orderedVisibleMessages } from '../lib/messageOrder';
 import { haptic } from '../lib/haptics';
@@ -60,6 +78,7 @@ import { LogoMark } from '../components/common/Brand';
 import { ThemeToggle } from '../components/common/ThemeToggle';
 import { TabBar, type NativeTab } from '../components/native/TabBar';
 import { ContactsPane } from '../components/native/ContactsPane';
+import { MessageRequests } from '../components/chat/MessageRequests';
 
 export const Chat = () => {
 	const { username, logout } = useAuth();
@@ -142,6 +161,9 @@ export const Chat = () => {
 	const hasConnectedRef = useRef(false);
 	// Bumps when the block list changes, to re-filter the conversation list.
 	const [blockVersion, setBlockVersion] = useState(0);
+	// Same idiom as blockVersion: localStorage isn't reactive, so a counter is
+	// what makes the request lists and the accepted-contact filter re-render.
+	const [requestVersion, setRequestVersion] = useState(0);
 
 	const handleBlock = useCallback(
 		(contactUsername: string) => {
@@ -249,8 +271,29 @@ export const Chat = () => {
 
 	useEffect(() => {
 		if (!username) return;
-		void refreshContacts();
-		void refreshGroups();
+		void (async () => {
+			await refreshContacts();
+			await refreshGroups();
+			// App Review 1.2, one-time upgrade seeding. Everyone you were already
+			// talking to before the gate existed stays a normal conversation.
+			//
+			// ORDERING IS LOAD-BEARING: this reads the keystore directly and only
+			// AFTER both refreshes have resolved. Seeding from empty React state
+			// would set the once-only flag against an empty list and turn every
+			// existing conversation into a request, with no way to re-run it.
+			if (!hasSeeded(username)) {
+				const [existingContacts, existingGroups] = await Promise.all([
+					keystore.listContacts(username),
+					keystore.listGroups(username),
+				]);
+				seedAcceptedFromExisting(
+					username,
+					existingContacts.map((c) => c.username),
+					existingGroups.map((g) => g.id)
+				);
+				setRequestVersion((v) => v + 1);
+			}
+		})();
 	}, [username, refreshContacts, refreshGroups]);
 
 	// Surface a sealed-sender key-config pin mismatch (dispatched by sealedFetch on
@@ -597,14 +640,25 @@ export const Chat = () => {
 						await refreshGroups();
 						const group = await keystore.getGroup(currentUsername, result.senderKeyGroupId);
 						if (group) {
-							// Reciprocate: if we just learned about this group, generate
-							// our own sender key and distribute it (creator → all members,
-							// non-creator → creator only).
-							const created = await ensureOwnSenderKey(currentUsername, result.senderKeyGroupId);
-							if (created) await distributeOwnSenderKeyRaw(group);
-							// Creator-relay: forward a member's key to the rest.
-							if (result.senderKeySender && result.senderKeySender !== currentUsername) {
-								await relaySenderKeyRaw(group, result.senderKeySender);
+							// App Review 1.2: a group whose creator you have not accepted is
+							// held as a request. Note what is SKIPPED — reciprocating our
+							// sender key would hand the stranger a live signal that this
+							// account exists and is online, before its owner has decided
+							// anything. Declining is meant to be silent, so the setup waits
+							// for accept (handleAcceptGroup runs exactly this block).
+							if (!isGroupAccepted(currentUsername, group.id) && group.creator !== currentUsername) {
+								addPendingGroup(currentUsername, group.id, group.creator);
+								setRequestVersion((v) => v + 1);
+							} else {
+								// Reciprocate: if we just learned about this group, generate
+								// our own sender key and distribute it (creator → all members,
+								// non-creator → creator only).
+								const created = await ensureOwnSenderKey(currentUsername, result.senderKeyGroupId);
+								if (created) await distributeOwnSenderKeyRaw(group);
+								// Creator-relay: forward a member's key to the rest.
+								if (result.senderKeySender && result.senderKeySender !== currentUsername) {
+									await relaySenderKeyRaw(group, result.senderKeySender);
+								}
 							}
 						}
 					}
@@ -663,9 +717,30 @@ export const Chat = () => {
 					// local delete as "delete for me"; no crypto/keystore source changed).
 					// The ratchet advance stands: the message was cryptographically
 					// received either way, and un-advancing it would wedge the session.
-					if (isBlocked(currentUsername, sender)) {
+					const gate = gateInbound(currentUsername, sender);
+					if (gate === 'drop') {
 						sendAck({ id: frame.id });
 						await keystore.deleteMessageLocal(currentUsername, sender, result.displayMessage.id);
+						return;
+					}
+					// App Review 1.2 — the unknown-sender gate. A message from someone
+					// who is not an accepted contact is HELD: it stays encrypted-at-rest
+					// in the keystore (so accepting can render the backlog) but never
+					// reaches `messagesByContact`, so no text, no media preview and no
+					// sender-supplied content is displayed. `surfaceInboundActivity` is
+					// deliberately NOT called — a notification is content, and the point
+					// is that nothing unsolicited is shown unprompted.
+					//
+					// The ack is the BLOCKED-style one (id only, no `to`): a normal ack
+					// returns a delivery receipt, which would tell an unknown sender the
+					// account is live and reading before the recipient has decided
+					// anything. Declining is meant to be silent, so the acknowledgement
+					// has to be silent too. On accept, the receipt is simply never sent
+					// retroactively — a small, deliberate cost.
+					if (gate === 'hold') {
+						addPendingSender(currentUsername, sender);
+						setRequestVersion((v) => v + 1);
+						sendAck({ id: frame.id });
 						return;
 					}
 					setMessagesByContact((prev) => ({
@@ -719,6 +794,19 @@ export const Chat = () => {
 					showToast(result.error, 'error');
 					return;
 				case 'ok': {
+					// App Review 1.2 — the group half of the unknown-sender gate. Any
+					// user can bootstrap a group naming themselves creator and listing
+					// you as a member (src/lib/messaging.ts only checks that the CLAIMED
+					// creator is the one inviting you), so without this a stranger could
+					// push group content that renders immediately and the 1:1 gate would
+					// be cosmetic against the very vector it exists to close.
+					//
+					// Held exactly like a 1:1 request: decrypted and persisted, never
+					// surfaced, no notification, silent ack.
+					if (!isGroupAccepted(currentUsername, frame.groupId)) {
+						sendAck({ id: frame.id });
+						return;
+					}
 					const convoKey = groupConversationKey(frame.groupId);
 					setMessagesByContact((prev) => ({ ...prev, [convoKey]: [...(prev[convoKey] ?? []), result.displayMessage] }));
 					surfaceInboundActivity();
@@ -1027,6 +1115,10 @@ export const Chat = () => {
 			if (!username) return;
 			const groupId = crypto.randomUUID();
 			await createGroupLocal(username, groupId, name, members);
+			// Your own group — accepted by definition, or you would be sent a
+			// request for the group you just made.
+			acceptGroup(username, groupId);
+			setRequestVersion((v) => v + 1);
 			await refreshGroups();
 			const group = await keystore.getGroup(username, groupId);
 			if (group) {
@@ -1136,10 +1228,101 @@ export const Chat = () => {
 				return;
 			}
 
+			// You reached out to them, so they are accepted by definition — the gate
+			// is about people who reach YOU. Without this, adding a contact and then
+			// receiving their reply would file your own conversation as a request.
+			acceptSender(username, contactUsername);
+			setRequestVersion((v) => v + 1);
+
 			await refreshContacts();
 			await handleSelectContact(contactUsername);
 		},
 		[username, showToast, handleSelectContact, refreshContacts, enqueueSessionOp]
+	);
+
+	// App Review 1.2 — acting on a request.
+	//
+	// Accept: let them through, then load the held backlog out of the keystore
+	// (it was persisted all along, just never surfaced) so the conversation opens
+	// with its history rather than blank.
+	const handleAcceptRequest = useCallback(
+		async (sender: string) => {
+			if (!username) return;
+			acceptSender(username, sender);
+			setRequestVersion((v) => v + 1);
+			await refreshContacts();
+			const held = await keystore.loadMessages(username, sender);
+			setMessagesByContact((prev) => ({ ...prev, [sender]: held }));
+			showToast(`Accepted ${sender}.`, 'success');
+		},
+		[username, refreshContacts, showToast]
+	);
+
+	// Decline: block them and purge every held message from this device, the same
+	// hard delete "delete for me" uses. The sender is told nothing at all.
+	const handleDeclineRequest = useCallback(
+		async (sender: string) => {
+			if (!username) return;
+			declineSender(username, sender);
+			setRequestVersion((v) => v + 1);
+			setBlockVersion((v) => v + 1);
+			const held = await keystore.loadMessages(username, sender);
+			for (const message of held) {
+				await keystore.deleteMessageLocal(username, sender, message.id);
+			}
+			setMessagesByContact((prev) => {
+				const next = { ...prev };
+				delete next[sender];
+				return next;
+			});
+			showToast(`Declined. ${sender} can no longer reach you.`, 'success');
+		},
+		[username, showToast]
+	);
+
+	// Accepting a group runs the sender-key setup that was deliberately skipped
+	// while it was pending (see the senderkey branch in handleIncomingMessage) —
+	// that is what makes the group usable rather than merely visible.
+	const handleAcceptGroup = useCallback(
+		async (groupId: string) => {
+			if (!username) return;
+			acceptGroup(username, groupId);
+			setRequestVersion((v) => v + 1);
+			const group = await keystore.getGroup(username, groupId);
+			if (group) {
+				await enqueueSessionOp(async () => {
+					const created = await ensureOwnSenderKey(username, groupId);
+					if (created) await distributeOwnSenderKeyRaw(group);
+				});
+				const convoKey = groupConversationKey(groupId);
+				const held = await keystore.loadMessages(username, convoKey);
+				setMessagesByContact((prev) => ({ ...prev, [convoKey]: held }));
+			}
+			await refreshGroups();
+			showToast('Group accepted.', 'success');
+		},
+		[username, refreshGroups, showToast, enqueueSessionOp, distributeOwnSenderKeyRaw]
+	);
+
+	const handleDeclineGroup = useCallback(
+		async (groupId: string) => {
+			if (!username) return;
+			declineGroup(username, groupId); // also blocks whoever invited you
+			setRequestVersion((v) => v + 1);
+			setBlockVersion((v) => v + 1);
+			const convoKey = groupConversationKey(groupId);
+			const held = await keystore.loadMessages(username, convoKey);
+			for (const message of held) {
+				await keystore.deleteMessageLocal(username, convoKey, message.id);
+			}
+			setMessagesByContact((prev) => {
+				const next = { ...prev };
+				delete next[convoKey];
+				return next;
+			});
+			showToast('Group declined.', 'success');
+		},
+		[username, showToast]
 	);
 
 	// Remove a 1:1 contact. Rotate my delivery token so the removed contact's
@@ -1324,6 +1507,28 @@ export const Chat = () => {
 		: [];
 	const activeContactRecord = activeContact ? contacts.find((c) => c.username === activeContact) : undefined;
 
+	// App Review 1.2. `decryptIncoming` auto-adds an unknown sender as a keystore
+	// contact, so `contacts` contains people who have merely messaged you and are
+	// still awaiting a decision. EVERY surface that lists contacts must render the
+	// accepted subset, or a stranger's username shows up in the UI anyway and the
+	// gate is only half a gate.
+	const acceptedContacts = useMemo(() => {
+		void requestVersion; // re-run when a request is accepted or declined
+		return contacts.filter((c) => isAccepted(username ?? '', c.username));
+	}, [contacts, username, requestVersion]);
+	const acceptedGroups = useMemo(() => {
+		void requestVersion;
+		return groups.filter((g) => isGroupAccepted(username ?? '', g.id));
+	}, [groups, username, requestVersion]);
+	const pendingSenders = useMemo(() => {
+		void requestVersion;
+		return username ? getPendingSenders(username) : [];
+	}, [username, requestVersion]);
+	const pendingGroups = useMemo(() => {
+		void requestVersion;
+		return username ? getPendingGroups(username) : [];
+	}, [username, requestVersion]);
+
 	const acknowledgeKeyChange = useCallback(async () => {
 		if (!username || !activeContact) return;
 		// On the shared chain — a whole-record identity-doc write, same as the
@@ -1451,11 +1656,22 @@ export const Chat = () => {
 				{/* List pane — full-width on phones, a fixed ~320px sidebar at ≥900px.
 				    Hidden on phones while a conversation is open (master/detail). */}
 				<div
-					className={`${mobileView === 'conversation' ? 'hidden' : 'flex'} min-[900px]:flex w-full min-[900px]:w-80 min-[900px]:flex-shrink-0 min-h-0`}
+					className={`${mobileView === 'conversation' ? 'hidden' : 'flex'} min-[900px]:flex flex-col w-full min-[900px]:w-80 min-[900px]:flex-shrink-0 min-h-0`}
 				>
+					{/* Requests sit ABOVE the conversation list, in both chromes —
+					    they are the thing needing a decision, and burying them under
+					    the chat list would make the gate easy to never notice. */}
+					<MessageRequests
+						senders={pendingSenders}
+						groups={pendingGroups}
+						onAccept={(u) => void handleAcceptRequest(u)}
+						onDecline={(u) => void handleDeclineRequest(u)}
+						onAcceptGroup={(id) => void handleAcceptGroup(id)}
+						onDeclineGroup={(id) => void handleDeclineGroup(id)}
+					/>
 					{showContactsPane(chrome) ? (
 						<ContactsPane
-							contacts={contacts}
+							contacts={acceptedContacts}
 							currentUsername={username ?? ''}
 							blockVersion={blockVersion}
 							onAddContact={handleAddContact}
@@ -1478,8 +1694,8 @@ export const Chat = () => {
 						/>
 					) : (
 						<ContactList
-							contacts={contacts}
-							groups={groups}
+							contacts={acceptedContacts}
+							groups={acceptedGroups}
 							summaries={summaries}
 							blockVersion={blockVersion}
 							currentUsername={username ?? ''}
@@ -1744,7 +1960,7 @@ export const Chat = () => {
 
 			{createGroupOpen && (
 				<CreateGroupDialog
-					contacts={contacts.map((c) => c.username)}
+					contacts={acceptedContacts.map((c) => c.username)}
 					onClose={() => setCreateGroupOpen(false)}
 					onCreate={handleCreateGroup}
 				/>

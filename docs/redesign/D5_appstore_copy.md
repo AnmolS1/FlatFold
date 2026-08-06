@@ -2,6 +2,69 @@
 
 Written for the audience in the brief (privacy-conscious, Signal-adjacent, technically literate, unhyped) and in Anmol's voice: honest, precise, quietly confident, no overclaiming, no crypto-jargon dump. Character counts noted against Apple's limits.
 
+## ⚠️ REVISED 2026-08-06 after the guideline 1.1 rejection
+
+The original copy below this block was **rejected under guideline 1.1**
+(objectionable content in marketing). Nothing in FlatFold *is* objectionable —
+what tripped it is that the metadata marketed **anonymity and evasion**, which
+Apple reads as marketing the app for objectionable use. Every statement in the
+old copy was true; the problem was emphasis, not honesty.
+
+The specific triggers, in likely order of weight:
+
+- Keywords **`anonymous`** and **`burner`** (confirmed present in the submitted
+  set). "Burner" is the worst of them — it connotes an identity you discard to
+  avoid being traced.
+- *"It never sees what you said, and it can't hand over what it doesn't have."* —
+  reads as marketing resistance to legal process.
+- *"nothing that ties the app to the rest of your life"*, *"there's barely an
+  account at all"* — anonymity framing.
+- *"If your threat model is serious"* — adversarial positioning.
+- *"A panic wipe that clears everything on your device in one move"* — reads as
+  evidence destruction in a marketing context. The feature stays in the app; it
+  is simply no longer a selling point.
+
+**Do not reintroduce those keywords, and do not substitute near-synonyms**
+("untraceable", "off the grid", "no trace"). The rewrite also now *states the
+safety controls in the marketing*, which is what answers guideline 1.2 on the
+listing side.
+
+### The copy that is live in App Store Connect (verified via the ASC API 2026-08-06)
+
+**Subtitle** (limit 30): `Private messages, end to end` — 28
+
+**Promotional text** (limit 170):
+`Private messages between the people you choose. End-to-end encrypted, open source, and clear about exactly what it does and doesn't keep.` — 134
+
+**Keywords** (limit 100):
+`encrypted,privacy,e2ee,secure,messenger,private chat,end-to-end,open source,group chat,voice notes` — 98
+
+**Description:**
+
+> FlatFold is a private messenger for the people you actually talk to. Messages are end-to-end encrypted on your device, so only you and the person you are talking to can read them.
+>
+> You sign up with a username and a password. There is no directory to browse and no way for strangers to find you by scrolling: someone has to know your exact username, and you decide whether to let them through.
+>
+> It does the ordinary things, privately. One-to-one and group chats, photos, files, and voice notes, all encrypted end to end. Messages that disappear on a timer when you want them to. Notifications that do not put your conversations on the lock screen.
+>
+> You are in control of who can reach you. Approve or decline anyone new, block someone at any time, report a conversation if something is wrong, and delete your own messages for everyone in the chat. There is no tolerance for abusive users or objectionable content, and reports are reviewed.
+>
+> The whole thing is open source, which matters more than usual for a messenger. Asking people to trust an encrypted app and then hiding how it works does not sit right, so the code is public and there is a plain-language page in the app listing everything the server stores.
+>
+> No ads, no trackers, no analytics, and nothing about you to sell.
+
+**Note that paragraph four is now a load-bearing claim, not marketing.** It
+describes the approve/decline gate, blocking, reporting and delete-for-everyone.
+Those all shipped in the 1.2 fix — if any of them is ever removed, this paragraph
+has to change with it, or the listing is describing an app that does not exist.
+
+---
+
+## SUPERSEDED — the original copy, kept for the record
+
+Everything from here to "App Review notes" is what was rejected. It is retained
+so the rejection stays legible, not because any of it should be reused.
+
 ## Subtitle (limit 30)
 `Private chat, only a username` — 29 chars.
 

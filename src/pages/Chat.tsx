@@ -1274,6 +1274,12 @@ export const Chat = () => {
 		async (sender: string) => {
 			if (!username) return;
 			declineSender(username, sender);
+			// Sync the block to the SERVER, not just localStorage. Without this a
+			// declined stranger keeps delivering — held again each time, silently,
+			// advancing the ratchet — while the terms text promises "Decline, and it
+			// is dropped and they are blocked" and the review notes say blocks are
+			// server-enforced. handleBlock already does this; decline must too.
+			void apiBlock(sender).catch(() => {});
 			setRequestVersion((v) => v + 1);
 			setBlockVersion((v) => v + 1);
 			const held = await keystore.loadMessages(username, sender);
@@ -1317,7 +1323,12 @@ export const Chat = () => {
 	const handleDeclineGroup = useCallback(
 		async (groupId: string) => {
 			if (!username) return;
+			// Read the creator BEFORE declining — declineGroup clears the pending row
+			// that carries it. Read live rather than from the memo below, which is
+			// declared later in this component and would be a TDZ error in the deps.
+			const creator = getPendingGroups(username).find((g) => g.groupId === groupId)?.creator;
 			declineGroup(username, groupId); // also blocks whoever invited you
+			if (creator) void apiBlock(creator).catch(() => {}); // server-side too
 			setRequestVersion((v) => v + 1);
 			setBlockVersion((v) => v + 1);
 			const convoKey = groupConversationKey(groupId);

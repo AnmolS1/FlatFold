@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { focusOrder } from '../../lib/formFocus';
 import { useNavigate } from 'react-router';
 import { User, Lock } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
@@ -65,6 +66,7 @@ export const SignupForm = () => {
 					<User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-graphite-40 w-5 h-5" />
 					<input
 						id="new-username"
+						onKeyDown={focusOrder({ next: 'new-password' })}
 						type="text"
 						autoComplete="username"
 						value={username}
@@ -88,6 +90,7 @@ export const SignupForm = () => {
 					<Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-graphite-40 w-5 h-5" />
 					<input
 						id="new-password"
+						onKeyDown={focusOrder({ prev: 'new-username' })}
 						type="password"
 						autoComplete="new-password"
 						value={password}

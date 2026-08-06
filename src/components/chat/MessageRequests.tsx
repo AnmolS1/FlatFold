@@ -31,7 +31,14 @@ export const MessageRequests = ({
 	const total = senders.length + groups.length;
 
 	return (
-		<section className="border-b border-crease-line-bold" aria-label="Message requests">
+		// `shrink-0` + a capped height: requests sit above the conversation list in
+		// a flex column, so without this a long queue would squeeze the list (or
+		// push its docked "New message" button out of the shell). Past the cap the
+		// requests scroll among themselves.
+		<section
+			className="shrink-0 max-h-[40%] overflow-y-auto border-b border-crease-line-bold"
+			aria-label="Message requests"
+		>
 			<h2 className="px-4 pt-3 pb-2 text-xs font-bold uppercase tracking-wide text-graphite-60">
 				Requests ({total})
 			</h2>

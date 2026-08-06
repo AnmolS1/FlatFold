@@ -1690,6 +1690,14 @@ export const Chat = () => {
 						onAcceptGroup={(id) => void handleAcceptGroup(id)}
 						onDeclineGroup={(id) => void handleDeclineGroup(id)}
 					/>
+					{/* The pane must CLAIM the leftover height, not size to its content.
+					    This div is load-bearing: the parent above became `flex-col` when
+					    MessageRequests was added, and in a column the child's height is
+					    content-based — so ContactList's docked "New message" button (which
+					    is pinned to the BOTTOM of the list) rode up to sit directly under
+					    the last chat row instead of above the tab bar. `min-h-0` lets the
+					    inner list scroll rather than stretching the pane past the shell. */}
+					<div className="flex-1 min-h-0 flex">
 					{showContactsPane(chrome) ? (
 						<ContactsPane
 							contacts={acceptedContacts}
@@ -1739,6 +1747,7 @@ export const Chat = () => {
 							onComposeOpenChange={setComposeOpen}
 						/>
 					)}
+					</div>
 				</div>
 
 				{/* Conversation pane — hidden on phones while the list is showing. */}

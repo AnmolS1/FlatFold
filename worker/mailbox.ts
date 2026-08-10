@@ -329,6 +329,23 @@ export class Mailbox extends DurableObject<Env> {
 	}
 
 	private async deliverTo(recipientUsername: string, envelope: WsEnvelope): Promise<void> {
+		// App Review 1.2: server-side block enforcement. The recipient's block list
+		// is checked HERE, before anything is queued or pushed, so a blocked account
+		// cannot deliver at all — as opposed to delivering and having the recipient's
+		// device decline to render it, which is what the client-side list does.
+		//
+		// The sender is told nothing and gets no error: a block that announced
+		// itself would just tell an abuser to come back from a new account. The
+		// message is dropped silently and the send looks ordinary from their side.
+		//
+		// SCOPE, stated rather than glossed: `envelope.from` exists only on the
+		// normal path. A SEALED send is from-less by design — the server does not
+		// know who sent it and must not — so it cannot be filtered here and is
+		// caught by the client-side list on receipt instead.
+		if ('from' in envelope && typeof envelope.from === 'string') {
+			const { isBlockedServerSide } = await import('./blocks');
+			if (await isBlockedServerSide(this.env.DB, recipientUsername, envelope.from)) return;
+		}
 		const stub = this.env.MAILBOX.getByName(recipientUsername);
 		await stub.fetch('https://internal/deliver', {
 			method: 'POST',

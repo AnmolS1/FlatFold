@@ -1,18 +1,44 @@
 # FlatFold: current status — START HERE
 
-**This file is the entry point. There are 28 docs; you do not need most of them,
-and several look current but are not.**
+**This file is the entry point. Several docs look current and are not.**
 
 Read in this order:
 
 | # | file | why |
 | --- | --- | --- |
-| 1 | **this file** | what is true today, and the "Deliberate behaviours" list — several of the most surprising behaviours in the app are intentional and already documented. Do not file them. |
-| 2 | `redesign/HANDOFF_2026-07-28.md` | **the current handoff.** Mac voice notes and the build mechanics. Its "half-fixed" framing is superseded — the fix landed and is verified. |
-| 2a | `ASC_SUBMISSION_CHECKLIST.md` | **copy-paste ready: exactly what to put in every App Store Connect field**, incl. the review notes, the privacy answers, the accessibility claims and the custom EULA. |
-| 2b | `redesign/HANDOFF_SUBMISSION_AUDIT.md` | **App Store state, read from the ASC API 2026-07-28.** Two hard blockers (no screenshots on either platform, no macOS build ever uploaded) and five judgement calls. Start here for anything submission-shaped. |
-| 3 | `redesign/HANDOFF_STEP6_CONTINUATION.md` | **authoritative for the hard constraints** (the frozen files). Otherwise historical — its status section is stale. |
-| 4 | whatever the task needs | the D1–D7 design specs, `FULL_AUDIT_2.md`, `NATIVE_MACOS_PLAN.md`, `ENCRYPTION_COMPLIANCE.md`, `THREAT_MODEL.md` |
+| 1 | **this file** | what is true today, the HARD CONSTRAINTS below, and the "Deliberate behaviours" list — several of the most surprising behaviours in the app are intentional and already documented. Do not file them. |
+| 2 | **`TESTING.md`** | **the on-device test plan.** Run it before every submission and after any change to the chat surface, auth, or the Worker. It exists because the three bug classes that have actually shipped here (layout, host focus, deploy target) cannot fail a unit test. |
+| 3 | `ASC_SUBMISSION_CHECKLIST.md` | **copy-paste ready: exactly what to put in every App Store Connect field**, incl. the privacy answers, the accessibility claims and the custom EULA. |
+| 4 | `redesign/D5b_app_review_notes.md` | the review notes to paste into ASC, including the **guideline 1.2 checklist mapping** and the two limits that must not be overclaimed. |
+| 5 | whatever the task needs | `ARCHITECTURE.md`, `THREAT_MODEL.md`, the D1–D7 design specs, `NATIVE_MACOS_PLAN.md`, `ENCRYPTION_COMPLIANCE.md` |
+
+## THE HARD CONSTRAINTS — canonical copy
+
+These governed the whole build. They were previously in
+`redesign/HANDOFF_STEP6_CONTINUATION.md` (itself the restatement of a deleted
+brief); that doc has now been removed as spent, so **this is the canonical copy.
+Do not delete it without moving it somewhere that outlives this file.**
+
+1. **The crypto and backend are OFF-LIMITS.** Do not change `src/crypto/**`,
+   `src/keystore/**`, or the ratchet region of `src/lib/messaging.ts`.
+   Sanctioned exceptions to date, each granted explicitly and given
+   ratchet-grade rigor: the D7 account-recovery / 2FA / change-password
+   protocol, one-time-prekey replenishment, passkey unlock, and (2026-08-06)
+   `worker/**` for the App Review 1.2 endpoints and tables — that one is
+   narrow, and it did NOT touch the crypto paths inside the Worker. **Any
+   future exception needs the same explicit grant.** A performance or
+   convenience motive is not enough — off-thread Argon2 was declined on exactly
+   those grounds.
+2. **Reuse the live native seams** rather than inventing parallel ones:
+   `src/lib/platform.ts` (`isNativePlatform()`, `apiOrigin()`, `wsOrigin()`),
+   `src/lib/nativeToken.ts`, `src/lib/apiClient.ts`.
+3. **Keep the web build working.** Every native behaviour is gated on
+   `isNativePlatform()`; the web path must stay functional.
+4. **Preserve the privacy behaviours** — content-free notifications, no
+   third-party SDKs/analytics/trackers, no remote app shell, nothing that leaks
+   a sender or message text.
+5. **Maintain accessibility** — the a11y pass (focus traps, labels, contrast) is
+   part of "done", not a follow-up.
 
 **Mac voice-note playback: FIXED 2026-07-28.** Playback runs through
 `AVAudioPlayer` in the plugin on a Mac and renders no `<audio>` element there at
@@ -41,8 +67,8 @@ count, which PR is merged — is stamped with the date it was checked, because t
 file asserts them and will therefore go stale by construction. It already did
 once: the commit that made this the entry point left the version, test count and
 tracked-file claims describing the state before the last merge. If a number here
-is not stamped today, trust `redesign/HANDOFF_2026-07-26.md` over it — being
-dated, its staleness is at least legible.
+is not stamped today, treat it as unverified — an unstamped number here is
+almost certainly describing an earlier state.
 
 ## What FlatFold is
 
@@ -56,18 +82,35 @@ side.
 - Preview (own worker + own D1, safe to test against): see `PREVIEW_ORIGIN` in
   `.env.asc` — the hostname carries a personal account handle, so it stays out of
   a doc that FULL_AUDIT_2 P1 proposes tracking in a public repo.
-- iOS + macOS: submitted to the App Store and **in review** (stamped 2026-07-30).
-  Both platforms went in together off the Catalyst merge; TestFlight build 2
-  (version 1.0) was the last pre-submission state.
+- iOS + macOS: **REJECTED 2026-08-06 under guidelines 1.1 and 1.2**, fix built on
+  `fix/asc-content-safety` (stamped 2026-08-06).
+  - **1.1** — the metadata marketed anonymity and evasion. Keywords `anonymous`
+    and `burner` were confirmed in the submitted set. The rewrite is live in ASC
+    on both platforms; see `redesign/D5_appstore_copy.md`, which keeps the
+    rejected copy marked superseded so the rejection stays legible. **Do not
+    reintroduce those words or near-synonyms** ("untraceable", "off the grid").
+  - **1.2** — anonymous user-generated content. The real property behind it: any
+    stranger who knew your exact username could send content that was
+    auto-accepted and displayed. Now gated. Age rating is `SEVENTEEN_PLUS`.
+  - macOS sits at `REJECTED` with build 3; iOS was pulled to
+    `DEVELOPER_REJECTED` because build 5 predates the fix while the new
+    description already claims the features.
+  - **Prod D1 carries migrations 0010–0012 (applied 2026-08-06, 28 real users,
+    backed up first); the prod Worker is deliberately still the OLD version.**
+    Apply migrations BEFORE the Worker, always — see `TESTING.md` §7.
 - Source: https://github.com/AnmolS1/FlatFold
 
 Stack: React + Vite + TypeScript + Tailwind v4 on the front end, Capacitor 8
 (SwiftPM, not CocoaPods) for iOS, and a Cloudflare Worker backend with Durable
 Objects for mailboxes, D1 for storage, and R2 for media.
 
-## Status: the build is done and shipped
+## Status
 
-*Verified 2026-07-26 against `d96ebe4`.*
+*App Store state stamped 2026-08-06; the build-completeness table below was
+verified 2026-07-26 against `d96ebe4` and is still accurate for those areas.*
+
+**The app is built and shipped; what is open is the App Store rejection.** See
+the 1.1/1.2 entry above, and run `TESTING.md` before any resubmission.
 
 Every step of the native build order is complete and live. PRs #8 (48 commits),
 #9 (prekey replenishment), #10 (passkey unlock) and #11 (the FULL_AUDIT_2
@@ -232,7 +275,7 @@ one, argue the tradeoff rather than reporting it as a defect.
 ## Hard constraints
 
 The crypto and backend are off limits. The canonical statement lives under
-**"Hard constraints"** in `docs/redesign/HANDOFF_STEP6_CONTINUATION.md`, and that
+**"THE HARD CONSTRAINTS"** at the top of this file, and that
 copy is authoritative. Do not restate it elsewhere, because two copies will drift.
 
 The short version, so you know it applies to you: do not change `src/crypto/**`,
@@ -268,10 +311,11 @@ the security claims are only meaningful if they were actually checked.
   simulator. Note that after a native rebuild the app must be force-quit and
   relaunched, because WKWebView otherwise keeps the old JavaScript.
 
-Older verification screenshots were deleted in a docs cleanup on 2026-07-25. The
-written record survives in `docs/redesign/verify/STEP1_VERIFY_LOG.md`, and the
-per-feature evidence is described in the commit messages and in
-`HANDOFF_STEP6_CONTINUATION.md`.
+Older verification screenshots were deleted in a docs cleanup on 2026-07-25, and
+the Step-1 verify log went with a second cleanup on 2026-08-06. The per-feature
+evidence lives in the commit messages, in `redesign/verify/`, and — for anything
+from here on — in `TESTING.md`, which is the plan those ad-hoc logs should have
+been all along.
 
 ## What is genuinely open
 

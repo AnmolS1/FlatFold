@@ -2,7 +2,7 @@
 
 The implementable native spec, written against the D1 recommendation (Quiet Paper frame + Blueprint brand ground + Focus gestures). This is intent and rules for the Claude Code session to build and verify on-device; it is not device-tested. Re-point the navigation section if the primary direction changes.
 
-Cross-reference: the hard constraints bind everything here (no crypto/backend changes, reuse the native seams, preserve privacy behaviors, keep web working, a11y). They are restated in full under "Hard constraints" in `HANDOFF_STEP6_CONTINUATION.md`.
+Cross-reference: the hard constraints bind everything here (no crypto/backend changes, reuse the native seams, preserve privacy behaviors, keep web working, a11y). They are restated in full under "Hard constraints" in `STATUS.md ("The hard constraints")`.
 
 ## 0. Global rules — these are what make the bug class impossible
 

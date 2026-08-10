@@ -4,7 +4,7 @@ Written 2026-07-28 for FlatFold 1.0, app `6793349838`. Copy-paste ready. Every
 ASC field named here was read from the API the same day, so "empty" means
 measured empty, not assumed.
 
-**Read `SUBMISSION_AUDIT.md` for the reasoning.** This file is only the doing.
+**Read `STATUS.md` for the reasoning.** This file is only the doing.
 
 ---
 

@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import {
+	apiAcceptTerms,
 	apiChangePassword,
 	apiEnrollRecovery,
 	apiLogin,
@@ -74,6 +75,10 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 	// close), not localStorage, so a fresh tab with an otherwise-valid
 	// session cookie still needs an explicit re-unlock.
 	const [keystoreLocked, setKeystoreLocked] = useState(false);
+	// App Review 1.2. Defaults TRUE so the gate never flashes over the loading
+	// screen before /me has answered; the bootstrap below sets the real value, and
+	// nothing is rendered behind it until `loading` clears anyway.
+	const [termsAccepted, setTermsAccepted] = useState(true);
 
 	// Bootstrap session state from the httpOnly cookie on load — this
 	// replaces Firebase's onAuthStateChanged.
@@ -86,6 +91,10 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 				const restoredUsername = result?.username ?? null;
 				setUsername(restoredUsername);
 				if (restoredUsername) setKeystoreLocked(!keystore.isUnlocked(restoredUsername));
+				// `undefined` from a Worker that predates the field ⇒ accepted. A
+				// client ahead of the Worker must not gate everyone behind an accept
+				// endpoint that would 404.
+				setTermsAccepted(result?.termsAccepted !== false);
 			})
 			.catch(() => {
 				if (!cancelled) setUsername(null);
@@ -104,6 +113,10 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 		await establishLocalIdentity(result.username, password);
 		setUsername(result.username);
 		setKeystoreLocked(false);
+		// Read from the response, not assumed: signup and login don't re-run the
+		// /me bootstrap, so without this the gate wouldn't raise until the next
+		// cold start — and a brand-new account is exactly who must see it.
+		setTermsAccepted(result.termsAccepted);
 	};
 
 	const login = async (usernameInput: string, password: string, code?: string): Promise<'ok' | 'two-factor-required'> => {
@@ -112,6 +125,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 		await establishLocalIdentity(result.username, password);
 		setUsername(result.username);
 		setKeystoreLocked(false);
+		setTermsAccepted(result.termsAccepted);
 		return 'ok';
 	};
 
@@ -252,13 +266,26 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 		await publishIdentityMaterial(material);
 		setUsername(usernameInput);
 		setKeystoreLocked(false);
+		// Recovery is the one authenticated path with no terms state in its own
+		// response, and this account may well have accepted already. Ask, rather
+		// than defaulting to false and making someone re-accept for no reason.
+		setTermsAccepted((await apiMe())?.termsAccepted !== false);
 		return 'ok';
+	};
+
+	// App Review 1.2. The server records the version; we only flip local state
+	// once it has actually persisted, so a failed request leaves the gate up.
+	const acceptTerms = async (): Promise<void> => {
+		await apiAcceptTerms();
+		setTermsAccepted(true);
 	};
 
 	const value: AuthContextType = {
 		username,
 		loading,
 		keystoreLocked,
+		termsAccepted,
+		acceptTerms,
 		signup,
 		login,
 		logout,

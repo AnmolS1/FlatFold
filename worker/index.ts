@@ -20,7 +20,9 @@ import {
 	createUser,
 	getRecoveryParams,
 	getUser,
+	hasAcceptedTerms,
 	setBackupCodeHashes,
+	setTermsAccepted,
 	setRecovery,
 	setTotp,
 	setTotpLastStep,
@@ -29,6 +31,7 @@ import {
 	type UserRow,
 } from './db';
 import { decryptTotpSecret, encryptTotpSecret, hashBackupCode, verifyTotp } from './totp';
+import { TERMS_VERSION } from '../shared/terms';
 
 // Auth rate limits. Keyed by the TARGET username, not an IP — FlatFold
 // deliberately does not log IPs (invariant #5), so per-actor throttling isn't
@@ -68,6 +71,8 @@ import { handleAddOneTimePreKeys, handleGetBundle, handleGetPreKeyCount, handleP
 import { handleMediaDelete, handleMediaDownload, handleMediaUpload } from './media';
 import { handlePushSubscribe, handlePushUnsubscribe, handleVapidPublicKey, handleApnsSubscribe, handleApnsUnsubscribe } from './push';
 import { handleDeleteAccount } from './account';
+import { handleReport } from './report';
+import { handleBlock, handleListBlocks, handleUnblock, isUsernameBanned } from './blocks';
 import { handleSeal, handleSealKeys } from './seal';
 
 export { Mailbox } from './mailbox';
@@ -119,6 +124,10 @@ async function readAuthenticatedUsername(request: Request, env: Env): Promise<st
 	// token_epoch. A "Sign out everywhere" (or a deleted account) fails this.
 	const user = await getUser(env.DB, payload.sub);
 	if (!user || user.token_epoch !== payload.epoch) return null;
+	// App Review 1.2: a terminated account is ejected IMMEDIATELY, including any
+	// session it already holds — waiting for the token to expire would leave an
+	// abusive account live for up to 14 days after being actioned.
+	if (user.disabled_at !== null) return null;
 	return payload.sub;
 }
 
@@ -140,7 +149,9 @@ async function handleSignup(request: Request, env: Env): Promise<Response> {
 	}
 
 	const existing = await getUser(env.DB, username);
-	if (existing) {
+	// A handle retired after a termination is reported as taken, in the same words
+	// — the retired list must not be enumerable, and "taken" is also just true.
+	if (existing || (await isUsernameBanned(env.DB, username))) {
 		return json({ error: 'That username is taken.' }, { status: 409 });
 	}
 
@@ -150,7 +161,10 @@ async function handleSignup(request: Request, env: Env): Promise<Response> {
 	await createUser(env.DB, { username, passwordVerifier, createdAt });
 
 	const token = await signSessionToken(username, env.SESSION_SECRET, 0); // fresh user ⇒ epoch 0
-	return authResponse({ username }, token, isNativeClient(request));
+	// A brand-new account has never accepted anything, so this is unconditionally
+	// false. Reported here so the client can raise the gate immediately rather
+	// than only on the next cold start.
+	return authResponse({ username, termsAccepted: false }, token, isNativeClient(request));
 }
 
 async function handleLogin(request: Request, env: Env): Promise<Response> {
@@ -175,6 +189,12 @@ async function handleLogin(request: Request, env: Env): Promise<Response> {
 	if (!user || !ok) {
 		return json({ error: 'Invalid username or password.' }, { status: 401 });
 	}
+	// Terminated. Deliberately the SAME generic message as a bad password — a
+	// distinct "this account was banned" reply would be an enumeration oracle and
+	// would tell an abuser exactly which of their accounts got actioned.
+	if (user.disabled_at !== null) {
+		return json({ error: 'Invalid username or password.' }, { status: 401 });
+	}
 
 	// Second factor (D7 §4): password alone isn't enough once 2FA is on. Ask for a
 	// code, then verify it (TOTP or a single-use backup code) before issuing a token.
@@ -192,7 +212,11 @@ async function handleLogin(request: Request, env: Env): Promise<Response> {
 	}
 
 	const token = await signSessionToken(username, env.SESSION_SECRET, user.token_epoch);
-	return authResponse({ username }, token, isNativeClient(request));
+	return authResponse(
+		{ username, termsAccepted: hasAcceptedTerms(user, TERMS_VERSION) },
+		token,
+		isNativeClient(request)
+	);
 }
 
 async function handleMe(request: Request, env: Env): Promise<Response> {
@@ -205,12 +229,31 @@ async function handleMe(request: Request, env: Env): Promise<Response> {
 	// each app open so a durable login never hits the idle wall.
 	const user = await getUser(env.DB, payload.sub);
 	if (!user || user.token_epoch !== payload.epoch) return json({ error: 'Not authenticated.' }, { status: 401 });
+	if (user.disabled_at !== null) return json({ error: 'Not authenticated.' }, { status: 401 });
 	const refreshed = await signSessionToken(payload.sub, env.SESSION_SECRET, user.token_epoch, payload.iat);
 	return authResponse(
-		{ username: payload.sub, sessionCreatedAt: payload.iat, twoFactorEnabled: user.totp_secret !== null },
+		{
+			username: payload.sub,
+			sessionCreatedAt: payload.iat,
+			twoFactorEnabled: user.totp_secret !== null,
+			// App Review 1.2: the client gates the whole app surface on this. It is
+			// reported on every /me, so a re-gate (TERMS_VERSION bump) takes effect on
+			// the next app open without needing a sign-out.
+			termsAccepted: hasAcceptedTerms(user, TERMS_VERSION),
+		},
 		refreshed,
 		readBearerToken(request) !== null
 	);
+}
+
+// App Review 1.2: record acceptance of the terms. Authenticated, and the version
+// written is the SERVER's constant — any `version` in the body is ignored, so a
+// caller cannot store a future revision to skip the next re-gate.
+async function handleAcceptTerms(env: Env, username: string): Promise<Response> {
+	// Coarsened to the minute, matching `created_at` (migrations/0001_init.sql).
+	const acceptedAt = Math.floor(Date.now() / 60_000) * 60;
+	await setTermsAccepted(env.DB, username, acceptedAt, TERMS_VERSION);
+	return json({ ok: true, termsVersion: TERMS_VERSION });
 }
 
 function handleLogout(): Response {
@@ -544,6 +587,33 @@ async function route(request: Request, env: Env): Promise<Response> {
 			if (!doResp.ok) return json({ error: 'Could not register token.' }, { status: 400 });
 			await setUserSealToken(env.DB, username, body.token);
 			return json({ ok: true });
+		}
+
+		// App Review 1.2: accept the in-app terms. No re-auth — this is a consent
+		// record, not a security-sensitive mutation, and requiring the password
+		// again immediately after sign-in would be friction with no threat behind
+		// it (the worst a hijacked session can do here is agree to terms).
+		if (pathname === '/api/account/accept-terms' && method === 'POST') {
+			const username = await readAuthenticatedUsername(request, env);
+			if (!username) return json({ error: 'Not authenticated.' }, { status: 401 });
+			return handleAcceptTerms(env, username);
+		}
+
+		// App Review 1.2: block management, enforced at the mailbox on delivery.
+		if (pathname === '/api/blocks') {
+			const username = await readAuthenticatedUsername(request, env);
+			if (!username) return json({ error: 'Not authenticated.' }, { status: 401 });
+			if (method === 'GET') return handleListBlocks(env, username);
+			if (method === 'POST') return handleBlock(request, env, username);
+			if (method === 'DELETE') return handleUnblock(request, env, username);
+		}
+
+		// App Review 1.2: flag objectionable content. Authenticated so a report is
+		// attributable — an anonymous report channel is itself an abuse vector.
+		if (pathname === '/api/report' && method === 'POST') {
+			const username = await readAuthenticatedUsername(request, env);
+			if (!username) return json({ error: 'Not authenticated.' }, { status: 401 });
+			return handleReport(request, env, username);
 		}
 
 		// Account deletion (invariant #6). Auth-gated AND password-reauthed

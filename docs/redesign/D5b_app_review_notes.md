@@ -35,6 +35,26 @@ These are the ones that will cost a review if the notes don't say them.
    adding it returns "That user has not published key material yet."
 4. **Sign-in is rate-limited to 10 attempts per 5 minutes per username.** A few
    mistyped passwords produce a throttle message that reads like an outage.
+5. **The terms screen appears before the app, on both accounts.** It is
+   unskippable by design (guideline 1.2) and appears once per account. Tap
+   "I agree" on each.
+6. **The first message from the second account lands under "Requests", not in
+   the chat list — and shows no message text.** This is the unknown-sender gate
+   working, not a delivery failure. Tap Accept on the request and the
+   conversation opens with its history. See the mapping below for why it exists.
+
+## Suggested order for reviewing the 1.2 mechanisms
+
+1. Sign in as the first account, accept the terms.
+2. Sign in as the second account on the other device, accept the terms.
+3. From account A, add account B and send a message.
+4. On account B: the message appears under **Requests**, sender name only, no
+   content. This is the filtering mechanism.
+5. Accept it — the conversation opens. Or Decline, which blocks them silently.
+6. In the conversation, open the ⋮ menu → **Report contact**. The report dialog
+   shows the consent text and the message checkboxes; nothing is attached unless
+   ticked. Sending also blocks the account.
+7. Settings → About lists support@ and report@flatfold.ponderance.dev.
 
 ## One more, for whoever submits — do not paste this into ASC
 
@@ -121,3 +141,62 @@ this is a note for us, not for them.
       threat model is reachable, since the description points at both.
 - [ ] If either account is ever signed in from a new place for testing, expect
       the safety-number warning and consider recreating the pair.
+
+---
+
+## Guideline 1.2 — the checklist, mapped
+
+Paste this section into App Store Connect's review notes.
+
+> FlatFold is a private one-to-one and group messenger. It has no feed, no public
+> posts, no discovery and no profiles. Content is only ever exchanged between
+> people who have each other's exact username, and a new sender must be approved
+> before their messages are shown.
+>
+> Addressing guideline 1.2 point by point:
+>
+> - **Age rating:** now 18+.
+> - **EULA:** every account must accept terms before the app can be used. The
+>   terms state there is no tolerance for objectionable content or abusive users
+>   and that accounts sending it are terminated. The screen is unskippable and
+>   appears for existing accounts too, not only new ones.
+> - **Filtering:** a message from anyone who is not already a contact is held as
+>   a request showing only the sender's username — no message text, no media
+>   preview and no notification — until the recipient approves it. Unsolicited
+>   content is therefore never displayed unprompted. The same applies to group
+>   invitations from someone who is not a contact.
+> - **Flagging:** Report is in the conversation menu. It sends the report for
+>   review, and reporting also blocks the account in the same step.
+> - **Blocking:** users can block anyone. Blocks are enforced on the server, so a
+>   blocked account cannot deliver at all rather than merely being hidden.
+> - **Removing content:** there is no feed. A sender can delete their own message
+>   for everyone in the conversation, either party can delete a conversation from
+>   their device, and declining a request purges what was held.
+> - **Acting within 24 hours:** reports are reviewed within 24 hours. Accounts
+>   sending objectionable content are terminated — the account can no longer sign
+>   in, every existing session is invalidated immediately, and the username is
+>   retired so it cannot be registered again.
+> - **Contact info:** support@flatfold.ponderance.dev and
+>   report@flatfold.ponderance.dev are shown in the app under Settings → About.
+>
+> **On encryption, and what it means for reports.** Messages are end-to-end
+> encrypted, so the developer cannot read message content on the server and
+> cannot scan it. A report therefore includes the specific messages the reporting
+> user chose to attach, from their own device, after being shown exactly what is
+> being sent. That is how a report is reviewed. Reported material is deleted once
+> the report is closed and in any case within 90 days.
+
+### Two limits stated honestly, because overclaiming them is worse
+
+Neither of these is a gap in the guideline; both are properties of an E2EE
+messenger, and Signal and Session have the same ones. Say them plainly if asked
+rather than implying otherwise:
+
+- **Termination ejects, it does not permanently bar.** Identity is a username
+  with no email, no phone and deliberately no IP logging, so a determined person
+  can register a new account. What is durable is that the offending handle is
+  retired. Apple's wording is "eject the user", which is what this does.
+- **Server-side blocking cannot apply to a sender-hidden (sealed) message,**
+  because the server genuinely does not know who sent it — that is the point of
+  the feature. Those are caught by the recipient's device instead, which sees the
+  sender after decrypting. Every send is covered by one layer or the other.

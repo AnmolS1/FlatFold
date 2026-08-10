@@ -1,7 +1,7 @@
 # Native voice-note playback — §4 verification
 
 Run 2026-07-28 on a Mac Catalyst Debug build, against
-`../PROMPT_NATIVE_AUDIO_PLAYBACK.md` §4. Driven by `--verify-audio`
+`../MAC_AUDIO_FINDINGS.md` §4. Driven by `--verify-audio`
 (MainViewController), which unlocks from the DOM, opens the conversation by
 accessible name, and clicks every note.
 

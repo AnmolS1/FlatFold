@@ -107,8 +107,14 @@ side.
     first). Migrations went in BEFORE the Worker, and being additive-only is
     what keeps a Worker rollback survivable — see `TESTING.md` §7.
   - The terms gate is enforced **client-side**; the Worker only reports
-    `termsAccepted`. No route rejects on it, which is why deploying the new
-    Worker could not lock out users still pinned to the old client.
+    `termsAccepted`, and **no route rejects on it** — which is why deploying the
+    new Worker could not lock anyone out.
+  - **Verified against prod on 2026-08-10, not just designed:** `test1` read
+    `termsAccepted: false` → `POST /api/account/accept-terms` → `200 {"ok":true,
+    "termsVersion":"2026-08-06"}` → `true`, still `true` on a **new login
+    session** (so it persists in D1, not the session), while control account
+    `test2` still read `false`. That is the retroactive gate working on a
+    pre-existing account.
 - Source: https://github.com/AnmolS1/FlatFold
 
 Stack: React + Vite + TypeScript + Tailwind v4 on the front end, Capacitor 8

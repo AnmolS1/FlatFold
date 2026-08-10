@@ -82,8 +82,10 @@ side.
 - Preview (own worker + own D1, safe to test against): see `PREVIEW_ORIGIN` in
   `.env.asc` — the hostname carries a personal account handle, so it stays out of
   a doc that FULL_AUDIT_2 P1 proposes tracking in a public repo.
-- iOS + macOS: **REJECTED 2026-08-06 under guidelines 1.1 and 1.2**, fix built on
-  `fix/asc-content-safety` (stamped 2026-08-06).
+- iOS + macOS: rejected 2026-08-06 under guidelines 1.1 and 1.2. **The fix is
+  merged, deployed and uploaded (2026-08-10) — what is left is yours to do in
+  App Store Connect: attach the new builds, take iOS out of
+  `DEVELOPER_REJECTED`, reply in Resolution Center, and submit both platforms.**
   - **1.1** — the metadata marketed anonymity and evasion. Keywords `anonymous`
     and `burner` were confirmed in the submitted set. The rewrite is live in ASC
     on both platforms; see `redesign/D5_appstore_copy.md`, which keeps the
@@ -92,12 +94,21 @@ side.
   - **1.2** — anonymous user-generated content. The real property behind it: any
     stranger who knew your exact username could send content that was
     auto-accepted and displayed. Now gated. Age rating is `SEVENTEEN_PLUS`.
-  - macOS sits at `REJECTED` with build 3; iOS was pulled to
-    `DEVELOPER_REJECTED` because build 5 predates the fix while the new
-    description already claims the features.
-  - **Prod D1 carries migrations 0010–0012 (applied 2026-08-06, 28 real users,
-    backed up first); the prod Worker is deliberately still the OLD version.**
-    Apply migrations BEFORE the Worker, always — see `TESTING.md` §7.
+  - **Builds waiting in ASC: iOS `6` and macOS `4`, both `VALID`** (uploaded
+    2026-08-10 from `477285a`). Both sit on the **still-open 1.0 trains** —
+    neither version ever went live, so `MARKETING_VERSION` stays `1.0` and the
+    build number simply rises. Do **not** bump the version to resubmit.
+  - Uploaded with the **local** fastlane lanes (`fastlane ios beta`,
+    `fastlane mac beta_mac`), which is the proven path here — `mac-release.yml`
+    has never run, and `scripts/release.sh` would force a version bump the
+    binary does not carry. See "Shipping a build" below.
+  - **Prod is fully deployed**: Worker version `9c0992cf` serving `477285a`,
+    with migrations 0010–0012 (applied 2026-08-06, 28 real users, backed up
+    first). Migrations went in BEFORE the Worker, and being additive-only is
+    what keeps a Worker rollback survivable — see `TESTING.md` §7.
+  - The terms gate is enforced **client-side**; the Worker only reports
+    `termsAccepted`. No route rejects on it, which is why deploying the new
+    Worker could not lock out users still pinned to the old client.
 - Source: https://github.com/AnmolS1/FlatFold
 
 Stack: React + Vite + TypeScript + Tailwind v4 on the front end, Capacitor 8
@@ -106,11 +117,12 @@ Objects for mailboxes, D1 for storage, and R2 for media.
 
 ## Status
 
-*App Store state stamped 2026-08-06; the build-completeness table below was
+*App Store state stamped 2026-08-10; the build-completeness table below was
 verified 2026-07-26 against `d96ebe4` and is still accurate for those areas.*
 
-**The app is built and shipped; what is open is the App Store rejection.** See
-the 1.1/1.2 entry above, and run `TESTING.md` before any resubmission.
+**The app is built, deployed and uploaded. What is open is the App Store
+paperwork** — attaching builds 6 and 4 and resubmitting. See the 1.1/1.2 entry
+above, and run `TESTING.md` before any resubmission.
 
 Every step of the native build order is complete and live. PRs #8 (48 commits),
 #9 (prekey replenishment), #10 (passkey unlock) and #11 (the FULL_AUDIT_2
@@ -132,12 +144,51 @@ as `bd367c6`, so all 17 pre-squash originals still look unmerged. Compare agains
 | D7 account features | Shipped. Change password, BIP39 recovery, TOTP 2FA, biometric unlock. |
 | Passkey unlock (web) | Shipped 2026-07-25. WebAuthn PRF wraps the master key; Touch ID replaces retyping the password after a reload. |
 | TLS pinning | Shipped and proven with both controls. See `TLS_PINNING.md`. |
-| Release pipeline | Working. A `v*` tag builds and uploads to TestFlight via CI. |
+| Release pipeline | **The LOCAL fastlane lanes are what actually ships here.** A `v*` tag does build and upload iOS via CI, but it last ran in July; `mac-release.yml` has **never run at all**. Every build in ASC since (iOS 5/6, macOS 3/4) came from `fastlane ios beta` / `fastlane mac beta_mac` on this Mac. See "Shipping a build". |
 | Compliance | US: nothing to file (public source is not subject to the EAR). France: ANSSI declaration accepted. |
 | macOS | **Shipped 2026-07-29** (`02550a7`). Mac Catalyst, native voice notes, and the store submission. Was blocked; see open item 2 for how, and why the escape was the one the spike predicted. |
 | Android | **Not built.** Never started. |
 
-Tests: 662 passing across 63 files (2026-07-26). `tsc -b` and eslint are clean.
+Tests: 784 passing across 78 files (2026-08-10). `tsc -b` and eslint are clean.
+
+## Shipping a build
+
+`NATIVE_MACOS_PLAN.md` says this Mac cannot distribute. **That is stale.** It was
+true of a bare Xcode CLI holding only an Apple Development certificate, and
+stopped being true once `match` supplied App Store distribution material. Do not
+go build an Xcode Cloud pipeline on the strength of it.
+
+```bash
+export PATH="$HOME/.gem/ruby/3.4.0/bin:$PATH"   # fastlane + xcpretty live here;
+                                                # without it gym dies "Exit status: 127"
+set -a; . ./.match.env; . ./.env; set +a
+
+cd ios/App && pod install && cd ../..            # iOS mode
+bundle exec fastlane ios beta                    # -> next iOS build number
+
+git checkout -- ios/App/App.xcodeproj/project.pbxproj ios/App/Podfile.lock
+cd ios/App && FLATFOLD_CATALYST=1 pod install && cd ../..   # Catalyst mode
+bundle exec fastlane mac beta_mac                # -> next macOS build number
+
+git checkout -- ios/App/App.xcodeproj/project.pbxproj ios/App/Podfile.lock
+```
+
+Notes that cost time when forgotten:
+
+- **`update_code_signing_settings` rewrites `project.pbxproj` on every lane.**
+  Restore it *between* the two lanes, or the Mac build inherits the iOS profile.
+- **The pod-mode marker `ios/App/Pods/.flatfold-pod-mode` is the only reliable
+  check.** `Podfile.lock` is tracked and gets restored, so it can disagree with
+  what is installed — and `ls Pods/CapacitorFilesystem` is meaningless, because a
+  `:path =>` pod is referenced in place and never gets its own directory.
+- **Leave the pods in `ios` mode at rest.** iOS-with-Catalyst-pods loses native
+  file save *silently*; Catalyst-with-iOS-pods fails loudly. Park on the loud one.
+- **While a version train is open** (rejected but never live), keep
+  `MARKETING_VERSION` — the lanes derive the next build number from TestFlight on
+  their own. `scripts/release.sh` is the wrong tool here: it insists the tag match
+  `package.json`, which would name a version the binary does not report.
+- **Build the web assets from a clean tree**, or the in-app build stamp reads
+  `abc1234+` and matches no commit.
 
 ## The two-layer auth model, which trips everyone up
 

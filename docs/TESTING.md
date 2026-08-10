@@ -63,12 +63,21 @@ FLATFOLD_CATALYST=1 pod install  # macOS — EXCLUDES it (no maccatalyst slice)
 `pod install`. Check which mode you are in before building:
 
 ```bash
-grep -c CapacitorFilesystem ios/App/Podfile.lock   # >0 = iOS, 0 = Catalyst
+cat ios/App/Pods/.flatfold-pod-mode    # "ios" or "catalyst" — authoritative
 ```
+
+**Use the marker, not the lock file, and not the Pods directory.** Two obvious
+checks are both wrong. `Podfile.lock` is *tracked*, so it gets restored after
+every lane and can say `catalyst` while the installed pods are iOS. And
+`ls Pods/CapacitorFilesystem` tells you nothing: it is a `:path =>` development
+pod, referenced in place, so it **never gets a `Pods/<Name>/` directory** — it
+lives under `Pods/Local Podspecs/` and as a target in `Pods/Pods.xcodeproj`.
+Checking for the directory reports a perfectly good iOS install as Catalyst.
 
 If you build iOS with Catalyst pods, native file save is silently missing from
 the binary. If you build Catalyst with iOS pods, the build fails outright — the
-noisy failure is the lucky one.
+noisy failure is the lucky one. For that reason, **leave the tree in `ios` mode
+when you finish**: it is the state whose mistake announces itself.
 
 ### Build and install
 
@@ -261,8 +270,20 @@ Quick but non-negotiable. These are the app's actual purpose.
 
 ## 7. Before you ship
 
+- [ ] **Stash first, so the build stamp is honest.** `git status --porcelain`
+      counts untracked files, so stray assets stamp the bundle `abc1234+` — a
+      binary that matches no commit. Then confirm the sha landed *in the built
+      output*, with no `+`: `grep -roh '<sha>[+]*' dist/client/assets/`
 - [ ] Rebuild native against **production** (`npm run build:native`, no
-      `VITE_API_ORIGIN`)
+      `VITE_API_ORIGIN`), then verify on the artifact:
+      `grep -o "connect-src[^\"]*" ios/App/App/public/index.html`
+- [ ] **Deploy the web from its OWN `npm run build` — never from a `dist/` that
+      `build:native` touched.** The two share an output directory but not a
+      valid final state: `inject-native-csp.mjs` rewrites
+      `dist/client/index.html` **in place**, and that CSP pins `connect-src` to
+      the app's own origin. Ship it to browsers and the page still loads while
+      the sealed-sender relay is silently blocked. Check
+      `grep -c connect-src dist/client/index.html` — must be **0**.
 - [ ] Migrations applied to prod **before** the Worker deploy — additive
       migrations are what make a Worker rollback survivable
 - [ ] Verify the deploy target **before** deploying:
@@ -270,8 +291,13 @@ Quick but non-negotiable. These are the app's actual purpose.
       — `wrangler deploy --env X` is **ignored**; the environment is chosen at
       build time by `CLOUDFLARE_ENV`
 - [ ] After deploying, probe **30+ times** — propagation is not atomic, and for a
-      couple of minutes requests hit either version
-- [ ] `MARKETING_VERSION` bumped if the previous version went live
+      couple of minutes requests hit either version. Probe a route that only the
+      new code answers, and keep a **control** (a route that does not exist) so
+      a 404 means "old version" rather than "wrong probe"
+- [ ] `MARKETING_VERSION` bumped **only if the previous version actually went
+      live**. A rejected version's train is still open: keep the version and let
+      the build number rise. Check before assuming —
+      `get_app_store_versions` reports `app_store_state` per platform
 - [ ] Archive verified on the **built artifact**, not the project file:
       `plutil -p` the bundle Info.plist, `codesign -d --entitlements :-`
 - [ ] Poll App Store Connect to a terminal state — a green lane means "upload
